@@ -1161,7 +1161,7 @@ function neuesDoc(typ) {
     id: uid(), typ, nr: '', datum: t, leistungsdatum: t,
     faellig: typ === 'rechnung' ? plusTage(t, num(S.firma.zahlungsziel) || 14) : '',
     gueltigBis: typ === 'angebot' ? plusTage(t, num(S.firma.angebotTage) || 30) : '',
-    kunde: { name: '', adresse: '', ustid: '', email: '', leitweg: '' },
+    kunde: { name: '', adresse: '', ustid: '', email: '', leitweg: '', land: '' },
     positionen: [{ text: '', menge: 1, einheit: 'Stk.', preis: 0, ust: 19 }],
     hinweis: '', status: typ === 'rechnung' ? 'entwurf' : 'offen', ku: ku()
   };
@@ -1170,7 +1170,7 @@ function readEditor() {
   const f = $('#edForm'); if (!f) return;
   const g = (n) => (f.elements[n] ? f.elements[n].value : '');
   Object.assign(edit, { datum: g('datum'), leistungsdatum: g('leistungsdatum'), faellig: g('faellig'), gueltigBis: g('gueltigBis'), hinweis: g('hinweis'), rc: edit.ku ? '' : g('rc') });
-  edit.kunde = { name: g('k_name').trim(), adresse: g('k_adresse').trim(), ustid: g('k_ustid').trim(), email: g('k_email').trim(), leitweg: g('k_leitweg').trim() };
+  edit.kunde = { name: g('k_name').trim(), adresse: g('k_adresse').trim(), ustid: g('k_ustid').trim(), email: g('k_email').trim(), leitweg: g('k_leitweg').trim(), land: g('k_land').trim().toUpperCase() };
   edit.positionen = [...f.querySelectorAll('.pos')].map((p) => ({
     text: p.querySelector('[name=p_text]').value, menge: num(p.querySelector('[name=p_menge]').value), einheit: p.querySelector('[name=p_einheit]').value,
     preis: num(p.querySelector('[name=p_preis]').value), ust: edit.ku || edit.rc ? 0 : num(p.querySelector('[name=p_ust]').value)
@@ -1221,6 +1221,7 @@ function vEditor() {
       <label>E-Mail (optional)<input name="k_email" type="email" value="${esc(d.kunde.email)}"></label>
       <label class="full">Anschrift<textarea name="k_adresse" rows="2" placeholder="Straße Nr.&#10;PLZ Ort">${esc(d.kunde.adresse)}</textarea></label>
       <label>USt-IdNr. des Kunden${RC[d.rc] && RC[d.rc].idPflicht ? '' : ' (optional)'}<input name="k_ustid" value="${esc(d.kunde.ustid)}"></label>
+      ${RC[d.rc] && d.rc !== 'inland13b' ? `<label>Land des Kunden (2 Buchstaben, z. B. AT, CH, US)<input name="k_land" maxlength="2" value="${esc(d.kunde.land)}" placeholder="${esc(ustLand(d.kunde.ustid))}"></label>` : ''}
       ${d.ku ? '' : `<label>Steuerfall<select name="rc"><option value="">Normal, mit deutscher Umsatzsteuer</option>${Object.entries(RC).map(([k, v]) => `<option value="${k}"${k === rcArt(d) ? ' selected' : ''}>${v.t}</option>`).join('')}</select></label>`}
       ${RC[d.rc] ? `<p class="small muted full" style="margin:0">Ohne Umsatzsteuer. Auf der Rechnung steht: „${RC[d.rc].hinweis}“</p>` : ''}
       ${isRe ? `<label>Leitweg-ID (nur bei Behörden)<input name="k_leitweg" value="${esc(d.kunde.leitweg)}" placeholder="z. B. 991-12345-67"></label>` : ''}
@@ -1353,7 +1354,9 @@ function vERechnungFehlt(r, m) {
       <label>E-Mail des Kunden<input name="k_email" type="email" value="${esc(r.kunde.email)}"></label>
       <label>Leitweg-ID (nur bei Behörden)<input name="k_leitweg" value="${esc(r.kunde.leitweg)}"></label>
       <label>PLZ<input name="k_plz" inputmode="numeric" value="${esc(k.plz)}"></label>
-      <label>Ort<input name="k_ort" value="${esc(k.ort)}"></label></div>
+      <label>Ort<input name="k_ort" value="${esc(k.ort)}"></label>
+      ${r.rc ? `<label>USt-IdNr. des Kunden<input name="k_ustid" value="${esc(r.kunde.ustid)}"></label>` : ''}
+      ${r.rc && r.rc !== 'inland13b' ? `<label>Land des Kunden (2 Buchstaben)<input name="k_land" maxlength="2" value="${esc(r.kunde.land || ustLand(r.kunde.ustid))}"></label>` : ''}</div>
       <p class="small muted">Das ändert nur die Empfängerdaten der E-Rechnung, nicht den Inhalt der Rechnung.</p>` : ''}
   </form>
   <div class="dlg-foot">
@@ -1626,10 +1629,17 @@ function druck(d, titel) {
 /* ---------- E-Rechnung (XRechnung 3.0, UBL) ---------- */
 function kundenAdresse(t) {
   const z = String(t || '').split('\n').map((l) => l.trim()).filter(Boolean);
+  /* Letzte Zeile nur aus Buchstaben (z. B. „Österreich“) ist das Land, nicht der Ort */
+  const landZeile = z.length > 2 && !/\d/.test(z[z.length - 1]) ? z.pop() : '';
   const last = z.length > 1 ? z[z.length - 1] : '';
-  const m = last.match(/^(?:D-?\s*)?(\d{5})\s+(.+)$/);
-  return { strasse: z.length > 1 ? z.slice(0, -1).join(', ') : z[0] || '', plz: m ? m[1] : '', ort: m ? m[2] : last };
+  const m = last.match(/^(?:[A-Z]{1,3}-\s?)?(\d{4}\s?[A-Z]{2}|\d{2}-\d{3}|\d{3}\s?\d{2}|\d{4,6})\s+(.+)$/);
+  return { strasse: z.length > 1 ? z.slice(0, -1).join(', ') : z[0] || '', plz: m ? m[1] : '', ort: m ? m[2] : last, landZeile };
 }
+/* Ländercode aus der USt-IdNr. (Griechenland nutzt dort EL statt GR) */
+const ustLand = (id) => { const c = String(id || '').replace(/\s/g, '').slice(0, 2).toUpperCase(); return /^[A-Z]{2}$/.test(c) ? (c === 'EL' ? 'GR' : c) : ''; };
+const kundenLand = (r) => (r.rc && r.rc !== 'inland13b' && (r.kunde.land || ustLand(r.kunde.ustid))) || 'DE';
+/* Codes nach EN 16931 (VATEX) für die Steuerbefreiungsgründe */
+const VATEX = { AE: 'VATEX-EU-AE', K: 'VATEX-EU-IC', G: 'VATEX-EU-G', O: 'VATEX-EU-O' };
 /* Was die XRechnung zusätzlich zu § 14 UStG braucht, sonst lehnt das Prüfprogramm des Empfängers sie ab */
 function eRechnungFehlt(r) {
   const f = S.firma, k = kundenAdresse(r.kunde.adresse), m = [];
@@ -1639,6 +1649,11 @@ function eRechnungFehlt(r) {
   if (!f.iban) m.push(['Deine IBAN (für die Zahlungsangaben)', 'firma']);
   if (!r.kunde.email) m.push(['E-Mail-Adresse des Kunden', 'kunde']);
   if (!k.plz || !k.ort) m.push(['Kundenanschrift mit PLZ und Ort in der letzten Zeile', 'kunde']);
+  const kat = RC[r.rc] && !r.ku ? RC[r.rc].xml : '';
+  /* BR-AE-2, BR-IC-2, BR-G-2: ohne deutsche USt braucht es deine USt-IdNr., bei AE und K auch die des Kunden */
+  if (['AE', 'K', 'G'].includes(kat) && !f.ustid) m.push(['Deine USt-IdNr. (Pflicht bei diesem Steuerfall)', 'firma']);
+  if (['AE', 'K'].includes(kat) && !r.kunde.ustid) m.push(['USt-IdNr. des Kunden (Pflicht bei diesem Steuerfall)', 'kunde']);
+  if (r.rc && r.rc !== 'inland13b' && kundenLand(r) === 'DE') m.push(['Land des Kunden (nicht Deutschland)', 'kunde']);
   return m;
 }
 
@@ -1650,12 +1665,17 @@ function xrechnung(r) {
   const k = adr(r.kunde.adresse);
   const kat = (satz) => r.ku ? 'E' : RC[r.rc] ? RC[r.rc].xml : (satz > 0 ? 'S' : 'Z');
   const sub = r.ku ? [[0, s.netto]] : Object.entries(s.proSatz).map(([k2, v]) => [Number(k2), v]);
+  const rcKat = !r.ku && RC[r.rc] ? RC[r.rc].xml : '';
+  /* BR-O-2/5/9: bei „nicht steuerbar“ (O) weder Steuersatz noch USt-IdNr. von Verkäufer oder Käufer */
+  const satzEl = (v) => rcKat === 'O' ? '' : `<cbc:Percent>${rcKat ? 0 : v}</cbc:Percent>`;
+  const befreiung = r.ku ? '<cbc:TaxExemptionReason>Kleinunternehmer gemäß § 19 UStG</cbc:TaxExemptionReason>' : rcKat ? `<cbc:TaxExemptionReasonCode>${VATEX[rcKat]}</cbc:TaxExemptionReasonCode><cbc:TaxExemptionReason>${RC[r.rc].hinweis}</cbc:TaxExemptionReason>` : '';
+  const land = kundenLand(r);
   const taxSub = sub.map(([satz, basis]) => `
       <cac:TaxSubtotal><cbc:TaxableAmount currencyID="EUR">${a(r2(basis))}</cbc:TaxableAmount><cbc:TaxAmount currencyID="EUR">${a(r2(basis * satz / 100))}</cbc:TaxAmount>
-        <cac:TaxCategory><cbc:ID>${kat(satz)}</cbc:ID><cbc:Percent>${satz}</cbc:Percent>${r.ku ? '<cbc:TaxExemptionReason>Kleinunternehmer gemäß § 19 UStG</cbc:TaxExemptionReason>' : RC[r.rc] ? `<cbc:TaxExemptionReason>${RC[r.rc].hinweis}</cbc:TaxExemptionReason>` : ''}<cac:TaxScheme><cbc:ID>VAT</cbc:ID></cac:TaxScheme></cac:TaxCategory></cac:TaxSubtotal>`).join('');
+        <cac:TaxCategory><cbc:ID>${kat(satz)}</cbc:ID>${satzEl(satz)}${befreiung}<cac:TaxScheme><cbc:ID>VAT</cbc:ID></cac:TaxScheme></cac:TaxCategory></cac:TaxSubtotal>`).join('');
   const lines = r.positionen.map((p, i) => `
   <cac:InvoiceLine><cbc:ID>${i + 1}</cbc:ID><cbc:InvoicedQuantity unitCode="${/std/i.test(p.einheit) ? 'HUR' : /tag/i.test(p.einheit) ? 'DAY' : 'C62'}">${num(p.menge)}</cbc:InvoicedQuantity><cbc:LineExtensionAmount currencyID="EUR">${a(r2(num(p.menge) * num(p.preis)))}</cbc:LineExtensionAmount>
-    <cac:Item><cbc:Name>${x(p.text)}</cbc:Name><cac:ClassifiedTaxCategory><cbc:ID>${kat(num(p.ust))}</cbc:ID><cbc:Percent>${r.ku ? 0 : num(p.ust)}</cbc:Percent><cac:TaxScheme><cbc:ID>VAT</cbc:ID></cac:TaxScheme></cac:ClassifiedTaxCategory></cac:Item>
+    <cac:Item><cbc:Name>${x(p.text)}</cbc:Name><cac:ClassifiedTaxCategory><cbc:ID>${kat(num(p.ust))}</cbc:ID>${satzEl(r.ku ? 0 : num(p.ust))}<cac:TaxScheme><cbc:ID>VAT</cbc:ID></cac:TaxScheme></cac:ClassifiedTaxCategory></cac:Item>
     <cac:Price><cbc:PriceAmount currencyID="EUR">${a(num(p.preis))}</cbc:PriceAmount></cac:Price></cac:InvoiceLine>`).join('');
   const orig = r.stornoVon ? S.rechnungen.find((y) => y.id === r.stornoVon) : null;
   return `<?xml version="1.0" encoding="UTF-8"?>
@@ -1673,18 +1693,18 @@ function xrechnung(r) {
   <cac:AccountingSupplierParty><cac:Party>
     ${f.email ? `<cbc:EndpointID schemeID="EM">${x(f.email)}</cbc:EndpointID>` : ''}
     <cac:PostalAddress><cbc:StreetName>${x(f.strasse)}</cbc:StreetName><cbc:CityName>${x(f.ort)}</cbc:CityName><cbc:PostalZone>${x(f.plz)}</cbc:PostalZone><cac:Country><cbc:IdentificationCode>DE</cbc:IdentificationCode></cac:Country></cac:PostalAddress>
-    ${f.ustid ? `<cac:PartyTaxScheme><cbc:CompanyID>${x(f.ustid)}</cbc:CompanyID><cac:TaxScheme><cbc:ID>VAT</cbc:ID></cac:TaxScheme></cac:PartyTaxScheme>` : ''}
+    ${f.ustid && rcKat !== 'O' ? `<cac:PartyTaxScheme><cbc:CompanyID>${x(f.ustid)}</cbc:CompanyID><cac:TaxScheme><cbc:ID>VAT</cbc:ID></cac:TaxScheme></cac:PartyTaxScheme>` : ''}
     ${f.steuernr ? `<cac:PartyTaxScheme><cbc:CompanyID>${x(f.steuernr)}</cbc:CompanyID><cac:TaxScheme><cbc:ID>FC</cbc:ID></cac:TaxScheme></cac:PartyTaxScheme>` : ''}
     <cac:PartyLegalEntity><cbc:RegistrationName>${x(f.name)}</cbc:RegistrationName></cac:PartyLegalEntity>
     <cac:Contact><cbc:Name>${x(f.inhaber || f.name)}</cbc:Name><cbc:Telephone>${x(f.tel || '-')}</cbc:Telephone><cbc:ElectronicMail>${x(f.email || '-')}</cbc:ElectronicMail></cac:Contact>
   </cac:Party></cac:AccountingSupplierParty>
   <cac:AccountingCustomerParty><cac:Party>
     ${r.kunde.email ? `<cbc:EndpointID schemeID="EM">${x(r.kunde.email)}</cbc:EndpointID>` : ''}
-    <cac:PostalAddress><cbc:StreetName>${x(k.strasse)}</cbc:StreetName><cbc:CityName>${x(k.ort)}</cbc:CityName><cbc:PostalZone>${x(k.plz)}</cbc:PostalZone><cac:Country><cbc:IdentificationCode>DE</cbc:IdentificationCode></cac:Country></cac:PostalAddress>
-    ${r.kunde.ustid ? `<cac:PartyTaxScheme><cbc:CompanyID>${x(r.kunde.ustid)}</cbc:CompanyID><cac:TaxScheme><cbc:ID>VAT</cbc:ID></cac:TaxScheme></cac:PartyTaxScheme>` : ''}
+    <cac:PostalAddress><cbc:StreetName>${x(k.strasse)}</cbc:StreetName><cbc:CityName>${x(k.ort)}</cbc:CityName><cbc:PostalZone>${x(k.plz)}</cbc:PostalZone><cac:Country><cbc:IdentificationCode>${land}</cbc:IdentificationCode></cac:Country></cac:PostalAddress>
+    ${r.kunde.ustid && rcKat !== 'O' ? `<cac:PartyTaxScheme><cbc:CompanyID>${x(r.kunde.ustid)}</cbc:CompanyID><cac:TaxScheme><cbc:ID>VAT</cbc:ID></cac:TaxScheme></cac:PartyTaxScheme>` : ''}
     <cac:PartyLegalEntity><cbc:RegistrationName>${x(r.kunde.name)}</cbc:RegistrationName></cac:PartyLegalEntity>
   </cac:Party></cac:AccountingCustomerParty>
-  <cac:Delivery><cbc:ActualDeliveryDate>${r.leistungsdatum || r.datum}</cbc:ActualDeliveryDate></cac:Delivery>
+  <cac:Delivery><cbc:ActualDeliveryDate>${r.leistungsdatum || r.datum}</cbc:ActualDeliveryDate>${rcKat === 'K' ? `<cac:DeliveryLocation><cac:Address><cbc:StreetName>${x(k.strasse)}</cbc:StreetName><cbc:CityName>${x(k.ort)}</cbc:CityName><cbc:PostalZone>${x(k.plz)}</cbc:PostalZone><cac:Country><cbc:IdentificationCode>${land}</cbc:IdentificationCode></cac:Country></cac:Address></cac:DeliveryLocation>` : ''}</cac:Delivery>
   ${f.iban ? `<cac:PaymentMeans><cbc:PaymentMeansCode>58</cbc:PaymentMeansCode><cbc:PaymentID>${x(r.nr)}</cbc:PaymentID><cac:PayeeFinancialAccount><cbc:ID>${x(f.iban.replace(/\s/g, ''))}</cbc:ID>${f.bank ? `<cbc:Name>${x(f.name)}</cbc:Name>` : ''}${f.bic ? `<cac:FinancialInstitutionBranch><cbc:ID>${x(f.bic)}</cbc:ID></cac:FinancialInstitutionBranch>` : ''}</cac:PayeeFinancialAccount></cac:PaymentMeans>` : ''}
   ${r.faellig && !credit ? `<cac:PaymentTerms><cbc:Note>Zahlbar bis ${dat(r.faellig)}</cbc:Note></cac:PaymentTerms>` : ''}
   <cac:TaxTotal><cbc:TaxAmount currencyID="EUR">${a(s.ust)}</cbc:TaxAmount>${taxSub}
@@ -1779,8 +1799,10 @@ const ACT = {
     const r = S.rechnungen.find((x) => x.id === el.dataset.id), f = $('#nachForm');
     r.kunde.email = f.elements.k_email.value.trim() || r.kunde.email;
     r.kunde.leitweg = f.elements.k_leitweg.value.trim();
+    if (f.elements.k_ustid) r.kunde.ustid = f.elements.k_ustid.value.trim();
+    if (f.elements.k_land) r.kunde.land = f.elements.k_land.value.trim().toUpperCase();
     const plz = f.elements.k_plz.value.trim(), ort = f.elements.k_ort.value.trim();
-    if (plz && ort) { const k = kundenAdresse(r.kunde.adresse); r.kunde.adresse = (k.strasse ? k.strasse.split(', ').join('\n') + '\n' : '') + plz + ' ' + ort; }
+    if (plz && ort) { const k = kundenAdresse(r.kunde.adresse); r.kunde.adresse = (k.strasse ? k.strasse.split(', ').join('\n') + '\n' : '') + plz + ' ' + ort + (k.landZeile ? '\n' + k.landZeile : ''); }
     merkeKunde(r.kunde); await save();
     const m = eRechnungFehlt(r); if (m.length) return vERechnungFehlt(r, m);
     download(`${r.nr}.xml`, xrechnung(r), 'application/xml'); toast('E-Rechnung gespeichert'); vDetailRe(r.id);
@@ -1864,7 +1886,7 @@ document.addEventListener('input', (e) => {
   }
   if (e.target.name === 'k_name' && e.target.closest('#edForm')) {
     const k = S.kunden.find((x) => x.name === e.target.value);
-    if (k) { const f = $('#edForm'); if (!f.elements.k_adresse.value) f.elements.k_adresse.value = k.adresse || ''; if (!f.elements.k_ustid.value) f.elements.k_ustid.value = k.ustid || ''; if (!f.elements.k_email.value) f.elements.k_email.value = k.email || ''; if (f.elements.k_leitweg && !f.elements.k_leitweg.value) f.elements.k_leitweg.value = k.leitweg || ''; refreshEditor(); }
+    if (k) { const f = $('#edForm'); if (!f.elements.k_adresse.value) f.elements.k_adresse.value = k.adresse || ''; if (!f.elements.k_ustid.value) f.elements.k_ustid.value = k.ustid || ''; if (!f.elements.k_email.value) f.elements.k_email.value = k.email || ''; if (f.elements.k_leitweg && !f.elements.k_leitweg.value) f.elements.k_leitweg.value = k.leitweg || ''; if (f.elements.k_land && !f.elements.k_land.value) f.elements.k_land.value = k.land || ''; refreshEditor(); }
   }
 });
 document.addEventListener('change', async (e) => {

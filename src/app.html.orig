@@ -1,0 +1,1921 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="robots" content="noindex,nofollow">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Steuer-Cockpit">
+<meta name="theme-color" content="#0f1720">
+<link rel="apple-touch-icon" href="icon.png">
+<link rel="manifest" href="manifest.json">
+<title>Steuer-Cockpit</title>
+<style>
+:root {
+  --bg: #f3f5f8; --panel: #ffffff; --fg: #141a21; --muted: #5d6876; --line: #dbe0e6;
+  --accent: #1f5fbf; --accent-fg: #ffffff; --soft: #eaf1fb;
+  --good: #1d7a46; --good-bg: #e5f4ea; --warn: #8a5a00; --warn-bg: #fdf1d8; --bad: #b3261e; --bad-bg: #fbe6e4;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0f1720; --panel: #17212c; --fg: #e8edf2; --muted: #9aa6b3; --line: #29343f;
+    --accent: #6ea2f2; --accent-fg: #0f1720; --soft: #1b2a3b;
+    --good: #6fcf97; --good-bg: #16302a; --warn: #f2c25b; --warn-bg: #362b13; --bad: #f08a80; --bad-bg: #3a1d1b;
+    color-scheme: dark;
+  }
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; }
+body { background: var(--bg); color: var(--fg); font: 16px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; padding-bottom: calc(84px + env(safe-area-inset-bottom, 0px)); }
+[hidden] { display: none !important; }
+header.top { position: sticky; top: 0; z-index: 5; background: var(--bg); padding: calc(10px + env(safe-area-inset-top, 0px)) 16px 8px; border-bottom: 1px solid var(--line); }
+header.top .row { max-width: 860px; margin: 0 auto; display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.brand { font-weight: 800; letter-spacing: .08em; text-transform: uppercase; font-size: 13px; color: var(--accent); }
+.firm { font-size: 13px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+main { max-width: 860px; margin: 0 auto; padding: 16px; }
+h1 { font-size: 1.35rem; margin: 4px 0 12px; }
+h2 { font-size: 1.05rem; margin: 0 0 8px; }
+h3 { font-size: .95rem; margin: 14px 0 6px; }
+p { margin: 0 0 8px; }
+.muted { color: var(--muted); }
+.small { font-size: 13px; }
+.card { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 14px; margin-bottom: 12px; }
+.status { border-radius: 12px; padding: 14px; margin-bottom: 12px; border: 1px solid var(--line); background: var(--panel); }
+.status .big { font-size: 1.25rem; font-weight: 700; }
+.todo { list-style: none; margin: 0; padding: 0; }
+.todo li { display: flex; gap: 10px; align-items: flex-start; padding: 10px 0; border-top: 1px solid var(--line); }
+.todo li:first-child { border-top: 0; padding-top: 0; }
+.todo .dot { flex: 0 0 auto; width: 10px; height: 10px; border-radius: 50%; margin-top: 7px; background: var(--muted); }
+.dot.bad { background: var(--bad); } .dot.warn { background: var(--warn); } .dot.good { background: var(--good); }
+.todo .grow { flex: 1; min-width: 0; }
+.tiles { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin-bottom: 12px; }
+@media (min-width: 700px) { .tiles { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
+.tile { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 12px; }
+.tile .q { font-size: 13px; color: var(--muted); }
+.tile .v { font-size: 1.2rem; font-weight: 700; margin: 2px 0; font-variant-numeric: tabular-nums; }
+.tile .e { font-size: 12.5px; color: var(--muted); }
+.pill { display: inline-block; font-size: 12px; font-weight: 600; padding: 2px 8px; border-radius: 999px; background: var(--soft); color: var(--accent); white-space: nowrap; }
+.pill.good { background: var(--good-bg); color: var(--good); }
+.pill.warn { background: var(--warn-bg); color: var(--warn); }
+.pill.bad { background: var(--bad-bg); color: var(--bad); }
+.pill.grey { background: var(--line); color: var(--muted); }
+.list { list-style: none; margin: 0; padding: 0; }
+.list li { border-top: 1px solid var(--line); }
+.list li:first-child { border-top: 0; }
+.item { display: flex; gap: 10px; align-items: center; padding: 11px 2px; width: 100%; background: none; border: 0; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+.item .grow { flex: 1; min-width: 0; }
+.item .t { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.item .s { font-size: 13px; color: var(--muted); }
+.item .amt { text-align: right; font-variant-numeric: tabular-nums; font-weight: 600; white-space: nowrap; }
+.filters { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 10px; }
+.chip { border: 1px solid var(--line); background: var(--panel); color: var(--fg); border-radius: 999px; padding: 6px 12px; font: inherit; font-size: 14px; cursor: pointer; }
+.chip[aria-pressed="true"] { background: var(--accent); color: var(--accent-fg); border-color: var(--accent); }
+button, .btn { font: inherit; font-weight: 600; border-radius: 10px; padding: 10px 14px; border: 1px solid var(--line); background: var(--panel); color: var(--fg); cursor: pointer; text-decoration: none; display: inline-block; }
+.btn.primary, button.primary { background: var(--accent); color: var(--accent-fg); border-color: var(--accent); }
+.btn.danger, button.danger { color: var(--bad); }
+button:disabled { opacity: .5; cursor: not-allowed; }
+.btns { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
+.empty { text-align: center; padding: 26px 10px; color: var(--muted); }
+details { border-top: 1px solid var(--line); padding-top: 8px; margin-top: 8px; }
+details > summary { cursor: pointer; color: var(--muted); font-size: 14px; }
+label { display: grid; gap: 4px; font-size: 14px; color: var(--muted); }
+label.check { display: flex; gap: 8px; align-items: center; color: var(--fg); }
+input, select, textarea { font: inherit; font-size: 16px; color: var(--fg); background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 9px 10px; width: 100%; min-width: 0; }
+label.check input { width: auto; }
+textarea { min-height: 70px; resize: vertical; }
+.grid2 { display: grid; grid-template-columns: 1fr; gap: 10px; }
+@media (min-width: 600px) { .grid2 { grid-template-columns: 1fr 1fr; } }
+.full { grid-column: 1 / -1; }
+.pos { border: 1px solid var(--line); border-radius: 10px; padding: 10px; margin-bottom: 8px; display: grid; gap: 8px; grid-template-columns: 1fr 1fr; }
+.pos .text { grid-column: 1 / -1; }
+@media (min-width: 640px) { .pos { grid-template-columns: 3fr 1fr 1fr 1.2fr 1fr auto; align-items: end; } .pos .text { grid-column: auto; } }
+.pos .sum { font-variant-numeric: tabular-nums; font-weight: 600; padding: 9px 0; }
+.pos .del { padding: 8px 10px; }
+.totals { margin-left: auto; max-width: 320px; font-variant-numeric: tabular-nums; }
+.totals div { display: flex; justify-content: space-between; gap: 12px; padding: 3px 0; }
+.totals .gross { font-weight: 700; border-top: 1px solid var(--line); padding-top: 6px; margin-top: 4px; }
+.checks { list-style: none; padding: 0; margin: 0; font-size: 14px; }
+.checks li { padding: 2px 0; }
+.checks li.ok::before { content: "✓ "; color: var(--good); font-weight: 700; }
+.checks li.miss::before { content: "✗ "; color: var(--bad); font-weight: 700; }
+nav.tabs { position: fixed; left: 0; right: 0; bottom: 0; z-index: 6; background: var(--panel); border-top: 1px solid var(--line); padding-bottom: env(safe-area-inset-bottom, 0px); }
+nav.tabs .row { max-width: 860px; margin: 0 auto; display: grid; grid-template-columns: repeat(7, 1fr); }
+nav.tabs button { border: 0; border-radius: 0; background: none; padding: 9px 2px 10px; font-size: 12px; font-weight: 600; color: var(--muted); display: grid; justify-items: center; gap: 2px; }
+nav.tabs button svg { width: 22px; height: 22px; }
+nav.tabs button[aria-current="page"] { color: var(--accent); }
+.fab { position: fixed; right: max(16px, env(safe-area-inset-right, 0px)); bottom: calc(76px + env(safe-area-inset-bottom, 0px)); z-index: 7; width: 58px; height: 58px; border-radius: 50%; background: var(--accent); color: var(--accent-fg); border: 0; font-size: 32px; line-height: 1; padding: 0; box-shadow: 0 6px 18px rgba(0,0,0,.25); }
+dialog { border: 0; padding: 0; background: var(--panel); color: var(--fg); width: 100%; max-width: 760px; max-height: 100%; border-radius: 14px; }
+dialog::backdrop { background: rgba(0,0,0,.45); }
+@media (max-width: 640px) { dialog { margin: auto 0 0; max-width: 100%; border-radius: 14px 14px 0 0; max-height: 94vh; } }
+.dlg-head { position: sticky; top: 0; background: var(--panel); display: flex; justify-content: space-between; align-items: center; gap: 10px; padding: 14px 16px; border-bottom: 1px solid var(--line); z-index: 1; }
+.dlg-head h2 { margin: 0; }
+.dlg-body { padding: 16px; }
+.dlg-foot { position: sticky; bottom: 0; background: var(--panel); padding: 12px 16px calc(12px + env(safe-area-inset-bottom, 0px)); border-top: 1px solid var(--line); display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
+.x { border: 0; background: none; font-size: 26px; line-height: 1; padding: 4px 8px; color: var(--muted); }
+.menu { display: grid; gap: 10px; }
+.menu button { display: flex; gap: 12px; align-items: center; text-align: left; padding: 14px; }
+.menu .ic { font-size: 24px; width: 34px; text-align: center; }
+.menu .t { display: block; font-weight: 700; }
+.menu .s { display: block; font-weight: 400; font-size: 13px; color: var(--muted); }
+.preview { max-width: 100%; max-height: 260px; border-radius: 8px; border: 1px solid var(--line); display: block; margin-top: 8px; }
+.toast { position: fixed; left: 50%; transform: translateX(-50%); bottom: calc(150px + env(safe-area-inset-bottom, 0px)); background: var(--fg); color: var(--bg); padding: 10px 16px; border-radius: 10px; z-index: 20; font-size: 14px; max-width: calc(100% - 32px); }
+table.tab { width: 100%; border-collapse: collapse; font-size: 14px; }
+table.tab td, table.tab th { text-align: left; padding: 6px 4px; border-top: 1px solid var(--line); vertical-align: top; }
+.logo-prev { max-height: 64px; max-width: 220px; display: block; margin: 8px 0; background: #fff; border-radius: 6px; padding: 4px; border: 1px solid var(--line); }
+.wiz .opts { display: grid; gap: 8px; margin-top: 10px; }
+.wiz .opts button { text-align: left; font-weight: 500; }
+.wiz .step { font-size: 13px; color: var(--muted); margin-bottom: 4px; }
+.drop { border: 2px dashed var(--line); }
+.drop.on { border-color: var(--accent); background: var(--soft); }
+.upl { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.upl button { display: grid; justify-items: center; gap: 2px; padding: 10px 4px; font-size: 13px; }
+.upl .ic { font-size: 22px; line-height: 1.2; }
+#druck { display: none; }
+@media print {
+  @page { size: A4; margin: 18mm 16mm; }
+  body { background: #fff; color: #000; padding: 0; }
+  body > *:not(#druck) { display: none !important; }
+  #druck { display: block; font-size: 10.5pt; color: #000; }
+  #druck .absender { font-size: 8pt; text-decoration: underline; margin-bottom: 4mm; }
+  #druck .kopf { display: flex; justify-content: space-between; gap: 10mm; margin-bottom: 12mm; }
+  #druck .meta td { padding: 0 0 1mm 6mm; }
+  #druck .logo { display: block; max-height: 22mm; max-width: 60mm; margin: 0 0 4mm auto; }
+  #druck h1 { font-size: 16pt; margin: 0 0 6mm; }
+  #druck table.p { width: 100%; border-collapse: collapse; margin: 4mm 0; }
+  #druck table.p th, #druck table.p td { border-bottom: .3mm solid #999; padding: 2mm 1mm; text-align: left; }
+  #druck table.p .r { text-align: right; }
+  #druck .sum { margin-left: auto; width: 75mm; }
+  #druck .sum div { display: flex; justify-content: space-between; padding: .8mm 0; }
+  #druck .sum .g { font-weight: 700; border-top: .4mm solid #000; margin-top: 1mm; padding-top: 1.5mm; }
+  #druck .fuss { margin-top: 14mm; font-size: 8.5pt; color: #333; display: grid; grid-template-columns: repeat(3, 1fr); gap: 6mm; border-top: .3mm solid #999; padding-top: 3mm; }
+}
+</style>
+</head>
+<body>
+<header class="top"><div class="row"><span class="brand">Steuer-Cockpit</span><span class="firm" id="firmname"></span></div></header>
+<main id="app"><p class="muted">Lädt …</p></main>
+<button class="fab" id="fab" aria-label="Neu: Angebot, Rechnung oder Beleg" data-act="menu">+</button>
+<nav class="tabs" aria-label="Bereiche"><div class="row" id="tabs"></div></nav>
+<dialog id="dlg"></dialog>
+<div id="druck"></div>
+<script>
+(function () {
+'use strict';
+
+/* ---------- Speicher (IndexedDB, bleibt nur auf diesem Gerät) ---------- */
+const DBN = 'steuer-cockpit', ST = 'kv';
+let dbp = null;
+function db() {
+  if (!dbp) dbp = new Promise((res, rej) => {
+    const r = indexedDB.open(DBN, 1);
+    r.onupgradeneeded = () => r.result.createObjectStore(ST);
+    r.onsuccess = () => res(r.result);
+    r.onerror = () => rej(r.error);
+  });
+  return dbp;
+}
+async function kv(mode, fn) {
+  const d = await db();
+  return new Promise((res, rej) => {
+    const tx = d.transaction(ST, mode), st = tx.objectStore(ST);
+    const r = fn(st);
+    tx.oncomplete = () => res(r && 'result' in r ? r.result : undefined);
+    tx.onerror = () => rej(tx.error);
+  });
+}
+const idbGet = (k) => kv('readonly', (s) => s.get(k));
+const idbSet = (k, v) => kv('readwrite', (s) => s.put(v, k));
+const idbDel = (k) => kv('readwrite', (s) => s.delete(k));
+const idbKeys = () => kv('readonly', (s) => s.getAllKeys());
+
+/* ---------- Grunddaten ---------- */
+const RECHTSFORMEN = {
+  freiberufler: { label: 'Freiberufler', gewinn: 'EÜR (Einnahmen-Überschuss-Rechnung)', jahr: 'Einkommensteuer mit Anlage S und Anlage EÜR, Umsatzsteuer-Jahreserklärung', extra: 'Keine Gewerbesteuer.' },
+  einzel: { label: 'Einzelunternehmen (Gewerbe)', gewinn: 'EÜR; Bilanz erst ab 800.000 € Umsatz oder 80.000 € Gewinn im Jahr', jahr: 'Einkommensteuer mit Anlage G und Anlage EÜR, Gewerbesteuer, Umsatzsteuer-Jahreserklärung', extra: 'Gewerbesteuer-Freibetrag 24.500 €.' },
+  ek: { label: 'e.K. (eingetragener Kaufmann)', gewinn: 'Bilanz nach HGB, unter denselben Grenzen wie beim Einzelunternehmen befreit', jahr: 'Wie Einzelunternehmen, mit Bilanz zusätzlich E-Bilanz', extra: 'Eintrag im Handelsregister.' },
+  gbr: { label: 'GbR / eGbR', gewinn: 'EÜR, solange nicht buchführungspflichtig', jahr: 'Feststellungserklärung, Gewerbesteuer wenn gewerblich, Umsatzsteuer; jeder Gesellschafter macht seine eigene Einkommensteuer', extra: 'Gewinn wird auf die Gesellschafter verteilt.' },
+  ohg: { label: 'OHG / KG / GmbH & Co. KG', gewinn: 'Bilanz nach HGB', jahr: 'Feststellungserklärung, E-Bilanz, Gewerbesteuer, Umsatzsteuer', extra: 'Gewinnverteilung auf Gesellschafter, Kapitalkonten.' },
+  ug: { label: 'UG (haftungsbeschränkt)', gewinn: 'Bilanz und GuV nach HGB', jahr: 'Körperschaftsteuer, Gewerbesteuer, Umsatzsteuer, E-Bilanz', extra: '25 % des Jahresüberschusses in die Rücklage; Jahresabschluss offenlegen.' },
+  gmbh: { label: 'GmbH', gewinn: 'Bilanz und GuV nach HGB', jahr: 'Körperschaftsteuer, Gewerbesteuer, Umsatzsteuer, E-Bilanz', extra: 'Jahresabschluss offenlegen; Lohnsteuer für das Geschäftsführergehalt.' }
+};
+const KU_HINWEIS = 'Gemäß § 19 UStG wird keine Umsatzsteuer berechnet (Kleinunternehmerregelung).';
+const KU_GRENZE = 100000;
+const KATEGORIEN = ['Wareneinkauf', 'Büro und Software', 'Telefon und Internet', 'Fahrzeug und Reise', 'Werbung', 'Miete', 'Versicherung', 'Fremdleistung', 'Bewirtung', 'Porto und Versand', 'Bankgebühren', 'Fortbildung', 'Beiträge und Gebühren', 'Anschaffung (Gerät, Möbel)', 'Sonstiges'];
+const ZAHLWEGE = [['konto', 'Geschäftskonto'], ['bar', 'Bar'], ['privat', 'Privat ausgelegt'], ['offen', 'Noch nicht bezahlt']];
+const REGISTER_RF = ['ek', 'ohg', 'ug', 'gmbh'];
+
+function leer() {
+  return {
+    v: 2,
+    firma: { name: '', inhaber: '', strasse: '', plz: '', ort: '', steuernr: '', ustid: '', email: '', tel: '', iban: '', bic: '', bank: '', rechtsform: '', registergericht: '', registernr: '', logo: '', kleinunternehmer: false, turnus: 'monat', dauerfrist: false, zahlungsziel: 14, angebotTage: 30, basiszins: 1.27 },
+    angebote: [], rechnungen: [], belege: [], kunden: [], lieferanten: [], bank: [], zaehler: {}, letzteSicherung: null,
+    steuer: { versteuerung: 'soll', hebesatz: 400, berater: false, svz: 0, vzEst: 0, vzGew: 0, erledigt: {} }
+  };
+}
+let S = leer();
+let tab = 'start', filter = {};
+
+async function load() {
+  const s = await idbGet('state');
+  if (s) S = Object.assign(leer(), s, { firma: Object.assign(leer().firma, s.firma || {}), steuer: Object.assign(leer().steuer, s.steuer || {}) });
+  migriere();
+}
+/* Ältere Stände: Kunden bekommen eine id, Lieferanten entstehen aus vorhandenen Belegen */
+function migriere() {
+  S.kunden = S.kunden || []; S.lieferanten = S.lieferanten || [];
+  for (const k of S.kunden) if (!k.id) k.id = uid();
+  if ((S.v || 1) < 2) {
+    for (const b of S.belege.slice().sort((x, y) => (x.datum || '').localeCompare(y.datum || ''))) merkeLieferant(b.lieferant, b.kategorie, b.rc);
+    S.v = 2;
+  }
+  for (const l of S.lieferanten) if (!l.id) l.id = uid();
+}
+async function save() { await idbSet('state', S); }
+
+/* ---------- Hilfen ---------- */
+const $ = (sel, root) => (root || document).querySelector(sel);
+const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const eur = (n) => new Intl.NumberFormat('de-DE', { style: 'currency', currency: 'EUR' }).format(n || 0);
+const num = (v) => { if (typeof v === 'number') return v; const s = String(v || '').trim().replace(/\s/g, ''); if (!s) return 0; const n = s.includes(',') ? parseFloat(s.replace(/\./g, '').replace(',', '.')) : parseFloat(s); return isFinite(n) ? n : 0; };
+const r2 = (n) => Math.round((n + Number.EPSILON) * 100) / 100;
+const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+const heute = () => iso(new Date());
+const iso = (d) => { const z = new Date(d.getTime() - d.getTimezoneOffset() * 60000); return z.toISOString().slice(0, 10); };
+const plusTage = (isoD, t) => { const d = new Date(isoD + 'T12:00:00'); d.setDate(d.getDate() + t); return iso(d); };
+const dat = (isoD) => isoD ? new Date(isoD + 'T12:00:00').toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit', year: 'numeric' }) : '–';
+const tageBis = (isoD) => Math.round((new Date(isoD + 'T12:00:00') - new Date(heute() + 'T12:00:00')) / 86400000);
+const MONATE = ['Januar', 'Februar', 'März', 'April', 'Mai', 'Juni', 'Juli', 'August', 'September', 'Oktober', 'November', 'Dezember'];
+function toast(t) { const el = document.createElement('div'); el.className = 'toast'; el.setAttribute('role', 'status'); el.textContent = t; document.body.appendChild(el); setTimeout(() => el.remove(), 2600); }
+const ku = () => !!S.firma.kleinunternehmer;
+
+function summen(doc) {
+  if (doc.extern) {
+    const netto = num(doc.netto), ust = num(doc.ust);
+    return { netto, ust, brutto: r2(netto + ust), proSatz: {} };
+  }
+  let netto = 0; const proSatz = {};
+  for (const p of doc.positionen || []) {
+    const n = r2(num(p.menge) * num(p.preis));
+    netto += n;
+    const satz = doc.ku || doc.rc ? 0 : num(p.ust);
+    proSatz[satz] = (proSatz[satz] || 0) + n;
+  }
+  let ust = 0;
+  for (const s in proSatz) ust += r2(proSatz[s] * Number(s) / 100);
+  netto = r2(netto); ust = r2(ust);
+  return { netto, ust, brutto: r2(netto + ust), proSatz };
+}
+
+function naechsteNr(art, jahr) {
+  S.zaehler[art] = S.zaehler[art] || {};
+  const n = (S.zaehler[art][jahr] || 0) + 1;
+  S.zaehler[art][jahr] = n;
+  return art + '-' + jahr + '-' + String(n).padStart(art === 'RE' ? 4 : 3, '0');
+}
+
+function reStatus(r) {
+  if (r.typ === 'gutschrift') return { k: 'storno', t: 'Stornorechnung', c: 'grey' };
+  if (r.status === 'entwurf') return { k: 'entwurf', t: 'Entwurf', c: 'grey' };
+  if (r.status === 'storniert') return { k: 'storniert', t: 'Storniert', c: 'grey' };
+  if (r.status === 'bezahlt') return { k: 'bezahlt', t: 'Bezahlt', c: 'good' };
+  if (r.faellig && tageBis(r.faellig) < 0) return { k: 'ueberfaellig', t: 'Überfällig seit ' + (-tageBis(r.faellig)) + ' T.', c: 'bad' };
+  return { k: 'offen', t: r.faellig ? 'Offen, fällig ' + dat(r.faellig) : 'Offen', c: 'warn' };
+}
+function anStatus(a) {
+  if (a.status === 'abgerechnet') return { k: 'abgerechnet', t: 'In Rechnung', c: 'good' };
+  if (a.status === 'angenommen') return { k: 'angenommen', t: 'Angenommen', c: 'good' };
+  if (a.status === 'abgelehnt') return { k: 'abgelehnt', t: 'Abgelehnt', c: 'grey' };
+  if (a.gueltigBis && tageBis(a.gueltigBis) < 0) return { k: 'abgelaufen', t: 'Abgelaufen', c: 'grey' };
+  return { k: 'offen', t: a.gueltigBis ? 'Offen bis ' + dat(a.gueltigBis) : 'Offen', c: 'warn' };
+}
+const zaehlt = (r) => r.status !== 'entwurf';
+
+/* Umsatzsteuer-Zeitraum: letzter abgeschlossener Monat/Quartal, dessen Frist noch kommt und der nicht abgegeben ist */
+function ustZeitraum() {
+  let z = zrAus(zrRel(-1));
+  if (tageBis(z.frist) < 0 || S.steuer.erledigt['ustva-' + z.key]) z = zrAus(zrRel(0));
+  const u = ustva(z);
+  return Object.assign(z, { ust: u.ust, vst: u.vst, zahl: u.zahl });
+}
+
+/* ---------- Steuern: UStVA, ZM, Gewinn, Schätzung, Fristen ---------- */
+/* Steuerfall einer Rechnung ohne deutsche USt (Feld rc) und wohin sie in der Voranmeldung gehört */
+const RC = {
+  'eu-leistung': { t: 'Dienstleistung an Firma in der EU (Reverse Charge)', kz: '21', zm: 'S', idPflicht: true, xml: 'AE', hinweis: 'Steuerschuldnerschaft des Leistungsempfängers (Reverse Charge).' },
+  'eu-lieferung': { t: 'Warenlieferung an Firma in der EU', kz: '41', zm: 'L', idPflicht: true, xml: 'K', hinweis: 'Steuerfreie innergemeinschaftliche Lieferung.' },
+  inland13b: { t: 'Inland, Kunde schuldet die Steuer (§ 13b, z. B. Bauleistung)', kz: '60', xml: 'AE', hinweis: 'Steuerschuldnerschaft des Leistungsempfängers (§ 13b UStG).' },
+  drittland: { t: 'Dienstleistung an Kunden außerhalb der EU', kz: '45', xml: 'O', hinweis: 'Nicht im Inland steuerbare Leistung.' },
+  ausfuhr: { t: 'Warenlieferung in ein Land außerhalb der EU', kz: '43', xml: 'G', hinweis: 'Steuerfreie Ausfuhrlieferung.' }
+};
+const rcArt = (r) => (r.rc === true ? 'eu-leistung' : RC[r.rc] ? r.rc : '');
+const BILANZ = ['ek', 'ohg', 'ug', 'gmbh'];
+const KAPITAL = ['ug', 'gmbh'];
+let stZr = '', stJahr = 0;
+
+/* Fristen verschieben sich auf den nächsten Werktag (Wochenende, bundesweite Feiertage) */
+function feiertage(y) {
+  const a = y % 19, b = Math.floor(y / 100), c = y % 100, d = Math.floor(b / 4), e = b % 4, f = Math.floor((b + 8) / 25), g = Math.floor((b - f + 1) / 3);
+  const h = (19 * a + b - d - g + 15) % 30, i = Math.floor(c / 4), k = c % 4, l = (32 + 2 * e + 2 * i - h - k) % 7, m = Math.floor((a + 11 * h + 22 * l) / 451);
+  const ostern = iso(new Date(y, Math.floor((h + l - 7 * m + 114) / 31) - 1, ((h + l - 7 * m + 114) % 31) + 1));
+  return [`${y}-01-01`, `${y}-05-01`, `${y}-10-03`, `${y}-12-25`, `${y}-12-26`].concat([-2, 1, 39, 50].map((t) => plusTage(ostern, t)));
+}
+function werktag(isoD) {
+  let d = isoD;
+  for (;;) { const wd = new Date(d + 'T12:00:00').getDay(); if (wd !== 0 && wd !== 6 && !feiertage(+d.slice(0, 4)).includes(d)) return d; d = plusTage(d, 1); }
+}
+
+/* Voranmeldungszeiträume: Schlüssel 2026-09 (Monat) oder 2026-Q3 (Quartal) */
+function zrRel(n) {
+  const d = new Date(heute() + 'T12:00:00');
+  if (S.firma.turnus === 'quartal') { let q = d.getFullYear() * 4 + Math.floor(d.getMonth() / 3) + n; return `${Math.floor(q / 4)}-Q${(q % 4) + 1}`; }
+  const m = d.getFullYear() * 12 + d.getMonth() + n;
+  return `${Math.floor(m / 12)}-${String((m % 12) + 1).padStart(2, '0')}`;
+}
+function zrAus(key) {
+  const [ys, p] = key.split('-'), y = Number(ys);
+  let von, bis, name;
+  if (p[0] === 'Q') { const q = Number(p[1]) - 1; von = new Date(y, q * 3, 1); bis = new Date(y, q * 3 + 3, 0); name = `${q + 1}. Quartal ${y}`; }
+  else { const m = Number(p) - 1; von = new Date(y, m, 1); bis = new Date(y, m + 1, 0); name = MONATE[m] + ' ' + y; }
+  const frist = werktag(iso(new Date(bis.getFullYear(), bis.getMonth() + 1 + (S.firma.dauerfrist ? 1 : 0), 10)));
+  return { key, von: iso(von), bis: iso(bis), name, frist, dez: p === '12' };
+}
+
+/* Umsatzsteuer für einen Zeitraum, aufgeteilt auf die ELSTER-Kennzahlen */
+function ustva(z) {
+  const ist = S.steuer.versteuerung === 'ist';
+  const b = { 81: 0, 86: 0, 41: 0, 43: 0, 21: 0, 45: 0, 60: 0, 46: 0, 52: 0 };
+  const warn = []; let vst = 0, frei = 0, n = 0;
+  const drin = (d) => d && d >= z.von && d <= z.bis;
+  for (const r of S.rechnungen) {
+    if (!zaehlt(r) || r.ku) continue;
+    let tag = r.datum;
+    if (ist) {
+      if (r.typ === 'gutschrift') { const o = S.rechnungen.find((x) => x.id === r.stornoVon); if (!o || !o.bezahltAm) continue; }
+      else { if (!r.bezahltAm) continue; tag = r.bezahltAm; }
+    }
+    if (!drin(tag)) continue;
+    n++;
+    const s = summen(r), art = rcArt(r);
+    if (art) { b[RC[art].kz] += s.netto; continue; }
+    const teile = r.extern ? { [s.netto ? Math.round(s.ust / s.netto * 100) : 0]: s.netto } : s.proSatz;
+    for (const k in teile) {
+      if (Number(k) === 19) b[81] += teile[k];
+      else if (Number(k) === 7) b[86] += teile[k];
+      else if (teile[k]) { frei += teile[k]; warn.push(`${esc(r.nr || 'Rechnung')}: ${eur(teile[k])} mit ${k} % USt ohne Steuerfall, nicht eingerechnet. Steuerfall in der Rechnung angeben oder mit dem Steuerberater klären.`); }
+    }
+  }
+  for (const be of S.belege) {
+    if (!drin(be.datum)) continue;
+    n++;
+    if (be.rc === 'eu') b[46] += num(be.brutto);
+    else if (be.rc === 'welt') b[52] += num(be.brutto);
+    else if (!ku()) vst += num(be.vorsteuer);
+    if (!num(be.brutto)) warn.push(`Beleg ${esc(be.lieferant || 'ohne Lieferant')} vom ${dat(be.datum)} hat keinen Betrag.`);
+  }
+  const ganz = (x) => Math.trunc(r2(x));
+  const bas = {}; for (const k in b) bas[k] = ganz(b[k]);
+  const st = { 81: r2(bas[81] * 0.19), 86: r2(bas[86] * 0.07), 47: r2(bas[46] * 0.19), 53: r2(bas[52] * 0.19) };
+  const v67 = ku() ? 0 : r2(st[47] + st[53]);
+  const svz = z.dez && S.firma.turnus !== 'quartal' && S.firma.dauerfrist ? r2(num(S.steuer.svz)) : 0;
+  const ust = r2(st[81] + st[86] + st[47] + st[53]);
+  vst = r2(vst);
+  const zahl = r2(ust - vst - v67 - svz);
+  const rows = [
+    ['81', 'Umsätze zu 19 %', bas[81], `Steuer ${eur(st[81])} rechnet ELSTER selbst`, true],
+    ['86', 'Umsätze zu 7 %', bas[86], `Steuer ${eur(st[86])} rechnet ELSTER selbst`],
+    ['41', 'Warenlieferungen an Firmen in der EU (mit USt-IdNr.)', bas[41]],
+    ['43', 'Steuerfreie Ausfuhrlieferungen (außerhalb der EU)', bas[43]],
+    ['21', 'Dienstleistungen an Firmen in der EU (Reverse Charge)', bas[21]],
+    ['45', 'Übrige nicht steuerbare Umsätze (Leistung im Ausland)', bas[45]],
+    ['60', 'Umsätze, bei denen der Kunde die Steuer schuldet (§ 13b)', bas[60]],
+    ['46', 'Einkauf von Leistungen bei Firmen aus der EU ohne USt (z. B. Google, Meta)', bas[46]],
+    ['47', 'Steuer darauf, die du selbst schuldest', st[47], '', false, true],
+    ['52', 'Einkauf anderer Leistungen nach § 13b (z. B. Firmen außerhalb der EU)', bas[52]],
+    ['53', 'Steuer darauf, die du selbst schuldest', st[53], '', false, true],
+    ['66', 'Vorsteuer aus Rechnungen anderer Firmen', vst, '', true, true],
+    ['67', 'Vorsteuer aus den Einkäufen nach § 13b', v67, '', false, true],
+    ['39', 'Abzug der Sondervorauszahlung', svz, 'nur in der Dezember-Anmeldung', false, true],
+    ['83', zahl < 0 ? 'Ergebnis: Erstattung vom Finanzamt' : 'Ergebnis: an das Finanzamt zu zahlen', zahl, '', true, true]
+  ].filter((x) => x[2] || x[4]).map(([kz, t, wert, info, , cent]) => ({ kz, t, wert, info: info || '', cent: !!cent }));
+  return { z, rows, ust, vst: r2(vst + v67 + svz), zahl, n, warn, frei, nurRc: ku() && (bas[46] || bas[52]) };
+}
+const kzWert = (row) => row.cent ? row.wert.toFixed(2).replace('.', ',') : String(row.wert);
+function kzTabelle(rows) {
+  return `<table class="tab">${rows.map((x) => `<tr${x.kz === '83' ? ' style="font-weight:700"' : ''}><td style="white-space:nowrap">Kz ${x.kz}</td><td>${x.t}${x.info ? `<div class="small muted">${x.info}</div>` : ''}</td><td style="text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums">${x.cent ? eur(x.wert) : x.wert.toLocaleString('de-DE') + ' €'}</td><td style="text-align:right"><button class="chip" data-act="st-copy" data-k="${kzWert(x)}" aria-label="Wert für Kz ${x.kz} kopieren">Kopieren</button></td></tr>`).join('')}</table>`;
+}
+
+/* Zusammenfassende Meldung: EU-Geschäfte je Kunde und Quartal */
+function zm(von, bis) {
+  const m = {};
+  for (const r of S.rechnungen) {
+    const art = rcArt(r);
+    if (!zaehlt(r) || !art || !RC[art].zm || !(r.datum >= von && r.datum <= bis)) continue;
+    const id = String((r.kunde && r.kunde.ustid) || '').replace(/\s/g, '').toUpperCase();
+    const k = id + '|' + RC[art].zm;
+    m[k] = m[k] || { land: id.slice(0, 2), nr: id.slice(2), name: r.kunde.name, art: RC[art].zm, betrag: 0 };
+    m[k].betrag += summen(r).netto;
+  }
+  return Object.values(m).map((x) => Object.assign(x, { betrag: Math.trunc(r2(x.betrag)) }));
+}
+
+/* Gewinn: EÜR nach Zahlungseingang, bei Bilanz-Rechtsformen GuV-Vorschau nach Rechnungsdatum */
+function gewinn(jahr) {
+  const bilanz = BILANZ.includes(S.firma.rechtsform), j = String(jahr);
+  let ein = 0, offen = 0, nOffen = 0;
+  for (const r of S.rechnungen) {
+    if (!zaehlt(r)) continue;
+    const s = summen(r);
+    let tag = r.datum;
+    if (!bilanz) {
+      if (r.typ === 'gutschrift') { const o = S.rechnungen.find((x) => x.id === r.stornoVon); tag = o && o.bezahltAm ? r.datum : ''; }
+      else tag = r.bezahltAm || '';
+    }
+    if (tag.startsWith(j)) ein += s.netto;
+    if ((r.datum || '').startsWith(j) && r.typ !== 'gutschrift' && ['offen', 'ueberfaellig'].includes(reStatus(r).k)) { offen += s.brutto; nOffen++; }
+  }
+  const kat = {}, gross = [], ohne = [];
+  let aus = 0, bewirt = 0;
+  for (const b of S.belege) {
+    if (!(b.datum || '').startsWith(j)) continue;
+    const netto = r2(num(b.brutto) - num(b.vorsteuer));
+    if (!num(b.brutto)) ohne.push(b);
+    const k = b.kategorie || 'Ohne Kategorie';
+    kat[k] = r2((kat[k] || 0) + netto);
+    aus += netto;
+    if (k === 'Bewirtung') bewirt += netto;
+    if (netto > 800 && !['Miete', 'Versicherung', 'Fremdleistung', 'Werbung', 'Telefon und Internet', 'Wareneinkauf'].includes(k)) gross.push(b);
+  }
+  const nichtAbz = r2(bewirt * 0.3);
+  ein = r2(ein); aus = r2(aus);
+  return { bilanz, ein, aus, nichtAbz, gewinn: r2(ein - aus + nichtAbz), kat, gross, ohne, offen: r2(offen), nOffen };
+}
+
+/* Grobe Steuerschätzung. Tarif nach § 32a EStG, Grundtabelle (ledig), ohne andere Einkünfte und Abzüge */
+const EST_TARIF = {
+  2025: { g: [12096, 17443, 68480, 277825], a: 932.30, b: 176.64, c: 1015.13, d: 10911.92, e: 19246.67, soli: 19950 },
+  2026: { g: [12348, 17799, 69878, 277825], a: 914.51, b: 173.10, c: 1034.87, d: 11135.63, e: 19470.38, soli: 20350 }
+};
+function estTarif(zve, jahr) {
+  const t = EST_TARIF[Math.min(Math.max(jahr, 2025), 2026)], x = Math.floor(Math.max(0, zve));
+  let est;
+  if (x <= t.g[0]) est = 0;
+  else if (x <= t.g[1]) { const y = (x - t.g[0]) / 10000; est = (t.a * y + 1400) * y; }
+  else if (x <= t.g[2]) { const z = (x - t.g[1]) / 10000; est = (t.b * z + 2397) * z + t.c; }
+  else if (x <= t.g[3]) est = 0.42 * x - t.d;
+  else est = 0.45 * x - t.e;
+  return { est: Math.floor(est), soliGrenze: t.soli };
+}
+function schaetzung(jahr, gw) {
+  const rf = S.firma.rechtsform, g = Math.max(0, gw), z = [];
+  const hebe = num(S.steuer.hebesatz) || 400;
+  const gewerbe = rf && rf !== 'freiberufler';
+  const freibetrag = KAPITAL.includes(rf) ? 0 : 24500;
+  const mess = gewerbe ? Math.floor(Math.max(0, Math.floor(g / 100) * 100 - freibetrag) * 0.035) : 0;
+  const gewst = r2(mess * hebe / 100);
+  if (gewerbe) z.push(['Gewerbesteuer', gewst, `Hebesatz ${hebe} %${freibetrag ? ', nach Freibetrag 24.500 €' : ''}`]);
+  if (KAPITAL.includes(rf)) {
+    const kst = r2(g * 0.15);
+    z.push(['Körperschaftsteuer (15 %)', kst, '']);
+    z.push(['Solidaritätszuschlag', r2(kst * 0.055), '5,5 % der Körperschaftsteuer']);
+  } else if (['einzel', 'freiberufler', 'ek', ''].includes(rf || '')) {
+    const t = estTarif(g, jahr);
+    const anr = gewerbe ? Math.min(r2(mess * 4), gewst, t.est) : 0;
+    const est = Math.max(0, r2(t.est - anr));
+    const soli = est > t.soliGrenze ? r2(Math.min(est * 0.055, (est - t.soliGrenze) * 0.119)) : 0;
+    z.push(['Einkommensteuer', est, `ledig, ohne andere Einkünfte${anr ? `, nach Anrechnung der Gewerbesteuer (${eur(anr)})` : ''}`]);
+    if (soli) z.push(['Solidaritätszuschlag', soli, '']);
+  }
+  const summe = r2(z.reduce((a, x) => a + x[1], 0));
+  return { zeilen: z, summe, quote: g ? Math.round(summe / g * 100) : 0, personen: ['gbr', 'ohg'].includes(rf) };
+}
+
+/* Abgabefrist der Jahreserklärungen */
+function jahresFrist(j) {
+  if (S.steuer.berater) return werktag(j === 2024 ? '2026-04-30' : j === 2025 ? '2027-03-31' : iso(new Date(j + 2, 2, 0)));
+  return werktag(j === 2023 ? '2024-09-02' : `${j + 1}-07-31`);
+}
+
+/* Fristen der nächsten gut 12 Monate, dazu überfällige Voranmeldungen mit Daten */
+function fristen() {
+  const out = [], h = heute(), y0 = Number(h.slice(0, 4)), rf = S.firma.rechtsform, E = S.steuer.erledigt || {};
+  const bis = plusTage(h, 400);
+  const add = (datum, key, t, s, mitDaten) => {
+    datum = werktag(datum);
+    if (datum > bis || (datum < h && (E[key] || !mitDaten))) return;
+    out.push({ datum, key, t, s, erledigt: !!E[key] });
+  };
+  const d = (y, m, t) => `${y}-${String(m).padStart(2, '0')}-${String(t).padStart(2, '0')}`;
+  for (let n = -4; n <= 13; n++) {
+    const z = zrAus(zrRel(n));
+    if (z.bis >= h) { if (!ku()) add(z.frist, 'ustva-' + z.key, `Umsatzsteuer-Voranmeldung ${z.name}`, 'Abgeben und zahlen. Die Werte stehen im Reiter Steuern.', false); continue; }
+    const u = ustva(z);
+    if (!ku() || u.nurRc) add(z.frist, 'ustva-' + z.key, `Umsatzsteuer-Voranmeldung ${z.name}`, `${u.zahl < 0 ? 'Erstattung' : 'Zahllast'} ${eur(Math.abs(u.zahl))}. Abgeben und zahlen.`, u.n > 0);
+  }
+  if (S.rechnungen.some((r) => RC[rcArt(r)] && RC[rcArt(r)].zm)) {
+    const q0 = y0 * 4 + Math.floor((Number(h.slice(5, 7)) - 1) / 3);
+    for (let q = q0 - 2; q <= q0 + 3; q++) {
+      const y = Math.floor(q / 4), qi = q % 4;
+      const von = d(y, qi * 3 + 1, 1), ende = iso(new Date(y, qi * 3 + 3, 0));
+      const nd = new Date(y, qi * 3 + 3, 25);
+      add(iso(nd), `zm-${y}-Q${qi + 1}`, `Zusammenfassende Meldung ${qi + 1}. Quartal ${y}`, 'EU-Geschäfte an das Bundeszentralamt für Steuern melden (BZSt-Online-Portal).', zm(von, ende).length > 0);
+    }
+  }
+  for (const y of [y0, y0 + 1]) {
+    if (!ku() && S.firma.dauerfrist && S.firma.turnus !== 'quartal') add(d(y, 2, 10), 'svz-' + y, `Sondervorauszahlung Umsatzsteuer ${y}`, 'Ein Elftel der Vorjahres-Zahllast, wegen der Dauerfristverlängerung.');
+    if (num(S.steuer.vzEst)) for (const m of [3, 6, 9, 12]) add(d(y, m, 10), `vz-${y}-${m}`, `${KAPITAL.includes(rf) ? 'Körperschaftsteuer' : 'Einkommensteuer'}-Vorauszahlung ${eur(num(S.steuer.vzEst))}`, 'Laut Vorauszahlungsbescheid des Finanzamts.');
+    if (num(S.steuer.vzGew)) for (const m of [2, 5, 8, 11]) add(d(y, m, 15), `gv-${y}-${m}`, `Gewerbesteuer-Vorauszahlung ${eur(num(S.steuer.vzGew))}`, 'Laut Bescheid der Gemeinde.');
+  }
+  for (const j of [y0 - 2, y0 - 1]) {
+    const f = jahresFrist(j);
+    if (f >= h) add(f, 'jahr-' + j, `Steuererklärungen ${j} abgeben`, (rf ? RECHTSFORMEN[rf].jahr : 'Einkommensteuer, Umsatzsteuer, je nach Rechtsform Gewerbesteuer') + (S.steuer.berater ? '. Frist mit Steuerberater.' : '. Frist ohne Steuerberater.'));
+  }
+  if (KAPITAL.includes(rf) || rf === 'ohg') add(d(y0, 12, 31), 'offen-' + (y0 - 1), `Jahresabschluss ${y0 - 1} offenlegen`, 'Beim Unternehmensregister einreichen.');
+  return out.sort((a, b) => a.datum.localeCompare(b.datum));
+}
+
+function vSteuern() {
+  const rf = S.firma.rechtsform, y0 = new Date().getFullYear(), jahr = stJahr || y0;
+  const fr = fristen().filter((f) => !f.erledigt);
+  const next = fr[0];
+  const keys = []; for (let n = S.firma.turnus === 'quartal' ? -5 : -14; n <= 0; n++) keys.push(zrRel(n));
+  const zk = keys.includes(stZr) ? stZr : ustZeitraum().key;
+  const z = zrAus(zk), u = ustva(z), erl = S.steuer.erledigt['ustva-' + zk];
+  const qi = Math.floor((Number(z.bis.slice(5, 7)) - 1) / 3), qy = z.bis.slice(0, 4);
+  const zmL = zm(`${qy}-${String(qi * 3 + 1).padStart(2, '0')}-01`, iso(new Date(Number(qy), qi * 3 + 3, 0)));
+  const gw = gewinn(jahr), sch = schaetzung(jahr, gw.gewinn);
+  const uj = ustva({ von: jahr + '-01-01', bis: jahr + '-12-31', dez: false });
+  const tage = next ? tageBis(next.datum) : 0;
+  const fz = (f) => { const t = tageBis(f.datum); return t < 0 ? 'bad' : t <= 14 ? 'warn' : 'grey'; };
+  const fLi = (f) => `<li><span class="dot ${f.erledigt ? 'good' : fz(f)}"></span><div class="grow"><div><b>${dat(f.datum)}</b> ${f.t}${f.erledigt ? ' <span class="pill good">erledigt</span>' : ''}</div><div class="small muted">${f.s}</div></div><button data-act="st-done" data-k="${f.key}">${f.erledigt ? 'Wieder offen' : 'Erledigt'}</button></li>`;
+  const ustCard = !ku() || u.nurRc;
+  return `
+  <h1>Steuern</h1>
+  <div class="status"><div class="big">${next ? `<span class="pill ${fz(next)}">${tage < 0 ? 'Überfällig' : tage <= 14 ? 'Bald fällig' : 'Nächste Frist'}</span> ${next.t}` : '<span class="pill good">Gut</span> Keine offenen Fristen'}</div>
+  <p class="small muted" style="margin-top:6px">${next ? `Bis ${dat(next.datum)}${tage < 0 ? `, seit ${-tage} Tagen vorbei` : `, in ${tage} Tagen`}. ${next.s}` : 'Alle bekannten Fristen sind erledigt.'}</p></div>
+
+  ${ustCard ? `<div class="card">
+    <h2>Umsatzsteuer-Voranmeldung</h2>
+    <label>Zeitraum<select id="stZr">${keys.slice().reverse().map((k) => `<option value="${k}"${k === zk ? ' selected' : ''}>${zrAus(k).name}${S.steuer.erledigt['ustva-' + k] ? ' ✓' : ''}</option>`).join('')}</select></label>
+    <p style="margin-top:10px">${u.zahl >= 0 ? `<b>${eur(u.zahl)}</b> an das Finanzamt` : `<b>${eur(-u.zahl)}</b> Erstattung vom Finanzamt`}, Abgabe und Zahlung bis <b>${dat(z.frist)}</b>. ${erl ? `<span class="pill good">abgegeben am ${dat(erl)}</span>` : ''}</p>
+    ${u.warn.length ? `<ul class="checks">${u.warn.map((w) => `<li class="miss">${w}</li>`).join('')}</ul>` : ''}
+    <h3>Diese Werte trägst du in ELSTER ein</h3>
+    ${kzTabelle(u.rows)}
+    <div class="btns"><button class="primary" data-act="st-done" data-k="ustva-${zk}">${erl ? 'Doch nicht abgegeben' : 'Als abgegeben markieren'}</button><button data-act="st-csv" data-k="${zk}">Als Datei für den Steuerberater</button><button data-act="st-print" data-k="${zk}">Drucken / PDF</button></div>
+    <details><summary>So gibst du sie in ELSTER ab</summary><ol class="small" style="margin:8px 0 0;padding-left:20px">
+      <li>Bei <b>Mein ELSTER</b> anmelden (elster.de).</li>
+      <li>„Formulare &amp; Leistungen“, dann „Alle Formulare“, „Unternehmen“, „Umsatzsteuer-Voranmeldung ${z.von.slice(0, 4)}“.</li>
+      <li>Zeitraum „${esc(z.name)}“ wählen, dann die Kennzahlen oben eintragen. Mit „Kopieren“ landet der Wert in der Zwischenablage.</li>
+      <li>Prüfen lassen, die Zahl bei Kz 83 vergleichen und absenden. Danach hier „Als abgegeben markieren“.</li></ol>
+      <p class="small muted" style="margin-top:6px">ELSTER nimmt im Browser keine Dateien entgegen. Die direkte Übertragung aus der App braucht einen Server und eine Zulassung als Software-Hersteller und kommt später.</p></details>
+    <details><summary>So rechnet die App</summary><p class="small muted" style="margin-top:8px">${u.n} Rechnungen und Belege im Zeitraum ${dat(z.von)} bis ${dat(z.bis)}. ${S.steuer.versteuerung === 'ist' ? 'Ist-Versteuerung: Rechnungen zählen im Monat der Zahlung.' : 'Soll-Versteuerung: Rechnungen zählen nach Rechnungsdatum.'} Beträge ohne Cent wie in ELSTER, die Steuer darauf mit Cent. Vorsteuer zählt nach Belegdatum. Kleine Abweichungen zur Summe deiner Rechnungen kommen vom Abschneiden der Cent.</p></details>
+  </div>` : `<div class="card"><h2>Umsatzsteuer-Voranmeldung</h2><p>Als Kleinunternehmer gibst du keine Voranmeldung ab, nur eine Umsatzsteuer-Jahreserklärung.</p><p class="small muted">Ausnahme: Kaufst du Leistungen bei Firmen im Ausland ohne Umsatzsteuer ein (z. B. Werbung bei Google oder Meta), schuldest du die Steuer selbst. Markiere solche Belege, dann erscheint hier die Anmeldung.</p></div>`}
+
+  ${zmL.length ? `<div class="card"><h2>Zusammenfassende Meldung ${qi + 1}. Quartal ${qy}</h2>
+    <p class="small muted">Meldest du bis zum 25. nach Quartalsende im BZSt-Online-Portal. Bei Warenlieferungen über 50.000 € im Quartal monatlich.</p>
+    <table class="tab"><tr><th>Kunde</th><th>USt-IdNr.</th><th>Art</th><th style="text-align:right">Betrag</th></tr>${zmL.map((x) => `<tr><td>${esc(x.name)}</td><td>${x.land && x.nr ? esc(x.land + x.nr) : '<span class="pill bad">fehlt</span>'}</td><td>${x.art === 'S' ? 'Dienstleistung' : 'Lieferung'}</td><td style="text-align:right">${x.betrag.toLocaleString('de-DE')} €</td></tr>`).join('')}</table>
+    <div class="btns"><button data-act="st-zm" data-k="${qy}-${qi}">Liste als Datei</button></div></div>` : ''}
+
+  <div class="card">
+    <h2>${gw.bilanz ? 'Gewinn-Vorschau (GuV)' : 'Einnahmen-Überschuss-Rechnung'} ${jahr}</h2>
+    <div class="filters" role="group">${[y0, y0 - 1, y0 - 2].map((y) => `<button class="chip" data-act="st-jahr" data-k="${y}" aria-pressed="${y === jahr}">${y}</button>`).join('')}</div>
+    <table class="tab"><tr><td>Einnahmen (netto)</td><td style="text-align:right">${eur(gw.ein)}</td></tr>
+      <tr><td>minus Ausgaben (netto)</td><td style="text-align:right">− ${eur(gw.aus)}</td></tr>
+      ${gw.nichtAbz ? `<tr><td>plus nicht abziehbarer Teil der Bewirtung (30 %)</td><td style="text-align:right">${eur(gw.nichtAbz)}</td></tr>` : ''}
+      <tr><td><b>Gewinn</b></td><td style="text-align:right"><b>${eur(gw.gewinn)}</b></td></tr></table>
+    <p class="small muted" style="margin-top:6px">${gw.bilanz ? 'Nach Rechnungsdatum gerechnet. Die echte Bilanz mit Abschreibungen, Rückstellungen und Kapitalkonten macht der Steuerberater.' : 'Einnahmen zählen, wenn das Geld da ist (Zuflussprinzip). Ausgaben nach Belegdatum.'} Umsatzsteuer und Vorsteuer sind herausgerechnet; in der Anlage EÜR stehen sie als eigene Zeilen und heben sich mit den Zahlungen ans Finanzamt auf.</p>
+    ${gw.nOffen || gw.gross.length || gw.ohne.length ? `<ul class="checks">
+      ${gw.nOffen ? `<li class="miss">${gw.nOffen} Rechnung${gw.nOffen > 1 ? 'en' : ''} über ${eur(gw.offen)} noch offen${gw.bilanz ? ', stehen als Forderung in der Bilanz' : ', zählen erst im Jahr der Zahlung'}.</li>` : ''}
+      ${gw.gross.length ? `<li class="miss">${gw.gross.length} Beleg${gw.gross.length > 1 ? 'e' : ''} über 800 € netto (${gw.gross.slice(0, 3).map((b) => esc(b.lieferant || 'ohne Name')).join(', ')}). Geräte und andere Anschaffungen werden über mehrere Jahre abgeschrieben, das prüft der Steuerberater.</li>` : ''}
+      ${gw.ohne.length ? `<li class="miss">${gw.ohne.length} Beleg${gw.ohne.length > 1 ? 'e' : ''} ohne Betrag fehlen in der Rechnung.</li>` : ''}</ul>` : ''}
+    ${Object.keys(gw.kat).length ? `<details><summary>Ausgaben nach Kategorie</summary><table class="tab">${Object.entries(gw.kat).sort((a, b) => b[1] - a[1]).map(([k, v]) => `<tr><td>${esc(k)}</td><td style="text-align:right">${eur(v)}</td></tr>`).join('')}</table></details>` : ''}
+  </div>
+
+  <div class="card">
+    <h2>Wie viel solltest du für ${jahr} zurücklegen?</h2>
+    ${!rf ? '<p>Trag im Reiter <b>Firma</b> deine Rechtsform ein, dann rechnet die App hier.</p>' : sch.personen ? `<p>Bei ${esc(RECHTSFORMEN[rf].label)} zahlt jeder Gesellschafter seine Einkommensteuer selbst auf seinen Gewinnanteil.${sch.zeilen.length ? ` Die Gesellschaft zahlt etwa <b>${eur(sch.summe)}</b> Gewerbesteuer, falls sie gewerblich ist.` : ''}</p>` : `
+    <p><b>Etwa ${eur(sch.summe)}</b>${sch.quote ? `, rund ${sch.quote} % vom Gewinn` : ''}. ${jahr === y0 ? 'Gerechnet mit dem Gewinn bis heute, das Jahr läuft noch.' : ''}</p>
+    <table class="tab">${sch.zeilen.map(([t, v, s]) => `<tr><td>${t}${s ? `<div class="small muted">${s}</div>` : ''}</td><td style="text-align:right">${eur(v)}</td></tr>`).join('')}</table>`}
+    <p class="small muted" style="margin-top:6px">Grobe Schätzung ohne Kirchensteuer, Krankenversicherung, Freibeträge und andere Einkünfte. Bereits gezahlte Vorauszahlungen sind nicht abgezogen.</p>
+    <details><summary>Werte für die Umsatzsteuer-Jahreserklärung ${jahr}</summary>${kzTabelle(uj.rows.filter((x) => !['39', '83'].includes(x.kz)))}<p class="small muted" style="margin-top:6px">Summe aller Rechnungen und Belege des Jahres, gleiche Regeln wie bei der Voranmeldung. In der Jahreserklärung heißen einige Felder anders.</p></details>
+    ${rf ? `<p class="small" style="margin-top:8px"><b>Abzugeben für ${jahr}:</b> ${RECHTSFORMEN[rf].jahr}. Frist ${dat(jahresFrist(jahr))}${S.steuer.berater ? ' (mit Steuerberater)' : ''}.</p>` : ''}
+  </div>
+
+  <div class="card">
+    <h2>Fristen</h2>
+    ${fr.length ? `<ul class="todo">${fr.slice(0, 6).map(fLi).join('')}</ul>${fr.length > 6 ? `<details><summary>${fr.length - 6} weitere</summary><ul class="todo" style="margin-top:8px">${fr.slice(6).map(fLi).join('')}</ul></details>` : ''}` : '<p class="muted">Keine offenen Fristen.</p>'}
+    <div class="btns"><button data-act="st-ics">In meinen Kalender übernehmen</button></div>
+    <p class="small muted" style="margin-top:6px">Die Kalender-Datei erinnert dich drei Tage vor jeder Frist. Fällt eine Frist auf ein Wochenende oder einen bundesweiten Feiertag, gilt der nächste Werktag.</p>
+  </div>
+
+  <details class="card"><summary>Einstellungen für Steuern</summary>
+    <form id="stForm" class="grid2" style="margin-top:10px">
+      <label>Versteuerung<select name="versteuerung"><option value="soll"${S.steuer.versteuerung !== 'ist' ? ' selected' : ''}>Soll (nach Rechnungsdatum)</option><option value="ist"${S.steuer.versteuerung === 'ist' ? ' selected' : ''}>Ist (nach Zahlungseingang)</option></select></label>
+      <label>Gewerbesteuer-Hebesatz deiner Gemeinde %<input name="hebesatz" inputmode="numeric" value="${esc(S.steuer.hebesatz)}"></label>
+      <label>Sondervorauszahlung € (bei Dauerfristverlängerung)<input name="svz" inputmode="decimal" value="${esc(S.steuer.svz ? String(S.steuer.svz).replace('.', ',') : '')}" placeholder="0,00"></label>
+      <label>${KAPITAL.includes(rf) ? 'Körperschaftsteuer' : 'Einkommensteuer'}-Vorauszahlung je Quartal €<input name="vzEst" inputmode="decimal" value="${esc(S.steuer.vzEst ? String(S.steuer.vzEst).replace('.', ',') : '')}" placeholder="laut Bescheid"></label>
+      <label>Gewerbesteuer-Vorauszahlung je Quartal €<input name="vzGew" inputmode="decimal" value="${esc(S.steuer.vzGew ? String(S.steuer.vzGew).replace('.', ',') : '')}" placeholder="laut Bescheid"></label>
+      <p class="small muted full" style="margin:0">Vorauszahlungen nur eintragen, wenn ein Bescheid sie festsetzt. Dann erscheinen sie bei den Fristen.</p>
+      <label class="check" style="align-self:end"><input type="checkbox" name="berater"${S.steuer.berater ? ' checked' : ''}> Ein Steuerberater macht meine Jahreserklärungen</label>
+    </form>
+    <p class="small muted" style="margin-top:6px">Turnus der Voranmeldung, Dauerfristverlängerung und Rechtsform stellst du im Reiter Firma ein. Alles hier ist eine Hilfe zum Ausfüllen und ersetzt keine Steuerberatung.</p>
+  </details>`;
+}
+async function saveSteuer() {
+  const f = $('#stForm'); if (!f) return;
+  S.steuer.versteuerung = f.elements.versteuerung.value;
+  S.steuer.hebesatz = num(f.elements.hebesatz.value) || 400;
+  for (const k of ['svz', 'vzEst', 'vzGew']) S.steuer[k] = num(f.elements[k].value);
+  S.steuer.berater = f.elements.berater.checked;
+  await save(); render();
+  const d = $('#stForm'); if (d) d.closest('details').open = true;
+  toast('Gespeichert');
+}
+const icsEsc = (s) => String(s).replace(/<[^>]+>/g, '').replace(/[\\;,]/g, (c) => '\\' + c).replace(/\n/g, '\\n');
+function stIcs() {
+  const stamp = new Date().toISOString().replace(/[-:]/g, '').slice(0, 15) + 'Z';
+  const L = ['BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//Steuer-Cockpit//DE', 'CALSCALE:GREGORIAN', 'X-WR-CALNAME:Steuerfristen'];
+  for (const f of fristen().filter((x) => !x.erledigt && x.datum >= heute())) {
+    L.push('BEGIN:VEVENT', `UID:${f.key}@steuer-cockpit`, 'DTSTAMP:' + stamp, 'DTSTART;VALUE=DATE:' + f.datum.replace(/-/g, ''), 'DTEND;VALUE=DATE:' + plusTage(f.datum, 1).replace(/-/g, ''),
+      'SUMMARY:' + icsEsc(f.t), 'DESCRIPTION:' + icsEsc(f.s), 'BEGIN:VALARM', 'ACTION:DISPLAY', 'DESCRIPTION:' + icsEsc(f.t), 'TRIGGER:-P3D', 'END:VALARM', 'END:VEVENT');
+  }
+  L.push('END:VCALENDAR');
+  download('steuerfristen.ics', L.join('\r\n') + '\r\n', 'text/calendar');
+  toast('Kalender-Datei gespeichert. Öffnen, um die Termine zu übernehmen.');
+}
+function stCsv(key) {
+  const u = ustva(zrAus(key)), f = S.firma;
+  const q = (s) => '"' + String(s).replace(/<[^>]+>/g, '').replace(/"/g, '""') + '"';
+  const L = [['Umsatzsteuer-Voranmeldung', u.z.name], ['Firma', f.name], ['Steuernummer', f.steuernr], ['Versteuerung', S.steuer.versteuerung === 'ist' ? 'Ist' : 'Soll'], [], ['Kennzahl', 'Bezeichnung', 'Wert']]
+    .concat(u.rows.map((x) => ['Kz ' + x.kz, x.t, kzWert(x)]));
+  download(`UStVA-${key}.csv`, '﻿' + L.map((r) => r.map(q).join(';')).join('\r\n'), 'text/csv');
+}
+function stZm(k) {
+  const [y, qi] = k.split('-').map(Number);
+  const L = zm(`${y}-${String(qi * 3 + 1).padStart(2, '0')}-01`, iso(new Date(y, qi * 3 + 3, 0)));
+  const rows = [['Länderkennzeichen', 'USt-IdNr.', 'Betrag (EUR)', 'Art der Leistung', 'Kunde']].concat(L.map((x) => [x.land, x.nr, x.betrag, x.art, x.name]));
+  download(`ZM-${y}-Q${qi + 1}.csv`, '﻿' + rows.map((r) => r.map((v) => '"' + String(v).replace(/"/g, '""') + '"').join(';')).join('\r\n'), 'text/csv');
+}
+function stPrint(key) {
+  const u = ustva(zrAus(key)), f = S.firma;
+  $('#druck').innerHTML = `<h1>Umsatzsteuer-Voranmeldung ${esc(u.z.name)}</h1>
+    <p>${esc(f.name)}${f.steuernr ? ' · Steuernummer ' + esc(f.steuernr) : ''}<br>Zeitraum ${dat(u.z.von)} bis ${dat(u.z.bis)}, Frist ${dat(u.z.frist)}, ${S.steuer.versteuerung === 'ist' ? 'Ist' : 'Soll'}-Versteuerung</p>
+    <table class="p"><tr><th>Kennzahl</th><th>Bezeichnung</th><th class="r">Wert</th></tr>${u.rows.map((x) => `<tr><td>Kz ${x.kz}</td><td>${x.t}</td><td class="r">${x.cent ? eur(x.wert) : x.wert.toLocaleString('de-DE') + ' €'}</td></tr>`).join('')}</table>
+    <p style="font-size:8.5pt">Erstellt mit dem Steuer-Cockpit am ${dat(heute())}. Ausfüllhilfe, keine Steuerberatung.</p>`;
+  const alt = document.title; document.title = 'UStVA-' + key;
+  window.print();
+  setTimeout(() => { document.title = alt; }, 500);
+}
+
+/* ---------- Navigation ---------- */
+const ICONS = {
+  start: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 11l9-7 9 7v9a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z"/></svg>',
+  angebote: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3H6a1 1 0 0 0-1 1v16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V8z"/><path d="M14 3v5h5M9 13h6M9 17h4"/></svg>',
+  rechnungen: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3h12v18l-3-2-3 2-3-2-3 2z"/><path d="M9 8h6M9 12h6M9 16h3"/></svg>',
+  belege: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="6" width="18" height="14" rx="2"/><circle cx="12" cy="13" r="3.5"/><path d="M8 6l1.5-2h5L16 6"/></svg>',
+  bank: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 10l9-6 9 6M5 10v8M9.5 10v8M14.5 10v8M19 10v8M3 21h18"/></svg>',
+  steuern: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="3" width="16" height="18" rx="2"/><path d="M8 7h8M9 17l6-6"/><circle cx="9.5" cy="11.5" r=".8"/><circle cx="14.5" cy="16.5" r=".8"/></svg>',
+  firma: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 21V5a1 1 0 0 1 1-1h9a1 1 0 0 1 1 1v16M15 9h4a1 1 0 0 1 1 1v11M3 21h18M8 8h3M8 12h3M8 16h3"/></svg>'
+};
+const TABS = [['start', 'Übersicht'], ['angebote', 'Angebote'], ['rechnungen', 'Rechnungen'], ['belege', 'Belege'], ['bank', 'Bank'], ['steuern', 'Steuern'], ['firma', 'Firma']];
+
+function render() {
+  $('#tabs').innerHTML = TABS.map(([k, t]) => `<button data-act="tab" data-k="${k}"${k === tab ? ' aria-current="page"' : ''}>${ICONS[k]}<span>${t}</span></button>`).join('');
+  $('#firmname').textContent = S.firma.name || '';
+  const v = { start: vStart, angebote: vAngebote, rechnungen: vRechnungen, belege: vBelege, bank: vBank, steuern: vSteuern, firma: vFirma }[tab];
+  $('#app').innerHTML = v();
+}
+
+/* ---------- Übersicht ---------- */
+function vStart() {
+  const jahr = String(new Date().getFullYear());
+  const re = S.rechnungen.filter(zaehlt);
+  const offen = S.rechnungen.filter((r) => r.typ !== 'gutschrift' && ['offen', 'ueberfaellig'].includes(reStatus(r).k));
+  const ueber = offen.filter((r) => reStatus(r).k === 'ueberfaellig');
+  const offenSum = offen.reduce((a, r) => a + summen(r).brutto, 0);
+  const umsatzJahr = re.filter((r) => (r.datum || '').startsWith(jahr)).reduce((a, r) => a + summen(r).netto, 0);
+  const angOffen = S.angebote.filter((a) => anStatus(a).k === 'offen');
+  const angSum = angOffen.reduce((a, x) => a + summen(x).netto, 0);
+  const z = ustZeitraum();
+  const todos = [];
+
+  if (!S.firma.name || !S.firma.rechtsform) todos.push({ c: 'warn', t: 'Firmendaten und Rechtsform eintragen', s: 'Ohne sie fehlen Pflichtangaben auf Rechnungen.', act: 'tab', k: 'firma', b: 'Jetzt eintragen' });
+  for (const r of ueber.filter(mahnenFaellig).slice(0, 5)) todos.push({ c: 'bad', t: `${esc(r.kunde.name || 'Kunde')} zahlt ${eur(summen(r).brutto)} nicht`, s: `Rechnung ${esc(r.nr)}, fällig seit ${dat(r.faellig)}.${mahnStufe(r) ? ` ${MAHN[mahnStufe(r)].t} vom ${dat(letzteMahnung(r).datum)} ist abgelaufen.` : ''} Zahlung prüfen, dann ${MAHN[mahnStufe(r) + 1].t} schicken.`, act: 'mahnen', id: r.id, b: mahnStufe(r) ? 'Mahnen' : 'Erinnern' });
+  for (const r of ueber.filter((x) => !mahnenFaellig(x) && mahnStufe(x) && tageBis(letzteMahnung(x).frist) >= 0).slice(0, 3)) todos.push({ c: 'warn', t: `Warten auf Zahlung von ${esc(r.kunde.name || 'Kunde')}`, s: `${MAHN[mahnStufe(r)].t} zu ${esc(r.nr)} läuft bis ${dat(letzteMahnung(r).frist)}. Danach erinnert dich die App an den nächsten Schritt.`, act: 'open-re', id: r.id, b: 'Öffnen' });
+  for (const r of ueber.filter((x) => mahnStufe(x) >= 3 && tageBis(letzteMahnung(x).frist) < 0).slice(0, 3)) todos.push({ c: 'bad', t: `${esc(r.kunde.name || 'Kunde')} zahlt trotz letzter Mahnung nicht`, s: `Rechnung ${esc(r.nr)}, ${eur(summen(r).brutto)}. Mahnbescheid oder Inkasso prüfen.`, act: 'open-re', id: r.id, b: 'Öffnen' });
+  if (S.firma.name) for (const f of fristen().filter((x) => !x.erledigt && tageBis(x.datum) <= 10)) todos.push({ c: tageBis(f.datum) < 0 ? 'bad' : 'warn', t: `${f.t} bis ${dat(f.datum)}`, s: f.s, act: 'tab', k: 'steuern', b: 'Ansehen' });
+  for (const a of angOffen.filter((a) => a.gueltigBis && tageBis(a.gueltigBis) <= 5).slice(0, 3)) todos.push({ c: 'warn', t: `Angebot an ${esc(a.kunde.name || 'Kunde')} läuft in ${tageBis(a.gueltigBis)} Tagen ab`, s: `${esc(a.nr)}, ${eur(summen(a).netto)} netto. Nachfassen?`, act: 'open-an', id: a.id, b: 'Öffnen' });
+  const entw = S.rechnungen.filter((r) => r.status === 'entwurf');
+  if (entw.length) todos.push({ c: 'warn', t: `${entw.length} Rechnungsentwurf${entw.length > 1 ? 'e' : ''} noch nicht gestellt`, s: 'Erst nach „Rechnung stellen“ bekommt sie eine Nummer und zählt zum Umsatz.', act: 'tab', k: 'rechnungen', b: 'Ansehen' });
+  const beFehlt = S.belege.filter(belegFehlt);
+  if (beFehlt.length) todos.push({ c: 'warn', t: `${beFehlt.length} Beleg${beFehlt.length > 1 ? 'e' : ''} unvollständig`, s: 'Betrag oder Kategorie fehlen. Sonst fehlen Ausgaben und Vorsteuer in der Rechnung.', act: 'be-ergaenzen', b: 'Ergänzen' });
+  const hatDaten = S.rechnungen.length + S.angebote.length + S.belege.length > 0;
+  if (hatDaten && (!S.letzteSicherung || tageBis(S.letzteSicherung) < -14)) todos.push({ c: 'warn', t: 'Sicherung herunterladen', s: S.letzteSicherung ? `Letzte Sicherung am ${dat(S.letzteSicherung)}.` : 'Deine Daten liegen nur in diesem Browser. Eine Sicherung schützt vor Verlust.', act: 'backup', b: 'Sichern' });
+  if (ku() && umsatzJahr > KU_GRENZE * 0.8) todos.push({ c: umsatzJahr > KU_GRENZE ? 'bad' : 'warn', t: 'Kleinunternehmer-Grenze im Blick behalten', s: `Umsatz ${jahr}: ${eur(umsatzJahr)} von ${eur(KU_GRENZE)}. Darüber gilt die Regelung ab sofort nicht mehr.` });
+
+  const ampel = ueber.length ? { c: 'bad', t: `${ueber.length} Rechnung${ueber.length > 1 ? 'en' : ''} überfällig` } : todos.length ? { c: 'warn', t: `${todos.length} Sache${todos.length > 1 ? 'n' : ''} zu erledigen` } : { c: 'good', t: 'Alles erledigt' };
+
+  return `
+  <h1>So steht es</h1>
+  <div class="status">
+    <div class="big"><span class="pill ${ampel.c}">${ampel.c === 'good' ? 'Gut' : ampel.c === 'bad' ? 'Achtung' : 'Zu tun'}</span> ${ampel.t}</div>
+    <p class="muted small" style="margin-top:6px">${offen.length ? `Kunden schulden dir ${eur(offenSum)} aus ${offen.length} offenen Rechnung${offen.length > 1 ? 'en' : ''}.` : 'Keine offenen Rechnungen.'} Stand ${dat(heute())}.</p>
+  </div>
+  <div class="card">
+    <h2>Das musst du tun</h2>
+    ${todos.length ? `<ul class="todo">${todos.map((t) => `<li><span class="dot ${t.c}"></span><div class="grow"><div><b>${t.t}</b></div><div class="small muted">${t.s}</div></div>${t.act ? `<button data-act="${t.act}" data-k="${t.k || ''}" data-id="${t.id || ''}">${t.b}</button>` : ''}</li>`).join('')}</ul>` : '<p class="muted">Nichts zu tun. Neue Angebote, Rechnungen und Belege legst du über den Plus-Knopf an.</p>'}
+  </div>
+  <div class="tiles">
+    <div class="tile"><div class="q">Was ist noch offen?</div><div class="v">${eur(offenSum)}</div><div class="e">${offen.length} Rechnung${offen.length === 1 ? '' : 'en'}, davon ${ueber.length} überfällig</div></div>
+    <div class="tile"><div class="q">Umsatz ${jahr}</div><div class="v">${eur(umsatzJahr)}</div><div class="e">netto, aus gestellten Rechnungen${ku() ? `; Grenze ${eur(KU_GRENZE)}` : ''}</div></div>
+    <div class="tile"><div class="q">Offene Angebote</div><div class="v">${eur(angSum)}</div><div class="e">netto, ${angOffen.length} Angebot${angOffen.length === 1 ? '' : 'e'} warten auf Antwort</div></div>
+    <div class="tile"><div class="q">${ku() ? 'Umsatzsteuer' : 'Umsatzsteuer ' + esc(z.name)}</div><div class="v">${ku() ? '0,00 €' : eur(z.zahl)}</div><div class="e">${ku() ? 'Kleinunternehmer: keine Voranmeldung' : `${z.zahl < 0 ? 'Erstattung' : 'zu zahlen'}, Frist ${dat(z.frist)} (Schätzung)`}</div></div>
+  </div>
+  ${ku() ? '' : `<div class="card">
+    <h2>Wie viel Umsatzsteuer fällt für ${esc(z.name)} an?</h2>
+    <p>${z.zahl >= 0 ? `Voraussichtlich <b>${eur(z.zahl)}</b> ans Finanzamt` : `Voraussichtlich <b>${eur(-z.zahl)}</b> Erstattung vom Finanzamt`}, Abgabe und Zahlung bis <b>${dat(z.frist)}</b> (in ${tageBis(z.frist)} Tagen).</p>
+    <details><summary>So ist die Zahl entstanden</summary>
+      <table class="tab"><tr><td>Umsatzsteuer</td><td style="text-align:right">${eur(z.ust)}</td></tr>
+      <tr><td>minus Vorsteuer${S.firma.dauerfrist && S.firma.turnus !== 'quartal' && z.dez ? ' und Sondervorauszahlung' : ''}</td><td style="text-align:right">− ${eur(z.vst)}</td></tr>
+      <tr><td><b>Ergebnis</b></td><td style="text-align:right"><b>${eur(z.zahl)}</b></td></tr></table>
+      <p class="small muted" style="margin-top:6px">Zeitraum ${dat(z.von)} bis ${dat(z.bis)}. ${S.steuer.versteuerung === 'ist' ? 'Gerechnet nach Zahlungseingang (Ist-Versteuerung).' : 'Gerechnet nach Rechnungsdatum (Soll-Versteuerung).'}${S.firma.dauerfrist ? ' Mit Dauerfristverlängerung (+1 Monat).' : ''} Die Werte zum Eintragen in ELSTER stehen im Reiter <a href="#" data-act="tab" data-k="steuern">Steuern</a>.</p>
+    </details>
+  </div>`}
+  <details class="card"><summary>Was kann die App schon, was kommt noch?</summary>
+    <p class="small" style="margin-top:8px"><b>Schon da:</b> Angebote und Rechnungen schreiben, als PDF drucken, als E-Rechnung (XRechnung) speichern, Angebot mit einem Tipp in eine Rechnung umwandeln, Storno per Stornorechnung, Belege und alte Rechnungen hochladen, Kontoauszüge (CSV) einlesen und Zahlungen Rechnungen zuordnen, Umsatzsteuer-Voranmeldung mit ELSTER-Kennzahlen, Zusammenfassende Meldung, EÜR bzw. Gewinn-Vorschau, Steuerschätzung, Fristen mit Kalender-Erinnerung, Sicherung.</p>
+    <p class="small"><b>Kommt noch:</b> Login und Speicherung auf einem Server, Texterkennung für Belege, direkte Qonto-Verbindung, Buchungen nach SKR03/SKR04, direkte Abgabe über ELSTER, vollständige Jahreserklärungen.</p>
+    <p class="small muted">Deine Daten liegen nur in diesem Browser auf diesem Gerät. Andere Geräte sehen sie nicht. Lade regelmäßig eine Sicherung herunter. Die Ablage hier ist noch keine GoBD-konforme Archivierung.</p>
+  </details>`;
+}
+
+/* ---------- Listen ---------- */
+function chips(name, opts) {
+  const cur = filter[name] || opts[0][0];
+  return `<div class="filters" role="group">${opts.map(([k, t]) => `<button class="chip" data-act="filter" data-f="${name}" data-k="${k}" aria-pressed="${k === cur}">${t}</button>`).join('')}</div>`;
+}
+function vAngebote() {
+  const f = filter.an || 'offen';
+  const all = S.angebote.slice().sort((a, b) => (b.datum || '').localeCompare(a.datum || '') || b.nr.localeCompare(a.nr));
+  const list = all.filter((a) => f === 'alle' || (f === 'offen' ? anStatus(a).k === 'offen' : anStatus(a).k !== 'offen'));
+  const offen = all.filter((a) => anStatus(a).k === 'offen');
+  return `
+  <h1>Angebote</h1>
+  <div class="status"><div class="big">${offen.length ? `${offen.length} offen über ${eur(offen.reduce((s, a) => s + summen(a).netto, 0))} netto` : 'Kein offenes Angebot'}</div>
+  <p class="small muted" style="margin-top:4px">Angenommene Angebote wandelst du mit einem Tipp in eine Rechnung um.</p></div>
+  <div class="card">
+    ${chips('an', [['offen', 'Offen'], ['erledigt', 'Erledigt'], ['alle', 'Alle']])}
+    ${list.length ? `<ul class="list">${list.map((a) => { const st = anStatus(a); return `<li><button class="item" data-act="open-an" data-id="${a.id}"><div class="grow"><div class="t">${esc(a.kunde.name || 'Ohne Kunde')}</div><div class="s">${esc(a.nr)} · ${dat(a.datum)}</div></div><div><div class="amt">${eur(summen(a).netto)}</div><div style="text-align:right"><span class="pill ${st.c}">${st.t}</span></div></div></button></li>`; }).join('')}</ul>`
+      : `<div class="empty">${S.angebote.length ? 'In dieser Ansicht ist nichts.' : 'Noch kein Angebot.'}<div class="btns" style="justify-content:center"><button class="primary" data-act="new-an">Angebot erstellen</button></div></div>`}
+  </div>`;
+}
+function vRechnungen() {
+  const f = filter.re || 'offen';
+  const all = S.rechnungen.slice().sort((a, b) => (b.datum || '9').localeCompare(a.datum || '9') || String(b.nr).localeCompare(String(a.nr)));
+  const test = { offen: (r) => ['offen', 'ueberfaellig', 'entwurf'].includes(reStatus(r).k), bezahlt: (r) => reStatus(r).k === 'bezahlt', alle: () => true }[f];
+  const list = all.filter(test);
+  const offen = all.filter((r) => ['offen', 'ueberfaellig'].includes(reStatus(r).k));
+  const ueber = offen.filter((r) => reStatus(r).k === 'ueberfaellig');
+  return `
+  <h1>Rechnungen</h1>
+  <div class="status"><div class="big">${offen.length ? `${eur(offen.reduce((s, r) => s + summen(r).brutto, 0))} offen` : 'Alle Rechnungen bezahlt'}</div>
+  <p class="small muted" style="margin-top:4px">${offen.length ? `${offen.length} Rechnung${offen.length > 1 ? 'en' : ''} offen${ueber.length ? `, davon <b style="color:var(--bad)">${ueber.length} überfällig</b>` : ', keine überfällig'}.` : 'Neue Rechnungen legst du über den Plus-Knopf an.'}</p>
+  ${ueber.length ? `<table class="tab" style="margin-top:8px">${[['Noch nicht fällig', (r) => reStatus(r).k === 'offen'], ['Bis 30 Tage überfällig', (r) => reStatus(r).k === 'ueberfaellig' && verzugTage(r) <= 30], ['31 bis 60 Tage', (r) => verzugTage(r) > 30 && verzugTage(r) <= 60 && reStatus(r).k === 'ueberfaellig'], ['Über 60 Tage', (r) => verzugTage(r) > 60 && reStatus(r).k === 'ueberfaellig']].map(([t, fn]) => { const l = offen.filter(fn); return l.length ? `<tr><td>${t}</td><td>${l.length}</td><td style="text-align:right">${eur(l.reduce((a, x) => a + summen(x).brutto, 0))}</td></tr>` : ''; }).join('')}</table>` : ''}</div>
+  <div class="card">
+    ${chips('re', [['offen', 'Offen'], ['bezahlt', 'Bezahlt'], ['alle', 'Alle']])}
+    ${list.length ? `<ul class="list">${list.map((r) => { const st = reStatus(r); return `<li><button class="item" data-act="open-re" data-id="${r.id}"><div class="grow"><div class="t">${esc(r.kunde.name || 'Ohne Kunde')}</div><div class="s">${esc(r.nr || 'ohne Nummer')} · ${dat(r.datum)}${r.extern ? ' · hinterlegt' : ''}${mahnStufe(r) && !['bezahlt', 'storniert'].includes(st.k) ? ' · ' + MAHN[mahnStufe(r)].t : ''}</div></div><div><div class="amt">${eur(summen(r).brutto)}</div><div style="text-align:right"><span class="pill ${st.c}">${st.t}</span></div></div></button></li>`; }).join('')}</ul>`
+      : `<div class="empty">${S.rechnungen.length ? 'In dieser Ansicht ist nichts.' : 'Noch keine Rechnung.'}<div class="btns" style="justify-content:center"><button class="primary" data-act="new-re">Rechnung erstellen</button><button data-act="new-ext">Vorhandene hinterlegen</button></div></div>`}
+  </div>`;
+}
+const belegFehlt = (b) => !num(b.brutto) || !b.kategorie;
+function vBelege() {
+  const all = S.belege.slice().sort((a, b) => (b.datum || '').localeCompare(a.datum || ''));
+  const jahr = String(new Date().getFullYear());
+  const dJ = all.filter((b) => (b.datum || '').startsWith(jahr));
+  const fehlt = all.filter(belegFehlt);
+  const unbezahlt = all.filter((b) => b.zahlweg === 'offen');
+  let f = filter.be || 'alle';
+  if (f === 'fehlt' && !fehlt.length) f = filter.be = 'alle';
+  const test = { alle: () => true, fehlt: belegFehlt, offen: (b) => b.zahlweg === 'offen' }[f] || ((b) => (b.kategorie || 'ohne Kategorie') === f);
+  const list = all.filter(test);
+  const opts = [['alle', 'Alle']];
+  if (fehlt.length) opts.push(['fehlt', `Zu ergänzen (${fehlt.length})`]);
+  if (unbezahlt.length) opts.push(['offen', `Nicht bezahlt (${unbezahlt.length})`]);
+  if (!['alle', 'fehlt', 'offen'].includes(f)) opts.push([f, f]);
+  const proKat = {};
+  for (const b of dJ) { const k = b.kategorie || 'ohne Kategorie'; const x = proKat[k] = proKat[k] || { n: 0, brutto: 0, vst: 0 }; x.n++; x.brutto += num(b.brutto); x.vst += num(b.vorsteuer); }
+  const kat = Object.entries(proKat).sort((a, b) => b[1].brutto - a[1].brutto);
+  return `
+  <h1>Belege</h1>
+  <div class="status"><div class="big">${dJ.length ? `${eur(dJ.reduce((s, b) => s + num(b.brutto), 0))} Ausgaben ${jahr}` : `Noch keine Belege für ${jahr}`}</div>
+  <p class="small muted" style="margin-top:4px">${dJ.length ? `${dJ.length} Beleg${dJ.length > 1 ? 'e' : ''}, darin ${eur(dJ.reduce((s, b) => s + num(b.vorsteuer), 0))} Vorsteuer.` : 'Foto oder PDF einer Eingangsrechnung hochladen.'}${fehlt.length ? ` <b style="color:var(--warn)">${fehlt.length} noch zu ergänzen.</b>` : ''}</p></div>
+  <div class="card drop" id="dropZone">
+    <div class="upl">
+      <button data-act="be-kamera"><span class="ic">📷</span>Foto machen</button>
+      <button data-act="be-dateien"><span class="ic">📂</span>Dateien wählen</button>
+      <button data-act="new-be"><span class="ic">✍️</span>Ohne Datei</button>
+    </div>
+    <p class="small muted" style="margin:8px 0 0">Du kannst mehrere Dateien auf einmal wählen oder am Computer hierher ziehen. Betrag und Kategorie ergänzt du danach.</p>
+  </div>
+  <div class="card">
+    ${all.length ? chips('be', opts) : ''}
+    ${list.length ? `<ul class="list">${list.map((b) => `<li><button class="item" data-act="open-be" data-id="${b.id}"><div class="grow"><div class="t">${esc(b.lieferant || 'Ohne Lieferant')}</div><div class="s">${dat(b.datum)} · ${b.kategorie ? esc(b.kategorie) : '<span style="color:var(--warn)">Kategorie fehlt</span>'}${b.dateiName ? ' · 📎' : ''}${b.buchungId ? ' · 🏦' : ''}${b.zahlweg === 'privat' ? ' · privat ausgelegt' : b.zahlweg === 'bar' ? ' · bar' : ''}</div></div><div><div class="amt">${num(b.brutto) ? eur(num(b.brutto)) : '<span class="pill warn">Betrag fehlt</span>'}</div><div class="s" style="text-align:right">${b.zahlweg === 'offen' ? '<span class="pill warn">Nicht bezahlt</span>' : num(b.vorsteuer) ? 'VSt ' + eur(num(b.vorsteuer)) : ''}</div></div></button></li>`).join('')}</ul>`
+      : `<div class="empty">${all.length ? 'In dieser Ansicht ist nichts.' : 'Noch kein Beleg.'}</div>`}
+    <p class="small muted" style="margin-top:8px">Betrag, Datum und Steuersatz trägst du vorerst selbst ein. Die automatische Texterkennung kommt später.</p>
+  </div>
+  ${kat.length ? `<details class="card"><summary>Ausgaben ${jahr} nach Kategorie</summary>
+    <ul class="list" style="margin-top:6px">${kat.map(([k, x]) => `<li><button class="item" data-act="filter" data-f="be" data-k="${esc(k)}"><div class="grow"><div class="t">${esc(k)}</div><div class="s">${x.n} Beleg${x.n > 1 ? 'e' : ''}</div></div><div><div class="amt">${eur(x.brutto)}</div><div class="s" style="text-align:right">${x.vst ? 'VSt ' + eur(x.vst) : ''}</div></div></button></li>`).join('')}</ul>
+    <p class="small muted" style="margin-top:6px">Tippe auf eine Kategorie, um nur deren Belege zu sehen.</p></details>` : ''}
+  <div class="btns" style="margin-bottom:12px"><button data-act="kontakte" data-k="lieferanten">Lieferanten (${S.lieferanten.length})</button></div>`;
+}
+
+/* ---------- Bank ---------- */
+// Spaltennamen aus Bank-Exporten (Qonto auf Deutsch, Englisch, Französisch; dazu übliche Namen anderer Banken)
+const BANK_SPALTEN = {
+  id: ['transaction id', 'transaktions-id', 'transaktions id', 'id de la transaction', 'id de transaction'],
+  datum: ['settlement date', 'datum der abwicklung', 'abwicklungsdatum', 'date de règlement', 'buchungstag', 'buchungsdatum', 'operation date', 'datum des vorgangs', 'valuta', 'datum', 'date'],
+  betrag: ['total amount (incl', 'gesamtbetrag (inkl', 'montant total (ttc', 'gesamtbetrag', 'betrag', 'amount', 'montant', 'umsatz'],
+  gegenpartei: ['counterparty', 'gegenpartei', 'contrepartie', 'beguenstigter', 'begünstigter', 'empfänger', 'auftraggeber', 'name'],
+  zweck: ['reference', 'referenz', 'référence', 'verwendungszweck', 'buchungstext', 'libellé', 'label', 'beschreibung'],
+  seite: ['side', 'richtung', 'sens', 'soll/haben'],
+  status: ['status', 'statut']
+};
+function csvZeilen(text) {
+  text = text.replace(/^﻿/, '');
+  const erste = text.split(/\r?\n/)[0] || '';
+  const sep = [';', ',', '\t'].map((c) => [c, erste.split(c).length]).sort((a, b) => b[1] - a[1])[0][0];
+  const rows = []; let row = [], cell = '', q = false;
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (q) { if (c === '"') { if (text[i + 1] === '"') { cell += '"'; i++; } else q = false; } else cell += c; }
+    else if (c === '"') q = true;
+    else if (c === sep) { row.push(cell); cell = ''; }
+    else if (c === '\n' || c === '\r') { if (c === '\r' && text[i + 1] === '\n') i++; row.push(cell); rows.push(row); row = []; cell = ''; }
+    else cell += c;
+  }
+  if (cell || row.length) { row.push(cell); rows.push(row); }
+  return rows;
+}
+function bankDatum(s) {
+  s = String(s || '').trim();
+  let m = s.match(/^(\d{4})-(\d{2})-(\d{2})/); if (m) return `${m[1]}-${m[2]}-${m[3]}`;
+  m = s.match(/^(\d{1,2})[./-](\d{1,2})[./-](\d{2,4})/); if (m) return `${m[3].length === 2 ? '20' + m[3] : m[3]}-${m[2].padStart(2, '0')}-${m[1].padStart(2, '0')}`;
+  return '';
+}
+function bankBetrag(s) {
+  s = String(s || '').replace(/[−–]/g, '-').replace(/[^\d,.+-]/g, '');
+  if (!/\d/.test(s)) return NaN;
+  s = s.lastIndexOf(',') > s.lastIndexOf('.') ? s.replace(/\./g, '').replace(',', '.') : s.replace(/,/g, '');
+  const n = parseFloat(s); return isFinite(n) ? r2(n) : NaN;
+}
+const kurzHash = (s) => { let h = 5381; for (let i = 0; i < s.length; i++) h = ((h * 33) ^ s.charCodeAt(i)) >>> 0; return h.toString(36); };
+function bankAusCsv(text) {
+  const rows = csvZeilen(text).filter((r) => r.some((c) => c.trim()));
+  if (rows.length < 2) throw new Error('In der Datei stehen keine Buchungen.');
+  const kopf = rows[0].map((h) => h.trim().toLowerCase());
+  const col = {}, belegt = new Set();
+  for (const [f, worte] of Object.entries(BANK_SPALTEN)) {
+    for (const w of worte) {
+      const i = kopf.findIndex((h, j) => !belegt.has(j) && h.includes(w) && !(f === 'betrag' && /vat|mwst|ust\b|tva|excl|exkl|\bht\b|netto/.test(h) && !/inkl|incl|ttc/.test(h)));
+      if (i >= 0) { col[f] = i; belegt.add(i); break; }
+    }
+  }
+  if (col.datum == null || col.betrag == null) throw new Error('Spalten für Datum und Betrag nicht gefunden. Bitte den Konto-Export als CSV wählen.');
+  const zelle = (r, f) => col[f] == null ? '' : String(r[col[f]] || '').trim();
+  const out = [], zaehl = {}; let uebersprungen = 0;
+  for (const r of rows.slice(1)) {
+    const datum = bankDatum(zelle(r, 'datum')); let betrag = bankBetrag(zelle(r, 'betrag'));
+    if (!datum || !isFinite(betrag) || /declin|reject|revers|pending|abgelehnt|storniert|ausstehend|refus|annul|en attente/i.test(zelle(r, 'status'))) { uebersprungen++; continue; }
+    if (betrag > 0 && /debit|débit|soll|lastschrift|ausgang/i.test(zelle(r, 'seite'))) betrag = -betrag;
+    const gegenpartei = zelle(r, 'gegenpartei'), zweck = zelle(r, 'zweck');
+    let id = zelle(r, 'id') ? 'q:' + zelle(r, 'id') : '';
+    if (!id) { const h = 'h:' + kurzHash([datum, betrag, gegenpartei, zweck].join('|')); zaehl[h] = (zaehl[h] || 0) + 1; id = h + '-' + zaehl[h]; }
+    out.push({ id, datum, betrag, gegenpartei, zweck, belegId: null, rechnungId: null });
+  }
+  return { buchungen: out, uebersprungen };
+}
+function bankImport() {
+  const inp = document.createElement('input'); inp.type = 'file'; inp.accept = '.csv,text/csv';
+  inp.onchange = async () => {
+    const file = inp.files[0]; if (!file) return;
+    try {
+      const { buchungen, uebersprungen } = bankAusCsv(await file.text());
+      const da = new Set(S.bank.map((b) => b.id));
+      const neu = buchungen.filter((b) => !da.has(b.id));
+      S.bank.push(...neu); await save();
+      filter.bank = 'zuordnen'; tab = 'bank'; render();
+      const vorschl = neu.filter((b) => bankTreffer(b).length).length;
+      toast(`${neu.length} neue Buchung${neu.length === 1 ? '' : 'en'}${buchungen.length - neu.length ? `, ${buchungen.length - neu.length} schon vorhanden` : ''}${uebersprungen ? `, ${uebersprungen} übersprungen` : ''}${vorschl ? `. ${vorschl} ${vorschl === 1 ? 'passt' : 'passen'} zu offenen Rechnungen.` : ''}`);
+    } catch (e) { toast(e.message || 'Die Datei konnte nicht gelesen werden.'); }
+  };
+  inp.click();
+}
+const offeneRe = () => S.rechnungen.filter((r) => r.typ !== 'gutschrift' && ['offen', 'ueberfaellig'].includes(reStatus(r).k));
+// Offene Rechnungen, die zu einem Zahlungseingang passen: Rechnungsnummer im Verwendungszweck zählt mehr als gleicher Betrag
+function bankTreffer(b) {
+  if (b.betrag <= 0 || b.rechnungId) return [];
+  const z = (b.zweck + ' ' + b.gegenpartei).toLowerCase();
+  return offeneRe().map((r) => ({ r, p: (r.nr && z.includes(String(r.nr).toLowerCase()) ? 2 : 0) + (Math.abs(summen(r).brutto - b.betrag) < 0.01 ? 1 : 0) }))
+    .filter((x) => x.p).sort((a, c) => c.p - a.p).map((x) => x.r);
+}
+const bankOffen = (b) => b.betrag > 0 ? !b.rechnungId : !b.belegId;
+function vBank() {
+  const f = filter.bank || 'zuordnen';
+  const all = S.bank.slice().sort((a, b) => (b.datum || '').localeCompare(a.datum || ''));
+  const list = all.filter((b) => f === 'alle' || (f === 'ein' ? b.betrag > 0 : f === 'aus' ? b.betrag < 0 : bankOffen(b)));
+  const passt = all.filter((b) => bankTreffer(b).length);
+  const monat = heute().slice(0, 7);
+  const dM = all.filter((b) => b.datum.startsWith(monat));
+  const ein = dM.filter((b) => b.betrag > 0).reduce((s, b) => s + b.betrag, 0), aus = dM.filter((b) => b.betrag < 0).reduce((s, b) => s + b.betrag, 0);
+  return `
+  <h1>Bank</h1>
+  <div class="status"><div class="big">${all.length ? (passt.length ? `<span class="pill warn">Zu tun</span> ${passt.length} Zahlung${passt.length > 1 ? 'en passen' : ' passt'} zu offenen Rechnungen` : `${all.filter(bankOffen).length} Buchungen ohne Zuordnung`) : 'Noch keine Kontoauszüge'}</div>
+  <p class="small muted" style="margin-top:4px">${all.length ? `${MONATE[new Date().getMonth()]}: ${eur(ein)} rein, ${eur(-aus)} raus. Letzte Buchung ${dat(all[0].datum)}.` : 'Lade den Kontoauszug als CSV hoch. Bei Qonto: Transaktionen, Exportieren, CSV.'}</p>
+  <div class="btns"><button class="primary" data-act="bank-import">Kontoauszug (CSV) hochladen</button></div></div>
+  ${all.length ? `<div class="card">
+    ${chips('bank', [['zuordnen', 'Ohne Zuordnung'], ['ein', 'Eingänge'], ['aus', 'Ausgänge'], ['alle', 'Alle']])}
+    ${list.length ? `<ul class="list">${list.map((b) => { const t = bankTreffer(b); const re = b.rechnungId && S.rechnungen.find((r) => r.id === b.rechnungId);
+      const pill = re ? `<span class="pill good">${esc(re.nr)}</span>` : t.length ? '<span class="pill warn">Rechnung passt</span>' : b.belegId ? '<span class="pill good">Beleg</span>' : '';
+      return `<li><button class="item" data-act="open-bk" data-id="${esc(b.id)}"><div class="grow"><div class="t">${esc(b.gegenpartei || 'Ohne Namen')}</div><div class="s">${dat(b.datum)}${b.zweck ? ' · ' + esc(b.zweck) : ''}</div></div><div><div class="amt" style="color:${b.betrag > 0 ? 'var(--good)' : 'inherit'}">${eur(b.betrag)}</div><div style="text-align:right">${pill}</div></div></button></li>`; }).join('')}</ul>`
+      : '<div class="empty">In dieser Ansicht ist nichts.</div>'}
+  </div>` : ''}
+  <details class="card"><summary>Und die direkte Verbindung zu Qonto?</summary><p class="small muted" style="margin-top:6px">Kommt in einem späteren Schritt über einen kleinen Server, der deinen Qonto-Schlüssel sicher aufbewahrt. Bis dahin lädst du den Export hoch. Doppelte Buchungen erkennt die App und übernimmt sie nicht noch einmal.</p></details>`;
+}
+function vBuchung(id) {
+  const b = S.bank.find((x) => x.id === id); if (!b) return;
+  const re = b.rechnungId && S.rechnungen.find((r) => r.id === b.rechnungId);
+  const be = b.belegId && S.belege.find((x) => x.id === b.belegId);
+  const t = bankTreffer(b), rest = b.betrag > 0 && !re ? offeneRe().filter((r) => !t.includes(r)) : [];
+  const reBtn = (r, gut) => `<li><button class="item" data-act="bk-zu" data-id="${esc(b.id)}" data-k="${r.id}"><div class="grow"><div class="t">${esc(r.kunde.name || 'Ohne Kunde')}</div><div class="s">${esc(r.nr)} · ${dat(r.datum)}</div></div><div><div class="amt">${eur(summen(r).brutto)}</div><div style="text-align:right">${gut ? '<span class="pill good">passt</span>' : ''}</div></div></button></li>`;
+  openDlg(`${head(b.betrag > 0 ? 'Zahlungseingang' : 'Ausgabe')}<div class="dlg-body">
+    <p style="font-size:1.4rem"><b>${eur(b.betrag)}</b></p>
+    <p>${esc(b.gegenpartei || 'Ohne Namen')}<br><span class="small muted">${dat(b.datum)}${b.zweck ? ' · ' + esc(b.zweck) : ''}</span></p>
+    ${re ? `<div class="card"><b>Bezahlt damit:</b> <a href="#" data-act="open-re" data-id="${re.id}">Rechnung ${esc(re.nr)}</a> an ${esc(re.kunde.name || 'Kunde')}
+      <div class="btns"><button data-act="bk-los" data-id="${esc(b.id)}">Zuordnung lösen</button></div></div>` : ''}
+    ${b.betrag > 0 && !re ? `<div class="card"><b>Welche Rechnung wurde damit bezahlt?</b>
+      ${t.length + rest.length ? `<ul class="list">${t.map((r) => reBtn(r, true)).join('')}${rest.map((r) => reBtn(r, false)).join('')}</ul>` : '<p class="small muted">Keine offene Rechnung vorhanden. Vielleicht eine Privateinlage oder Erstattung.</p>'}</div>` : ''}
+    ${b.betrag < 0 ? (be ? `<p>Beleg: <a href="#" data-act="open-be" data-id="${be.id}">${esc(be.lieferant || 'Beleg')} vom ${dat(be.datum)}</a></p>` : `<p class="small muted">Zu dieser Ausgabe gehört noch kein Beleg.</p><div class="btns"><button class="primary" data-act="bk-beleg" data-id="${esc(b.id)}">Beleg dazu hochladen</button></div>`) : ''}
+  </div>`);
+}
+
+/* ---------- Firma ---------- */
+function vFirma() {
+  const f = S.firma, rf = RECHTSFORMEN[f.rechtsform];
+  const fehlt = pflichtFirma();
+  const inp = (k, l, attr) => `<label>${l}<input name="${k}" value="${esc(f[k])}" ${attr || ''}></label>`;
+  return `
+  <h1>Firma</h1>
+  <div class="status"><div class="big">${fehlt.length ? `<span class="pill warn">Zu tun</span> Es fehlen noch ${fehlt.length} Angaben` : '<span class="pill good">Gut</span> Firmendaten vollständig'}</div>
+  <p class="small muted" style="margin-top:4px">${fehlt.length ? 'Fehlt: ' + fehlt.join(', ') + '. Diese Angaben stehen auf jeder Rechnung.' : 'Diese Angaben stehen auf jeder Rechnung.'}</p></div>
+  <form class="card" id="firmaForm">
+    <h2>Welche Rechtsform hast du?</h2>
+    <label>Rechtsform<select name="rechtsform"><option value="">Bitte wählen</option>${Object.entries(RECHTSFORMEN).map(([k, v]) => `<option value="${k}"${k === f.rechtsform ? ' selected' : ''}>${v.label}</option>`).join('')}</select></label>
+    <div class="btns" style="margin-top:8px"><button type="button" data-act="rf-wizard">${f.rechtsform ? 'Rechtsform prüfen lassen' : 'Unsicher? Assistent starten'}</button></div>
+    <label class="check" style="margin-top:10px"><input type="checkbox" name="kleinunternehmer"${f.kleinunternehmer ? ' checked' : ''}> Ich bin Kleinunternehmer (§ 19 UStG, keine Umsatzsteuer auf Rechnungen)</label>
+    ${rf ? `<div class="card" style="background:var(--soft);border:0;margin:12px 0 0"><b>Was gilt für ${esc(rf.label)}?</b>
+      <table class="tab" style="margin-top:6px"><tr><td>Gewinnermittlung</td><td>${rf.gewinn}</td></tr><tr><td>Jahreserklärungen</td><td>${rf.jahr}</td></tr><tr><td>Umsatzsteuer</td><td>${f.kleinunternehmer ? 'Keine Voranmeldung, aber Umsatzsteuer-Jahreserklärung' : 'Voranmeldung monatlich oder vierteljährlich, Jahreserklärung'}</td></tr><tr><td>Besonderheit</td><td>${rf.extra}</td></tr></table>
+      <p class="small muted" style="margin:6px 0 0">Vereinfachte Übersicht, vor der Nutzung mit dem Steuerberater prüfen.</p></div>` : ''}
+    <h2 style="margin-top:18px">Firmendaten für Rechnungen</h2>
+    <div class="grid2">
+      ${inp('name', 'Firmenname')} ${inp('inhaber', gfLabel())}
+      ${inp('strasse', 'Straße und Nr.', 'class="full"')} ${inp('plz', 'PLZ', 'inputmode="numeric"')} ${inp('ort', 'Ort')}
+      ${inp('steuernr', 'Steuernummer')} ${inp('ustid', 'USt-IdNr. (falls vorhanden)')}
+      ${inp('email', 'E-Mail', 'type="email"')} ${inp('tel', 'Telefon', 'type="tel"')}
+      ${inp('iban', 'IBAN')} ${inp('bic', 'BIC')} ${inp('bank', 'Bank')}
+      ${REGISTER_RF.includes(f.rechtsform) ? `${inp('registergericht', 'Registergericht', 'placeholder="z. B. Amtsgericht München"')} ${inp('registernr', 'Registernummer', 'placeholder="z. B. HRB 123456"')}` : ''}
+      <div class="full"><label>Logo für Angebote und Rechnungen (optional)<input type="file" id="logoIn" accept="image/png,image/jpeg,image/webp,image/svg+xml"></label>
+        ${f.logo ? `<img class="logo-prev" src="${esc(f.logo)}" alt="Dein Logo"><button type="button" class="danger" data-act="logo-del">Logo entfernen</button>` : ''}</div>
+    </div>
+    <p class="small muted" style="margin-top:6px">Auf der Rechnung muss die Steuernummer oder die USt-IdNr. stehen.${REGISTER_RF.includes(f.rechtsform) ? ' Registergericht und Registernummer gehören bei deiner Rechtsform auf jeden Geschäftsbrief.' : ''}</p>
+    <h2 style="margin-top:18px">Voreinstellungen</h2>
+    <div class="grid2">
+      <label>Umsatzsteuer-Voranmeldung<select name="turnus"><option value="monat"${f.turnus === 'monat' ? ' selected' : ''}>monatlich</option><option value="quartal"${f.turnus === 'quartal' ? ' selected' : ''}>vierteljährlich</option></select></label>
+      <label class="check" style="align-self:end"><input type="checkbox" name="dauerfrist"${f.dauerfrist ? ' checked' : ''}> Dauerfristverlängerung (+1 Monat)</label>
+      <label>Zahlungsziel in Tagen<input name="zahlungsziel" inputmode="numeric" value="${esc(f.zahlungsziel)}"></label>
+      <label>Angebote gültig für Tage<input name="angebotTage" inputmode="numeric" value="${esc(f.angebotTage)}"></label>
+      <label>Basiszinssatz % (für Verzugszinsen in Mahnungen)<input name="basiszins" inputmode="decimal" value="${esc(String(f.basiszins).replace('.', ','))}"></label>
+    </div>
+    <p class="small muted" style="margin-top:6px">Der Basiszinssatz ändert sich jeweils zum 1. Januar und 1. Juli. Den aktuellen Wert veröffentlicht die Deutsche Bundesbank.</p>
+    <div class="btns"><button class="primary" type="submit">Speichern</button></div>
+  </form>
+  <div class="card">
+    <h2>Kunden und Lieferanten</h2>
+    <p class="small muted">Kunden merkt sich die App beim Schreiben von Angeboten und Rechnungen, Lieferanten beim Speichern von Belegen. Hier kannst du sie ansehen, ergänzen und neu anlegen.</p>
+    <div class="btns"><button data-act="kontakte" data-k="kunden">Kunden (${S.kunden.length})</button><button data-act="kontakte" data-k="lieferanten">Lieferanten (${S.lieferanten.length})</button></div>
+  </div>
+  <div class="card">
+    <h2>Sind meine Daten sicher?</h2>
+    <p>Alles liegt nur in diesem Browser auf diesem Gerät${S.letzteSicherung ? `, letzte Sicherung am ${dat(S.letzteSicherung)}` : ', noch keine Sicherung'}.</p>
+    <div class="btns"><button data-act="backup">Sicherung herunterladen</button><button data-act="restore">Sicherung einspielen</button></div>
+    <details><summary>Weitere Daten</summary>
+      <div class="btns"><button class="danger" data-act="wipe">Alle Daten auf diesem Gerät löschen</button></div>
+    </details>
+  </div>`;
+}
+function pflichtFirma() {
+  const f = S.firma, m = [];
+  if (!f.name) m.push('Firmenname');
+  if (!f.strasse || !f.plz || !f.ort) m.push('Anschrift');
+  if (!f.steuernr && !f.ustid) m.push('Steuernummer oder USt-IdNr.');
+  if (!f.rechtsform) m.push('Rechtsform');
+  if (REGISTER_RF.includes(f.rechtsform) && !f.registernr) m.push('Handelsregister');
+  return m;
+}
+function gfLabel() {
+  const rf = S.firma.rechtsform;
+  return ['ug', 'gmbh'].includes(rf) ? 'Geschäftsführer' : rf === 'gbr' || rf === 'ohg' ? 'Vertreten durch' : 'Inhaber';
+}
+
+/* Rechtsform-Assistent */
+const WZ = {
+  wer: { q: 'Machst du das allein oder mit Partnern?', o: [['allein', 'Allein'], ['mehrere', 'Mit einem oder mehreren Partnern']] },
+  haftung: { q: 'Haftet nur die Firma oder haftest du auch mit deinem Privatvermögen?', h: 'Nur die Firma haftet bei UG und GmbH. Die werden beim Notar gegründet.', o: [['ja', 'Nur die Firma (UG oder GmbH, beim Notar gegründet)'], ['nein', 'Ich hafte persönlich (keine Gründung beim Notar)']] },
+  kapital: { q: 'Wie hoch ist das Stammkapital?', o: [['klein', 'Unter 25.000 € (ab 1 €)'], ['gross', '25.000 € oder mehr']] },
+  taetigkeit: { q: 'Was für eine Tätigkeit ist es?', h: 'Hast du einen Gewerbeschein, ist es ein Gewerbe.', o: [['frei', 'Freier Beruf, z. B. Berater, Designer, Texter, Ingenieur, Dozent, Arzt, Anwalt'], ['gewerbe', 'Gewerbe, z. B. Handel, Online-Shop, Handwerk, Agentur, Vermittlung']] },
+  register: { q: 'Ist die Firma im Handelsregister eingetragen?', o: [['nein', 'Nein'], ['ja', 'Ja']] },
+  umsatz: { q: 'Wie hoch ist dein Umsatz?', h: 'Wichtig für die Kleinunternehmerregelung.', o: [['klein', 'Letztes Jahr bis 25.000 € und dieses Jahr voraussichtlich bis 100.000 €'], ['gruendung', 'Dieses Jahr gegründet, voraussichtlich bis 25.000 €'], ['gross', 'Mehr als das']] }
+};
+const WZ_ORDNUNG = ['wer', 'haftung', 'kapital', 'taetigkeit', 'register', 'umsatz'];
+let wiz = {};
+function wizFragen(a) {
+  const f = ['wer', 'haftung'];
+  if (a.haftung === 'ja') f.push('kapital');
+  if (a.haftung === 'nein') { f.push('taetigkeit'); if (a.taetigkeit === 'gewerbe') f.push('register'); }
+  f.push('umsatz');
+  return f;
+}
+function wizErgebnis(a) {
+  if (a.haftung === 'ja') return a.kapital === 'klein' ? 'ug' : 'gmbh';
+  const allein = a.wer === 'allein';
+  if (a.taetigkeit === 'frei') return allein ? 'freiberufler' : 'gbr';
+  return a.register === 'ja' ? (allein ? 'ek' : 'ohg') : (allein ? 'einzel' : 'gbr');
+}
+function vWizard() {
+  const fr = wizFragen(wiz), k = fr.find((x) => !wiz[x]);
+  const zurueck = fr.some((x) => wiz[x]) ? '<button data-act="wiz-back">Zurück</button>' : '';
+  if (k) {
+    const q = WZ[k];
+    return openDlg(`${head('Rechtsform-Assistent')}<div class="dlg-body wiz">
+      <div class="step">Frage ${fr.indexOf(k) + 1} von ${fr.length}</div>
+      <h2>${q.q}</h2>${q.h ? `<p class="small muted">${q.h}</p>` : ''}
+      <div class="opts">${q.o.map(([v, t]) => `<button data-act="wiz" data-k="${k}" data-v="${v}">${t}</button>`).join('')}</div>
+    </div><div class="dlg-foot">${zurueck}</div>`);
+  }
+  const rk = wizErgebnis(wiz), rf = RECHTSFORMEN[rk];
+  const kuOk = wiz.umsatz !== 'gross';
+  openDlg(`${head('Rechtsform-Assistent')}<div class="dlg-body wiz">
+    <div class="step">Ergebnis</div>
+    <h2>Das passt zu dir: ${esc(rf.label)}</h2>
+    <table class="tab" style="margin-top:6px"><tr><td>Gewinnermittlung</td><td>${rf.gewinn}</td></tr><tr><td>Jahreserklärungen</td><td>${rf.jahr}</td></tr><tr><td>Besonderheit</td><td>${rf.extra}</td></tr></table>
+    ${wiz.wer === 'mehrere' && rk === 'gbr' && wiz.taetigkeit === 'frei' ? '<p class="small muted" style="margin-top:6px">Freiberufler können statt der GbR auch eine Partnerschaftsgesellschaft (PartG) haben. Steuerlich wird sie hier wie eine GbR behandelt.</p>' : ''}
+    <h3>Kleinunternehmerregelung</h3>
+    ${kuOk ? `<p class="small">Bei deinem Umsatz ist sie möglich, aber freiwillig. Dann stellst du keine Umsatzsteuer in Rechnung, darfst aber auch keine Vorsteuer abziehen.</p>
+      <label class="check"><input type="checkbox" id="wizKu"${S.firma.kleinunternehmer ? ' checked' : ''}> Ich nutze die Kleinunternehmerregelung</label>`
+      : '<p class="small">Bei deinem Umsatz ist sie nicht möglich. Du stellst Umsatzsteuer in Rechnung und gibst Voranmeldungen ab.</p>'}
+    <p class="small muted" style="margin-top:10px">Vereinfachte Einschätzung, vor der Nutzung mit dem Steuerberater prüfen.</p>
+  </div><div class="dlg-foot">${zurueck}<button class="primary" data-act="wiz-ok" data-k="${rk}">Übernehmen</button></div>`);
+}
+
+/* ---------- Kunden und Lieferanten ---------- */
+let kTyp = 'kunden';
+function merkeLieferant(name, kategorie, rc) {
+  name = String(name || '').trim(); if (!name) return;
+  const l = S.lieferanten.find((x) => x.name.toLowerCase() === name.toLowerCase());
+  if (l) { if (kategorie && !l.kategorie) l.kategorie = kategorie; if (rc && !l.rc) l.rc = rc; }
+  else S.lieferanten.push({ id: uid(), name, adresse: '', ustid: '', email: '', tel: '', kategorie: kategorie || '', rc: rc || '', notiz: '' });
+}
+const nameAusDatei = (n) => n.replace(/\.[^.]+$/, '').replace(/[_-]+/g, ' ').trim().slice(0, 60);
+function rateLieferant(dateiname) {
+  const n = String(dateiname || '').toLowerCase();
+  return S.lieferanten.filter((l) => l.name.length >= 3 && n.includes(l.name.toLowerCase())).sort((a, b) => b.name.length - a.name.length)[0] || null;
+}
+function kontaktDocs(typ, k) {
+  const n = k.name.toLowerCase();
+  if (typ === 'kunden') return S.rechnungen.filter((r) => zaehlt(r) && (r.kunde.name || '').toLowerCase() === n);
+  return S.belege.filter((b) => (b.lieferant || '').toLowerCase() === n);
+}
+function vKontakte(typ) {
+  if (typ) kTyp = typ;
+  const isK = kTyp === 'kunden';
+  const list = S[kTyp].slice().sort((a, b) => a.name.localeCompare(b.name, 'de'));
+  openDlg(`${head('Kunden und Lieferanten')}<div class="dlg-body">
+    <div class="filters" role="group"><button class="chip" data-act="kontakte" data-k="kunden" aria-pressed="${isK}">Kunden (${S.kunden.length})</button><button class="chip" data-act="kontakte" data-k="lieferanten" aria-pressed="${!isK}">Lieferanten (${S.lieferanten.length})</button></div>
+    ${list.length ? `<ul class="list">${list.map((k) => {
+      const d = kontaktDocs(kTyp, k), sum = d.reduce((a, x) => a + (isK ? summen(x).netto : num(x.brutto)), 0);
+      return `<li><button class="item" data-act="kontakt" data-id="${k.id}"><div class="grow"><div class="t">${esc(k.name)}</div><div class="s">${esc(isK ? (k.adresse || '').split('\n').join(', ') || 'Anschrift fehlt' : k.kategorie || 'ohne Standardkategorie')}</div></div><div><div class="amt">${d.length ? eur(sum) : ''}</div><div class="s" style="text-align:right">${d.length} ${isK ? (d.length === 1 ? 'Rechnung' : 'Rechnungen') : (d.length === 1 ? 'Beleg' : 'Belege')}</div></div></button></li>`;
+    }).join('')}</ul>` : `<div class="empty">Noch keine ${isK ? 'Kunden' : 'Lieferanten'}.</div>`}
+    ${isK ? '' : '<p class="small muted" style="margin-top:8px">Mit einer Standardkategorie wird jeder neue Beleg dieses Lieferanten gleich richtig einsortiert.</p>'}
+  </div><div class="dlg-foot"><button class="primary" data-act="kontakt" data-id="">+ ${isK ? 'Kunde' : 'Lieferant'} anlegen</button></div>`);
+}
+function vKontakt(id) {
+  const isK = kTyp === 'kunden';
+  const alt = S[kTyp].find((x) => x.id === id);
+  const k = alt ? JSON.parse(JSON.stringify(alt)) : { id: uid(), name: '', adresse: '', ustid: '', email: '', tel: '', kategorie: '', rc: '', notiz: '' };
+  edit = k;
+  const v = (n) => esc(k[n] || '');
+  const d = alt ? kontaktDocs(kTyp, alt).sort((a, b) => (b.datum || '').localeCompare(a.datum || '')) : [];
+  openDlg(`${head(alt ? esc(k.name) : isK ? 'Neuer Kunde' : 'Neuer Lieferant')}<form id="koForm" class="dlg-body" autocomplete="off"><div class="grid2">
+    <label>Name<input name="name" value="${v('name')}" placeholder="${isK ? 'Firmen- oder Personenname' : 'z. B. Telekom'}"></label>
+    <label>E-Mail (optional)<input name="email" type="email" value="${v('email')}"></label>
+    <label class="full">Anschrift${isK ? '' : ' (optional)'}<textarea name="adresse" rows="2" placeholder="Straße Nr.&#10;PLZ Ort">${v('adresse')}</textarea></label>
+    <label>USt-IdNr. (optional)<input name="ustid" value="${v('ustid')}"></label>
+    <label>Telefon (optional)<input name="tel" type="tel" value="${v('tel')}"></label>
+    ${isK ? '' : `<label>Standardkategorie für Belege<select name="kategorie"><option value="">keine</option>${KATEGORIEN.map((c) => `<option${c === k.kategorie ? ' selected' : ''}>${c}</option>`).join('')}</select></label>
+    <label>Umsatzsteuer auf seinen Belegen<select name="rc"><option value="">Normal, mit deutscher USt</option><option value="eu"${k.rc === 'eu' ? ' selected' : ''}>Keine, Firma aus der EU</option><option value="welt"${k.rc === 'welt' ? ' selected' : ''}>Keine, Firma außerhalb der EU</option></select></label>`}
+    <label class="full">Notiz (optional)<input name="notiz" value="${v('notiz')}"></label>
+  </div>
+  ${alt && isK ? `<div class="btns"><button type="button" data-act="kunde-doc" data-k="angebot" data-id="${k.id}">Angebot schreiben</button><button type="button" data-act="kunde-doc" data-k="rechnung" data-id="${k.id}">Rechnung schreiben</button></div>` : ''}
+  ${d.length ? `<h3>${isK ? 'Rechnungen' : 'Belege'}</h3><ul class="list">${d.slice(0, 8).map((x) => `<li><button type="button" class="item" data-act="${isK ? 'open-re' : 'open-be'}" data-id="${x.id}"><div class="grow"><div class="t">${esc(isK ? x.nr : x.kategorie || 'ohne Kategorie')}</div><div class="s">${dat(x.datum)}</div></div><div class="amt">${eur(isK ? summen(x).brutto : num(x.brutto))}</div></button></li>`).join('')}</ul>` : ''}
+  </form><div class="dlg-foot"><button data-act="kontakte">Zurück zur Liste</button>${alt ? '<button class="danger" data-act="kontakt-del">Löschen</button>' : ''}<button class="primary" data-act="kontakt-save">Speichern</button></div>`);
+}
+async function saveKontakt() {
+  const f = $('#koForm'), k = edit;
+  for (const n of ['name', 'email', 'adresse', 'ustid', 'tel', 'kategorie', 'rc', 'notiz']) if (f.elements[n]) k[n] = f.elements[n].value.trim();
+  if (!k.name) return toast('Bitte einen Namen eintragen.');
+  if (S[kTyp].some((x) => x.id !== k.id && x.name.toLowerCase() === k.name.toLowerCase())) return toast('Diesen Namen gibt es schon.');
+  const i = S[kTyp].findIndex((x) => x.id === k.id);
+  if (i >= 0) S[kTyp][i] = k; else S[kTyp].push(k);
+  await save(); render(); vKontakte(); toast('Gespeichert');
+}
+
+/* ---------- Dialoge ---------- */
+const dlg = $('#dlg');
+function openDlg(html) { dlg.innerHTML = html; if (!dlg.open) dlg.showModal(); dlg.scrollTop = 0; }
+function closeDlg() { if (dlg.open) dlg.close(); dlg.innerHTML = ''; }
+dlg.addEventListener('click', (e) => { if (e.target === dlg) closeDlg(); });
+const head = (t) => `<div class="dlg-head"><h2>${t}</h2><button class="x" data-act="close" aria-label="Schließen">×</button></div>`;
+
+function vMenu() {
+  openDlg(`${head('Was möchtest du anlegen?')}<div class="dlg-body"><div class="menu">
+    <button data-act="new-an"><span class="ic">📝</span><span><span class="t">Angebot erstellen</span><span class="s">Kunde, Positionen, Gültigkeit. Später mit einem Tipp zur Rechnung.</span></span></button>
+    <button data-act="new-re"><span class="ic">🧾</span><span><span class="t">Rechnung erstellen</span><span class="s">Pflichtangaben werden geprüft, Nummer kommt automatisch. PDF und E-Rechnung.</span></span></button>
+    <button data-act="new-be"><span class="ic">📷</span><span><span class="t">Beleg hochladen</span><span class="s">Foto oder PDF einer Eingangsrechnung, für Ausgaben und Vorsteuer.</span></span></button>
+    <button data-act="new-ext"><span class="ic">📂</span><span><span class="t">Vorhandene Rechnung hinterlegen</span><span class="s">Alte Ausgangsrechnung aus Word oder einem anderen Programm, damit dein Umsatz vollständig ist.</span></span></button>
+  </div></div>`);
+}
+
+/* Angebot / Rechnung bearbeiten */
+let edit = null;
+function neuesDoc(typ) {
+  const t = heute();
+  return {
+    id: uid(), typ, nr: '', datum: t, leistungsdatum: t,
+    faellig: typ === 'rechnung' ? plusTage(t, num(S.firma.zahlungsziel) || 14) : '',
+    gueltigBis: typ === 'angebot' ? plusTage(t, num(S.firma.angebotTage) || 30) : '',
+    kunde: { name: '', adresse: '', ustid: '', email: '', leitweg: '' },
+    positionen: [{ text: '', menge: 1, einheit: 'Stk.', preis: 0, ust: 19 }],
+    hinweis: '', status: typ === 'rechnung' ? 'entwurf' : 'offen', ku: ku()
+  };
+}
+function readEditor() {
+  const f = $('#edForm'); if (!f) return;
+  const g = (n) => (f.elements[n] ? f.elements[n].value : '');
+  Object.assign(edit, { datum: g('datum'), leistungsdatum: g('leistungsdatum'), faellig: g('faellig'), gueltigBis: g('gueltigBis'), hinweis: g('hinweis'), rc: edit.ku ? '' : g('rc') });
+  edit.kunde = { name: g('k_name').trim(), adresse: g('k_adresse').trim(), ustid: g('k_ustid').trim(), email: g('k_email').trim(), leitweg: g('k_leitweg').trim() };
+  edit.positionen = [...f.querySelectorAll('.pos')].map((p) => ({
+    text: p.querySelector('[name=p_text]').value, menge: num(p.querySelector('[name=p_menge]').value), einheit: p.querySelector('[name=p_einheit]').value,
+    preis: num(p.querySelector('[name=p_preis]').value), ust: edit.ku || edit.rc ? 0 : num(p.querySelector('[name=p_ust]').value)
+  }));
+}
+function pflichtDoc(d) {
+  const f = S.firma, c = [];
+  c.push(['Dein Name und deine Anschrift', !!(f.name && f.strasse && f.plz && f.ort)]);
+  c.push(['Steuernummer oder USt-IdNr.', !!(f.steuernr || f.ustid)]);
+  c.push(['Name und Anschrift des Kunden', !!(d.kunde.name && d.kunde.adresse)]);
+  c.push(['Rechnungsdatum', !!d.datum]);
+  c.push(['Leistungsdatum oder -zeitraum', !!d.leistungsdatum]);
+  c.push(['Jede Position mit Beschreibung und Preis', d.positionen.length > 0 && d.positionen.every((p) => p.text.trim() && num(p.menge) !== 0)]);
+  if (RC[d.rc] && RC[d.rc].idPflicht) c.push(['USt-IdNr. des Kunden (EU-Geschäft)', /^[A-Z]{2}[0-9A-Z+*]{2,12}$/.test(String(d.kunde.ustid || '').replace(/\s/g, '').toUpperCase())]);
+  c.push([d.ku ? 'Hinweis auf Kleinunternehmerregelung' : RC[d.rc] ? 'Hinweis auf den Steuerfall' : 'Steuersatz und Steuerbetrag', true]);
+  c.push(['Fortlaufende Rechnungsnummer', true]);
+  return c;
+}
+function posHtml(p, i) {
+  const s = r2(num(p.menge) * num(p.preis));
+  return `<div class="pos" data-i="${i}">
+    <label class="text">Beschreibung<input name="p_text" value="${esc(p.text)}" placeholder="z. B. Webdesign Startseite"></label>
+    <label>Menge<input name="p_menge" inputmode="decimal" value="${esc(String(p.menge).replace('.', ','))}"></label>
+    <label>Einheit<input name="p_einheit" value="${esc(p.einheit)}" list="einheiten"></label>
+    <label>Einzelpreis netto €<input name="p_preis" inputmode="decimal" value="${esc(p.preis ? String(p.preis).replace('.', ',') : '')}" placeholder="0,00"></label>
+    ${edit.ku || edit.rc ? '<input type="hidden" name="p_ust" value="0">' : `<label>USt<select name="p_ust">${[19, 7, 0].map((v) => `<option value="${v}"${num(p.ust) === v ? ' selected' : ''}>${v} %</option>`).join('')}</select></label>`}
+    <div style="display:flex;gap:6px;align-items:end;justify-content:space-between"><span class="sum">${eur(s)}</span><button type="button" class="del" data-act="pos-del" data-i="${i}" aria-label="Position entfernen">✕</button></div>
+  </div>`;
+}
+function totalsHtml(d) {
+  const s = summen(d);
+  return `<div class="totals"><div><span>Netto</span><span>${eur(s.netto)}</span></div>
+    ${d.ku || d.rc ? `<div><span>Umsatzsteuer</span><span>0,00 €</span></div>` : Object.keys(s.proSatz).sort((a, b) => b - a).map((k) => `<div><span>USt ${k} % auf ${eur(s.proSatz[k])}</span><span>${eur(r2(s.proSatz[k] * k / 100))}</span></div>`).join('')}
+    <div class="gross"><span>Gesamt</span><span>${eur(s.brutto)}</span></div></div>`;
+}
+function vEditor() {
+  const d = edit, isRe = d.typ === 'rechnung';
+  const locked = isRe && d.status !== 'entwurf';
+  const checks = isRe ? pflichtDoc(d) : [];
+  const allOk = checks.every((c) => c[1]);
+  openDlg(`${head((d.nr ? esc(d.nr) + ' · ' : '') + (isRe ? (d.status === 'entwurf' ? 'Rechnung schreiben' : 'Rechnung') : 'Angebot schreiben'))}
+  <form id="edForm" class="dlg-body" autocomplete="off">
+    <datalist id="kunden">${S.kunden.map((k) => `<option value="${esc(k.name)}">`).join('')}</datalist>
+    <datalist id="einheiten"><option value="Stk."><option value="Std."><option value="Tag"><option value="pauschal"><option value="Monat"><option value="km"></datalist>
+    <h3 style="margin-top:0">Für wen?</h3>
+    <div class="grid2">
+      <label>Kunde<input name="k_name" list="kunden" value="${esc(d.kunde.name)}" placeholder="Firmen- oder Personenname"></label>
+      <label>E-Mail (optional)<input name="k_email" type="email" value="${esc(d.kunde.email)}"></label>
+      <label class="full">Anschrift<textarea name="k_adresse" rows="2" placeholder="Straße Nr.&#10;PLZ Ort">${esc(d.kunde.adresse)}</textarea></label>
+      <label>USt-IdNr. des Kunden${RC[d.rc] && RC[d.rc].idPflicht ? '' : ' (optional)'}<input name="k_ustid" value="${esc(d.kunde.ustid)}"></label>
+      ${d.ku ? '' : `<label>Steuerfall<select name="rc"><option value="">Normal, mit deutscher Umsatzsteuer</option>${Object.entries(RC).map(([k, v]) => `<option value="${k}"${k === rcArt(d) ? ' selected' : ''}>${v.t}</option>`).join('')}</select></label>`}
+      ${RC[d.rc] ? `<p class="small muted full" style="margin:0">Ohne Umsatzsteuer. Auf der Rechnung steht: „${RC[d.rc].hinweis}“</p>` : ''}
+      ${isRe ? `<label>Leitweg-ID (nur bei Behörden)<input name="k_leitweg" value="${esc(d.kunde.leitweg)}" placeholder="z. B. 991-12345-67"></label>` : ''}
+    </div>
+    <h3>Wann?</h3>
+    <div class="grid2">
+      <label>${isRe ? 'Rechnungsdatum' : 'Angebotsdatum'}<input type="date" name="datum" value="${esc(d.datum)}"></label>
+      ${isRe ? `<label>Leistungsdatum<input type="date" name="leistungsdatum" value="${esc(d.leistungsdatum)}"></label><label>Zahlbar bis<input type="date" name="faellig" value="${esc(d.faellig)}"></label>`
+        : `<label>Gültig bis<input type="date" name="gueltigBis" value="${esc(d.gueltigBis)}"></label>`}
+    </div>
+    <h3>Was?</h3>
+    <div id="posList">${d.positionen.map(posHtml).join('')}</div>
+    <button type="button" data-act="pos-add">+ Position</button>
+    <div id="totals" style="margin-top:10px">${totalsHtml(d)}</div>
+    ${d.ku ? `<p class="small muted">${KU_HINWEIS} Steht automatisch auf dem Dokument.</p>` : ''}
+    <label style="margin-top:10px">Text unter den Positionen (optional)<textarea name="hinweis" rows="2" placeholder="${isRe ? 'z. B. Vielen Dank für Ihren Auftrag.' : 'z. B. Wir freuen uns auf Ihre Rückmeldung.'}">${esc(d.hinweis)}</textarea></label>
+    ${isRe ? `<div class="card" style="margin-top:12px"><b id="chkHead">${allOk ? 'Alle Pflichtangaben nach § 14 UStG sind da' : 'Es fehlen noch Pflichtangaben'}</b><ul class="checks" id="checks">${checks.map((c) => `<li class="${c[1] ? 'ok' : 'miss'}">${c[0]}</li>`).join('')}</ul>
+      ${pflichtFirma().length ? '<p class="small" style="margin:6px 0 0">Deine eigenen Daten trägst du im Reiter <b>Firma</b> ein.</p>' : ''}</div>` : ''}
+  </form>
+  <div class="dlg-foot">
+    ${!d.neu && !isRe ? '<button class="danger" data-act="del-doc">Löschen</button>' : ''}
+    ${!d.neu && isRe && d.status === 'entwurf' ? '<button class="danger" data-act="del-doc">Entwurf löschen</button>' : ''}
+    <button data-act="save-doc">${isRe ? 'Als Entwurf speichern' : 'Speichern'}</button>
+    ${isRe ? `<button class="primary" data-act="stellen" id="btnStellen"${allOk ? '' : ' disabled'}>Rechnung stellen</button>` : ''}
+  </div>`);
+}
+function refreshEditor() {
+  readEditor();
+  $('#totals').innerHTML = totalsHtml(edit);
+  document.querySelectorAll('#posList .pos').forEach((el, i) => { el.querySelector('.sum').textContent = eur(r2(num(edit.positionen[i].menge) * num(edit.positionen[i].preis))); });
+  if (edit.typ === 'rechnung') {
+    const c = pflichtDoc(edit), ok = c.every((x) => x[1]);
+    $('#checks').innerHTML = c.map((x) => `<li class="${x[1] ? 'ok' : 'miss'}">${x[0]}</li>`).join('');
+    $('#chkHead').textContent = ok ? 'Alle Pflichtangaben nach § 14 UStG sind da' : 'Es fehlen noch Pflichtangaben';
+    $('#btnStellen').disabled = !ok;
+  }
+}
+function merkeKunde(k) {
+  if (!k.name) return;
+  const i = S.kunden.findIndex((x) => x.name.toLowerCase() === k.name.toLowerCase());
+  if (i >= 0) S.kunden[i] = Object.assign({}, S.kunden[i], Object.fromEntries(Object.entries(k).filter(([, v]) => v)));
+  else S.kunden.push(Object.assign({ id: uid() }, k));
+}
+async function saveDoc(stellen) {
+  readEditor();
+  const d = edit; delete d.neu;
+  const coll = d.typ === 'angebot' ? S.angebote : S.rechnungen;
+  if (d.typ === 'angebot' && !d.nr) d.nr = naechsteNr('AN', (d.datum || heute()).slice(0, 4));
+  if (stellen) {
+    if (!pflichtDoc(d).every((c) => c[1])) return toast('Es fehlen noch Pflichtangaben.');
+    d.nr = naechsteNr('RE', (d.datum || heute()).slice(0, 4));
+    d.status = 'offen'; d.gestelltAm = heute();
+  }
+  merkeKunde(d.kunde);
+  const i = coll.findIndex((x) => x.id === d.id);
+  if (i >= 0) coll[i] = d; else coll.push(d);
+  if (d.ausAngebot && stellen) { const a = S.angebote.find((x) => x.id === d.ausAngebot); if (a) a.status = 'abgerechnet'; }
+  await save();
+  toast(stellen ? `Rechnung ${d.nr} gestellt` : 'Gespeichert');
+  tab = d.typ === 'angebot' ? 'angebote' : 'rechnungen';
+  if (stellen) vDetailRe(d.id); else closeDlg();
+  render();
+}
+
+/* Detailansichten */
+function kopfDaten(d) {
+  return `<p><b>${esc(d.kunde.name)}</b><br><span class="muted" style="white-space:pre-line">${esc(d.kunde.adresse)}</span></p>`;
+}
+function posTabelle(d) {
+  if (d.extern) return '';
+  return `<table class="tab"><tr><th>Position</th><th style="text-align:right">Betrag</th></tr>${d.positionen.map((p) => `<tr><td>${esc(p.text)}<div class="small muted">${String(p.menge).replace('.', ',')} ${esc(p.einheit)} × ${eur(num(p.preis))}${d.ku ? '' : ' · ' + num(p.ust) + ' % USt'}</div></td><td style="text-align:right">${eur(r2(num(p.menge) * num(p.preis)))}</td></tr>`).join('')}</table>`;
+}
+function vDetailAn(id) {
+  const a = S.angebote.find((x) => x.id === id); if (!a) return;
+  const st = anStatus(a);
+  openDlg(`${head('Angebot ' + esc(a.nr))}<div class="dlg-body">
+    <p><span class="pill ${st.c}">${st.t}</span></p>
+    ${kopfDaten(a)}
+    <p class="small muted">Vom ${dat(a.datum)}, gültig bis ${dat(a.gueltigBis)}</p>
+    ${posTabelle(a)}<div style="margin-top:8px">${totalsHtml(a)}</div>
+    ${st.k === 'abgerechnet' ? '' : `<div class="card" style="margin-top:14px"><b>Wie hat der Kunde entschieden?</b><div class="btns">
+      <button data-act="an-status" data-k="angenommen" data-id="${a.id}"${a.status === 'angenommen' ? ' aria-pressed="true"' : ''}>Angenommen</button>
+      <button data-act="an-status" data-k="abgelehnt" data-id="${a.id}">Abgelehnt</button>
+      ${a.status !== 'offen' ? `<button data-act="an-status" data-k="offen" data-id="${a.id}">Wieder offen</button>` : ''}</div></div>`}
+  </div>
+  <div class="dlg-foot">
+    <button data-act="print" data-id="${a.id}" data-t="an">Drucken / PDF</button>
+    ${st.k === 'abgerechnet' ? '' : `<button data-act="edit-an" data-id="${a.id}">Bearbeiten</button>`}
+    ${st.k === 'abgerechnet' ? '' : `<button class="primary" data-act="an-to-re" data-id="${a.id}">In Rechnung umwandeln</button>`}
+  </div>`);
+}
+function vDetailRe(id) {
+  const r = S.rechnungen.find((x) => x.id === id); if (!r) return;
+  if (r.status === 'entwurf' && !r.extern) { edit = JSON.parse(JSON.stringify(r)); return vEditor(); }
+  const st = reStatus(r);
+  const storno = r.stornoId ? S.rechnungen.find((x) => x.id === r.stornoId) : null;
+  const orig = r.stornoVon ? S.rechnungen.find((x) => x.id === r.stornoVon) : null;
+  openDlg(`${head((r.typ === 'gutschrift' ? 'Stornorechnung ' : 'Rechnung ') + esc(r.nr))}<div class="dlg-body">
+    <p><span class="pill ${st.c}">${st.t}</span>${r.extern ? ' <span class="pill grey">Hinterlegt</span>' : ''}</p>
+    ${kopfDaten(r)}
+    <p class="small muted">Rechnungsdatum ${dat(r.datum)}${r.leistungsdatum ? ', Leistung ' + dat(r.leistungsdatum) : ''}${r.faellig && r.typ !== 'gutschrift' ? ', zahlbar bis ' + dat(r.faellig) : ''}${r.bezahltAm ? ', bezahlt am ' + dat(r.bezahltAm) : ''}</p>
+    ${posTabelle(r)}<div style="margin-top:8px">${totalsHtml(r)}</div>
+    ${storno ? `<p class="small">Storniert durch <a href="#" data-act="open-re" data-id="${storno.id}">${esc(storno.nr)}</a>.</p>` : ''}
+    ${orig ? `<p class="small">Storniert die Rechnung <a href="#" data-act="open-re" data-id="${orig.id}">${esc(orig.nr)}</a>.</p>` : ''}
+    ${r.dateiId ? `<p><button data-act="file" data-id="${r.dateiId}">📎 ${esc(r.dateiName || 'Datei')} öffnen</button></p>` : ''}
+    ${['offen', 'ueberfaellig'].includes(st.k) ? `<div class="card" style="margin-top:14px"><b>Ist das Geld da?</b>
+      <div class="grid2" style="margin-top:8px"><label>Bezahlt am<input type="date" id="bezDat" value="${heute()}"></label></div>
+      <div class="btns"><button class="primary" data-act="bezahlt" data-id="${r.id}">Als bezahlt markieren</button></div></div>` : ''}
+    ${(r.mahnungen || []).length || st.k === 'ueberfaellig' ? `<div class="card" style="margin-top:14px"><b>Mahnungen</b>
+      ${(r.mahnungen || []).length ? `<ul class="list" style="margin-top:6px">${r.mahnungen.map((m, i) => `<li style="display:flex;justify-content:space-between;align-items:center;gap:8px;padding:6px 0"><span>${MAHN[m.stufe].t} vom ${dat(m.datum)}<br><span class="small muted">Frist bis ${dat(m.frist)}${num(m.gebuehr) + num(m.zinsen) + num(m.pauschale) ? ', ' + eur(num(m.gebuehr) + num(m.zinsen) + num(m.pauschale)) + ' Gebühren und Zinsen' : ''}</span></span><button data-act="mahn-print" data-id="${r.id}" data-i="${i}">Drucken</button></li>`).join('')}</ul>` : '<p class="small muted" style="margin:6px 0 0">Noch nicht gemahnt.</p>'}
+      ${st.k === 'ueberfaellig' && mahnStufe(r) < 3 ? `<p class="small muted" style="margin:6px 0 0">${mahnenFaellig(r) ? 'Der nächste Schritt ist dran.' : `Die Frist der letzten Mahnung läuft noch bis ${dat(letzteMahnung(r).frist)}.`}</p><div class="btns"><button${mahnenFaellig(r) ? ' class="primary"' : ''} data-act="mahnen" data-id="${r.id}">${MAHN[mahnStufe(r) + 1].b}</button></div>` : ''}
+      ${st.k === 'ueberfaellig' && mahnStufe(r) >= 3 && tageBis(letzteMahnung(r).frist) < 0 ? '<p class="small" style="margin:6px 0 0">Alle Mahnstufen sind durch. Nächster Schritt wäre ein gerichtlicher Mahnbescheid (online über mahngerichte.de) oder ein Inkassobüro.</p>' : ''}</div>` : ''}
+    ${st.k === 'bezahlt' ? `<div class="btns"><button data-act="unbezahlt" data-id="${r.id}">Doch nicht bezahlt</button></div>` : ''}
+    <details><summary>Warum kann ich die Rechnung nicht ändern oder löschen?</summary><p class="small muted" style="margin-top:6px">Eine gestellte Rechnung darf nach GoBD nicht mehr verändert werden, und die Nummern müssen lückenlos sein. Wenn sie falsch ist, erstellst du eine Stornorechnung und danach eine neue Rechnung.</p></details>
+  </div>
+  <div class="dlg-foot">
+    ${!r.extern ? `<button data-act="print" data-id="${r.id}" data-t="re">Drucken / PDF</button><button data-act="xml" data-id="${r.id}">E-Rechnung (XML)</button>` : ''}
+    ${r.typ !== 'gutschrift' && r.status !== 'storniert' ? `<button class="danger" data-act="storno" data-id="${r.id}">Stornieren</button>` : ''}
+    ${r.extern ? `<button class="danger" data-act="del-ext" data-id="${r.id}">Entfernen</button>` : ''}
+  </div>`);
+}
+
+function vERechnungFehlt(r, m) {
+  const k = kundenAdresse(r.kunde.adresse), firma = m.some((x) => x[1] === 'firma');
+  openDlg(`${head('E-Rechnung ' + esc(r.nr))}<form id="nachForm" class="dlg-body" autocomplete="off">
+    <p>Für eine gültige E-Rechnung (XRechnung) fehlt noch:</p>
+    <ul class="checks">${m.map((x) => `<li class="miss">${x[0]}</li>`).join('')}</ul>
+    ${firma ? '<p class="small">Deine eigenen Angaben trägst du im Reiter <b>Firma</b> ein, sie gelten dann für alle Rechnungen.</p>' : ''}
+    ${m.some((x) => x[1] === 'kunde') || !r.kunde.leitweg ? `<h3>Angaben zum Kunden ergänzen</h3><div class="grid2">
+      <label>E-Mail des Kunden<input name="k_email" type="email" value="${esc(r.kunde.email)}"></label>
+      <label>Leitweg-ID (nur bei Behörden)<input name="k_leitweg" value="${esc(r.kunde.leitweg)}"></label>
+      <label>PLZ<input name="k_plz" inputmode="numeric" value="${esc(k.plz)}"></label>
+      <label>Ort<input name="k_ort" value="${esc(k.ort)}"></label></div>
+      <p class="small muted">Das ändert nur die Empfängerdaten der E-Rechnung, nicht den Inhalt der Rechnung.</p>` : ''}
+  </form>
+  <div class="dlg-foot">
+    ${firma ? `<button data-act="tab" data-k="firma">Zu den Firmendaten</button>` : ''}
+    <button data-act="open-re" data-id="${r.id}">Zurück</button>
+    ${m.every((x) => x[1] === 'kunde') ? `<button class="primary" data-act="kunde-nach" data-id="${r.id}">Speichern und E-Rechnung erzeugen</button>` : ''}
+  </div>`);
+}
+
+/* ---------- Zahlungserinnerung und Mahnungen ---------- */
+const MAHN = [null,
+  { t: 'Zahlungserinnerung', b: 'Zahlungserinnerung schreiben', frist: 7, gebuehr: 0 },
+  { t: '1. Mahnung', b: '1. Mahnung schreiben', frist: 10, gebuehr: 5 },
+  { t: 'Letzte Mahnung', b: 'Letzte Mahnung schreiben', frist: 7, gebuehr: 5 }];
+const mahnStufe = (r) => (r.mahnungen || []).length;
+const letzteMahnung = (r) => (r.mahnungen || [])[mahnStufe(r) - 1] || null;
+/* Ist jetzt der nächste Mahnschritt dran? Erst nach Fälligkeit und nach Ablauf der letzten Frist. */
+function mahnenFaellig(r) {
+  if (reStatus(r).k !== 'ueberfaellig' || mahnStufe(r) >= 3) return false;
+  const l = letzteMahnung(r); return !l || tageBis(l.frist) < 0;
+}
+const verzugTage = (r) => Math.max(0, -tageBis(r.faellig));
+function mahnZinsen(r, firma) {
+  const satz = num(S.firma.basiszins) + (firma ? 9 : 5);
+  return { satz: r2(satz), tage: verzugTage(r), betrag: r2(summen(r).brutto * satz / 100 * verzugTage(r) / 365) };
+}
+function vMahnen(id) {
+  const r = S.rechnungen.find((x) => x.id === id); if (!r) return;
+  const stufe = Math.min(mahnStufe(r) + 1, 3), M = MAHN[stufe];
+  const firma = !!r.kunde.ustid, z = mahnZinsen(r, firma);
+  const hatPauschale = (r.mahnungen || []).some((x) => x.pauschale), hatZinsen = (r.mahnungen || []).some((x) => x.zinsen);
+  openDlg(`${head(M.t + ' zu ' + esc(r.nr))}<form id="mahnForm" class="dlg-body" autocomplete="off" data-id="${r.id}" data-stufe="${stufe}">
+    <p>${esc(r.kunde.name)} schuldet dir <b>${eur(summen(r).brutto)}</b>, fällig seit ${dat(r.faellig)} (${z.tage} Tage).${mahnStufe(r) ? ` Zuletzt: ${MAHN[mahnStufe(r)].t} vom ${dat(letzteMahnung(r).datum)}.` : ''}</p>
+    <div class="grid2">
+      <label>Neue Zahlungsfrist<input type="date" name="frist" value="${plusTage(heute(), M.frist)}"></label>
+      <label>Mahngebühr €<input name="gebuehr" inputmode="decimal" value="${String(M.gebuehr).replace('.', ',')}"></label>
+    </div>
+    <label class="check" style="margin-top:10px"><input type="checkbox" name="b2b"${firma ? ' checked' : ''}> Kunde ist ein Unternehmen (kein Privatkunde)</label>
+    <label class="check"><input type="checkbox" name="zinsen"${hatZinsen ? ' checked' : ''}> Verzugszinsen berechnen <span class="muted small" id="zinsInfo">(${String(z.satz).replace('.', ',')} % p. a., ${z.tage} Tage: ${eur(z.betrag)})</span></label>
+    <label class="check"><input type="checkbox" name="pauschale"${firma && !hatPauschale ? '' : ' disabled'}> Verzugspauschale 40 € (${hatPauschale ? 'schon in einer früheren Mahnung berechnet' : 'nur bei Unternehmen'})</label>
+    <details style="margin-top:10px"><summary>Was ist erlaubt?</summary><p class="small muted" style="margin-top:6px">Mit festem Zahlungsdatum auf der Rechnung ist der Kunde ab dem Folgetag in Verzug. Dann darfst du Verzugszinsen verlangen: 5 Prozentpunkte über dem Basiszinssatz bei Privatkunden, 9 bei Unternehmen. Unternehmen schulden zusätzlich einmalig 40 € Pauschale. Mahngebühren nur in Höhe der echten Kosten (Porto, Papier), üblich sind bis 5 €. Die erste Erinnerung ist meist kostenlos und freundlich. Mahngebühren und Zinsen sind kein Umsatz und ohne Umsatzsteuer.</p></details>
+  </form>
+  <div class="dlg-foot"><button data-act="open-re" data-id="${r.id}">Abbrechen</button><button class="primary" data-act="mahn-save" data-id="${r.id}">Speichern und drucken</button></div>`);
+  const f = $('#mahnForm');
+  f.addEventListener('change', () => {
+    const b = f.elements.b2b.checked, zz = mahnZinsen(r, b);
+    f.elements.pauschale.disabled = !b || hatPauschale; if (f.elements.pauschale.disabled) f.elements.pauschale.checked = false;
+    $('#zinsInfo').textContent = `(${String(zz.satz).replace('.', ',')} % p. a., ${zz.tage} Tage: ${eur(zz.betrag)})`;
+  });
+}
+async function saveMahnung(el) {
+  const r = S.rechnungen.find((x) => x.id === el.dataset.id), f = $('#mahnForm');
+  const b2b = f.elements.b2b.checked, z = mahnZinsen(r, b2b);
+  const m = {
+    stufe: Number(f.dataset.stufe), datum: heute(), frist: f.elements.frist.value || plusTage(heute(), 7),
+    gebuehr: r2(num(f.elements.gebuehr.value)),
+    zinsen: f.elements.zinsen.checked ? z.betrag : 0, zinsSatz: z.satz, zinsTage: z.tage,
+    pauschale: f.elements.pauschale.checked && b2b && !(r.mahnungen || []).some((x) => x.pauschale) ? 40 : 0
+  };
+  r.mahnungen = (r.mahnungen || []).concat(m);
+  await save(); vDetailRe(r.id); render(); toast(MAHN[m.stufe].t + ' gespeichert');
+  druckMahnung(r, m);
+}
+function fussHtml() {
+  const f = S.firma;
+  return `<div class="fuss">${[[f.name, f.inhaber && gfLabel() + ': ' + f.inhaber, f.strasse, [f.plz, f.ort].join(' ')], [f.tel && 'Tel. ' + f.tel, f.email, f.steuernr && 'Steuernr. ' + f.steuernr, f.ustid && 'USt-IdNr. ' + f.ustid, REGISTER_RF.includes(f.rechtsform) && f.registernr && [f.registergericht, f.registernr].filter(Boolean).join(' ')], [f.bank, f.iban && 'IBAN ' + f.iban, f.bic && 'BIC ' + f.bic]].map((col) => `<div>${col.filter((x) => x && String(x).trim()).map(esc).join('<br>')}</div>`).join('')}</div>`;
+}
+function druckMahnung(r, m) {
+  const f = S.firma, s = summen(r), M = MAHN[m.stufe];
+  const absender = [f.name, f.strasse, [f.plz, f.ort].join(' ')].filter((x) => x && x.trim()).join(' · ');
+  const frueher = (r.mahnungen || []).filter((x) => x !== m && x.stufe < m.stufe);
+  /* Gebühren früherer Mahnungen bleiben offen und werden mitgeführt */
+  const alt = frueher.reduce((a, x) => a + num(x.gebuehr) + num(x.pauschale), 0);
+  const gesamt = r2(s.brutto + alt + num(m.gebuehr) + num(m.zinsen) + num(m.pauschale));
+  const text = {
+    1: `sicher ist es im Alltag untergegangen: Unsere Rechnung ${esc(r.nr)} vom ${dat(r.datum)} über ${eur(s.brutto)} war am ${dat(r.faellig)} fällig. Bis heute haben wir keinen Zahlungseingang festgestellt.</p><p>Bitte überweisen Sie den offenen Betrag bis zum <b>${dat(m.frist)}</b>. Falls Sie bereits gezahlt haben, betrachten Sie dieses Schreiben bitte als gegenstandslos.`,
+    2: `leider konnten wir für unsere Rechnung ${esc(r.nr)} vom ${dat(r.datum)}, fällig am ${dat(r.faellig)}, trotz ${frueher.length ? 'unserer Zahlungserinnerung vom ' + dat(frueher[frueher.length - 1].datum) : 'Fälligkeit'} noch keinen Zahlungseingang feststellen. Sie befinden sich seit dem ${dat(plusTage(r.faellig, 1))} in Zahlungsverzug.</p><p>Bitte überweisen Sie den unten genannten Gesamtbetrag bis spätestens <b>${dat(m.frist)}</b>.`,
+    3: `trotz ${frueher.length > 1 ? 'Zahlungserinnerung und Mahnung' : 'unserer Mahnung'} ist unsere Rechnung ${esc(r.nr)} vom ${dat(r.datum)}, fällig am ${dat(r.faellig)}, weiterhin unbezahlt.</p><p>Wir fordern Sie letztmalig auf, den unten genannten Gesamtbetrag bis zum <b>${dat(m.frist)}</b> zu überweisen. Geht die Zahlung bis dahin nicht ein, werden wir die Forderung ohne weitere Ankündigung gerichtlich geltend machen (gerichtliches Mahnverfahren). Die dadurch entstehenden Kosten gehen zu Ihren Lasten.`
+  }[m.stufe];
+  $('#druck').innerHTML = `
+    <div class="kopf"><div><div class="absender">${esc(absender)}</div><div style="white-space:pre-line"><b>${esc(r.kunde.name)}</b>\n${esc(r.kunde.adresse)}</div></div>
+    <table class="meta"><tr><td>Datum</td><td>${dat(m.datum)}</td></tr><tr><td>Rechnungsnr.</td><td><b>${esc(r.nr)}</b></td></tr><tr><td>Rechnungsdatum</td><td>${dat(r.datum)}</td></tr><tr><td>Fällig seit</td><td>${dat(r.faellig)}</td></tr></table></div>
+    <h1>${M.t}</h1>
+    <p>Sehr geehrte Damen und Herren,</p><p>${text}</p>
+    <div class="sum"><div><span>Rechnungsbetrag</span><span>${eur(s.brutto)}</span></div>
+    ${alt ? `<div><span>Gebühren aus früheren Mahnungen</span><span>${eur(alt)}</span></div>` : ''}
+    ${num(m.gebuehr) ? `<div><span>Mahngebühr</span><span>${eur(m.gebuehr)}</span></div>` : ''}
+    ${num(m.zinsen) ? `<div><span>Verzugszinsen ${String(m.zinsSatz).replace('.', ',')} % p. a. für ${m.zinsTage} Tage</span><span>${eur(m.zinsen)}</span></div>` : ''}
+    ${num(m.pauschale) ? `<div><span>Verzugspauschale § 288 Abs. 5 BGB</span><span>${eur(m.pauschale)}</span></div>` : ''}
+    <div class="g"><span>Offener Gesamtbetrag</span><span>${eur(gesamt)}</span></div></div>
+    <p>${f.iban ? `Bitte überweisen Sie auf ${f.bank ? esc(f.bank) + ', ' : ''}IBAN ${esc(f.iban)}${f.bic ? ', BIC ' + esc(f.bic) : ''}, Verwendungszweck ${esc(r.nr)}.` : `Bitte geben Sie bei der Zahlung die Rechnungsnummer ${esc(r.nr)} an.`}</p>
+    <p>Mit freundlichen Grüßen<br>${esc(f.inhaber || f.name)}</p>
+    ${fussHtml()}`;
+  const altT = document.title; document.title = (r.nr + '_' + M.t).replace(/[^\w-]+/g, '_');
+  window.print();
+  setTimeout(() => { document.title = altT; }, 500);
+}
+
+/* Beleg und hinterlegte Rechnung */
+let pendingFile = null;
+function fileInput(cur) {
+  return `<label>Foto oder PDF<input type="file" id="fileIn" accept="image/*,application/pdf,.xml"></label>
+  <div id="filePrev">${cur ? `<p class="small">Gespeichert: <a href="#" data-act="file" data-id="${cur.dateiId}">${esc(cur.dateiName)}</a></p>` : ''}</div>`;
+}
+function vBeleg(b) {
+  pendingFile = null;
+  const neu = !b;
+  b = b || { id: uid(), datum: heute(), lieferant: '', brutto: '', ustSatz: 19, vorsteuer: '', kategorie: '', notiz: '' };
+  edit = b;
+  openDlg(`${head(neu ? 'Beleg hochladen' : 'Beleg')}<form id="beForm" class="dlg-body" autocomplete="off">
+    ${fileInput(b.dateiId ? b : null)}
+    <div class="grid2" style="margin-top:12px">
+      <label>Lieferant<input name="lieferant" list="lieferantenListe" value="${esc(b.lieferant)}" placeholder="z. B. Telekom"></label>
+      <datalist id="lieferantenListe">${S.lieferanten.map((l) => `<option value="${esc(l.name)}">`).join('')}</datalist>
+      <label>Datum der Rechnung<input type="date" name="datum" value="${esc(b.datum)}"></label>
+      <label>Betrag brutto €<input name="brutto" inputmode="decimal" value="${esc(b.brutto ? String(b.brutto).replace('.', ',') : '')}" placeholder="0,00"></label>
+      <label>Steuersatz<select name="ustSatz">${[19, 7, 0].map((v) => `<option value="${v}"${num(b.ustSatz) === v ? ' selected' : ''}>${v} %</option>`).join('')}</select></label>
+      <label>Vorsteuer €<input name="vorsteuer" inputmode="decimal" value="${esc(b.vorsteuer !== '' ? String(b.vorsteuer).replace('.', ',') : '')}" placeholder="wird berechnet"></label>
+      <label>Umsatzsteuer auf dem Beleg<select name="rc"><option value="">Normal, mit deutscher USt</option><option value="eu"${b.rc === 'eu' ? ' selected' : ''}>Keine, Firma aus der EU (z. B. Google, Meta)</option><option value="welt"${b.rc === 'welt' ? ' selected' : ''}>Keine, Firma außerhalb der EU</option></select></label>
+      <label>Kategorie<select name="kategorie"><option value="">Bitte wählen</option>${KATEGORIEN.map((k) => `<option${k === b.kategorie ? ' selected' : ''}>${k}</option>`).join('')}</select></label>
+      <label>Bezahlt über<select name="zahlweg">${ZAHLWEGE.map(([k, t]) => `<option value="${k}"${k === (b.zahlweg || 'konto') ? ' selected' : ''}>${t}</option>`).join('')}</select></label>
+      ${bankAuswahl(b)}
+      <label class="full">Notiz (optional)<input name="notiz" value="${esc(b.notiz)}"></label>
+    </div>
+    <p class="small muted" style="margin-top:6px">Vorsteuer ist die Umsatzsteuer, die du selbst bezahlt hast. Sie mindert deine Umsatzsteuer-Zahlung. ${ku() ? 'Als Kleinunternehmer darfst du sie nicht abziehen.' : ''}</p>
+  </form>
+  <div class="dlg-foot">${neu ? '' : `<button class="danger" data-act="del-be" data-id="${b.id}">Löschen</button>`}<button class="primary" data-act="save-be">Speichern</button></div>`);
+  b._neu = neu;
+  if (b.dateiId && /^image\//.test(b.dateiTyp || '')) idbGet('datei:' + b.dateiId).then((d) => { const pv = $('#filePrev'); if (d && pv && !pendingFile && edit === b) pv.insertAdjacentHTML('beforeend', `<img class="preview" alt="Beleg" src="${URL.createObjectURL(d.blob)}">`); });
+}
+/* Zuordnung zur Bankbuchung (S.bank kommt aus dem Bank-Import) */
+function bankAuswahl(b) {
+  const bank = (S.bank || []).filter((x) => num(x.betrag) < 0 && (!x.belegId || x.belegId === b.id));
+  if (!bank.length) return '';
+  const br = num(b.brutto), passt = (x) => br && Math.abs(-num(x.betrag) - br) < 0.005;
+  const abstand = (x) => Math.abs((Date.parse(x.datum) || 0) - (Date.parse(b.datum) || 0)) / 86400000;
+  const sortiert = bank.sort((x, y) => (passt(y) - passt(x)) || abstand(x) - abstand(y)).slice(0, 40);
+  return `<label class="full">Zahlung auf dem Konto<select name="buchungId"><option value="">Noch nicht zugeordnet</option>${sortiert.map((x) => `<option value="${esc(x.id)}"${x.id === b.buchungId ? ' selected' : ''}>${dat(x.datum)} · ${esc(x.gegenpartei || x.zweck || '')} · ${eur(num(x.betrag))}${passt(x) ? ' · Betrag passt' : ''}</option>`).join('')}</select></label>`;
+}
+function calcVst() {
+  const f = $('#beForm'); if (!f) return;
+  const br = num(f.elements.brutto.value), s = num(f.elements.ustSatz.value);
+  f.elements.vorsteuer.placeholder = ku() || f.elements.rc.value ? '0,00' : String(r2(br - br / (1 + s / 100)).toFixed(2)).replace('.', ',');
+}
+async function storeFile(prefix) {
+  if (!pendingFile) return null;
+  const id = prefix + uid();
+  await idbSet('datei:' + id, { name: pendingFile.name, type: pendingFile.type, blob: pendingFile });
+  return { dateiId: id, dateiName: pendingFile.name, dateiTyp: pendingFile.type };
+}
+async function saveBeleg() {
+  const f = $('#beForm'), b = edit;
+  const neu = b._neu; delete b._neu;
+  const br = num(f.elements.brutto.value), s = num(f.elements.ustSatz.value);
+  const vstIn = f.elements.vorsteuer.value.trim();
+  Object.assign(b, { lieferant: f.elements.lieferant.value.trim(), datum: f.elements.datum.value, brutto: br, ustSatz: s, kategorie: f.elements.kategorie.value, notiz: f.elements.notiz.value.trim(), zahlweg: f.elements.zahlweg.value });
+  if (f.elements.buchungId) b.buchungId = f.elements.buchungId.value;
+  if (b.buchungId && b.zahlweg === 'offen') b.zahlweg = 'konto';
+  b.rc = f.elements.rc.value;
+  b.vorsteuer = ku() || b.rc ? 0 : (vstIn ? num(vstIn) : r2(br - br / (1 + s / 100)));
+  const fi = await storeFile('b');
+  if (fi) { if (b.dateiId) await idbDel('datei:' + b.dateiId); Object.assign(b, fi); }
+  if (!b.dateiId && !br) return toast('Bitte eine Datei wählen oder einen Betrag eintragen.');
+  const i = S.belege.findIndex((x) => x.id === b.id);
+  if (i >= 0) S.belege[i] = b; else S.belege.push(b);
+  b.hochgeladen = b.hochgeladen || heute();
+  for (const x of S.bank || []) { if (x.belegId === b.id && x.id !== b.buchungId) x.belegId = null; if (b.buchungId && x.id === b.buchungId) x.belegId = b.id; }
+  merkeLieferant(b.lieferant, b.kategorie, b.rc);
+  await save(); closeDlg(); tab = 'belege'; render(); toast(neu ? 'Beleg gespeichert' : 'Gespeichert');
+}
+function zeigeDatei(file) {
+  const pv = $('#filePrev'); if (!pv) return;
+  if (!file) { pv.innerHTML = ''; return; }
+  pv.innerHTML = file.type.startsWith('image/') ? `<img class="preview" alt="Vorschau" src="${URL.createObjectURL(file)}">` : `<p class="small">Ausgewählt: ${esc(file.name)}</p>`;
+  const f = $('#beForm');
+  if (f && !f.elements.lieferant.value) {
+    const l = rateLieferant(file.name);
+    f.elements.lieferant.value = l ? l.name : nameAusDatei(file.name);
+    if (l) lieferantVorgaben(l, f);
+  }
+}
+function lieferantVorgaben(l, f) {
+  if (l.kategorie && !f.elements.kategorie.value) f.elements.kategorie.value = l.kategorie;
+  if (l.rc && f.elements.rc && !f.elements.rc.value) { f.elements.rc.value = l.rc; calcVst(); }
+}
+function waehleDateien(opt) {
+  const inp = document.createElement('input'); inp.type = 'file'; inp.accept = opt.accept || 'image/*,application/pdf,.xml';
+  if (opt.multiple) inp.multiple = true;
+  if (opt.kamera) inp.setAttribute('capture', 'environment');
+  inp.onchange = () => dateienRein(inp.files).catch((e) => { console.error(e); toast('Die Dateien konnten nicht gespeichert werden.'); });
+  inp.click();
+}
+/* Eine Datei: Beleg-Dialog. Mehrere: je ein Beleg, Betrag und Kategorie werden danach ergänzt. */
+async function dateienRein(liste) {
+  let files = [...(liste || [])].filter((f) => f && f.size);
+  const gross = files.filter((f) => f.size > 25e6);
+  files = files.filter((f) => f.size <= 25e6);
+  if (gross.length) toast(`${gross.length} Datei${gross.length > 1 ? 'en sind' : ' ist'} größer als 25 MB und wurde${gross.length > 1 ? 'n' : ''} übersprungen.`);
+  if (!files.length) return;
+  if (files.length === 1) { vBeleg(null); pendingFile = files[0]; zeigeDatei(files[0]); return; }
+  for (const file of files) {
+    pendingFile = file;
+    const fi = await storeFile('b'), l = rateLieferant(file.name);
+    S.belege.push(Object.assign({ id: uid(), datum: heute(), lieferant: l ? l.name : nameAusDatei(file.name), brutto: 0, ustSatz: 19, vorsteuer: '', kategorie: (l && l.kategorie) || '', rc: (l && l.rc) || '', notiz: '', zahlweg: 'konto', hochgeladen: heute() }, fi));
+  }
+  pendingFile = null;
+  await save(); closeDlg(); filter.be = 'fehlt'; tab = 'belege'; render(); window.scrollTo(0, 0);
+  toast(`${files.length} Belege gespeichert. Ergänze jetzt Betrag und Kategorie.`);
+}
+function vExtern() {
+  pendingFile = null;
+  edit = { id: uid(), typ: 'rechnung', extern: true, status: 'offen', nr: '', datum: heute(), faellig: '', kunde: { name: '', adresse: '' }, netto: '', ust: '' };
+  openDlg(`${head('Vorhandene Rechnung hinterlegen')}<form id="exForm" class="dlg-body" autocomplete="off">
+    <p class="small muted" style="margin-top:0">Für Rechnungen, die du schon woanders geschrieben hast. Sie zählen dann zu Umsatz und Umsatzsteuer.</p>
+    ${fileInput(null)}
+    <div class="grid2" style="margin-top:12px">
+      <label>Rechnungsnummer<input name="nr" placeholder="wie auf der Rechnung"></label>
+      <label>Kunde<input name="k_name" list="kunden2"></label>
+      <datalist id="kunden2">${S.kunden.map((k) => `<option value="${esc(k.name)}">`).join('')}</datalist>
+      <label>Rechnungsdatum<input type="date" name="datum" value="${heute()}"></label>
+      <label>Zahlbar bis (optional)<input type="date" name="faellig"></label>
+      <label>Netto €<input name="netto" inputmode="decimal" placeholder="0,00"></label>
+      <label>Umsatzsteuer €<input name="ust" inputmode="decimal" placeholder="${ku() ? '0,00' : 'z. B. 19 % vom Netto'}"></label>
+      <label class="check full"><input type="checkbox" name="bezahlt"> Ist schon bezahlt</label>
+    </div>
+  </form>
+  <div class="dlg-foot"><button class="primary" data-act="save-ext">Hinterlegen</button></div>`);
+}
+async function saveExtern() {
+  const f = $('#exForm'), r = edit;
+  const netto = num(f.elements.netto.value);
+  const ustIn = f.elements.ust.value.trim();
+  Object.assign(r, { nr: f.elements.nr.value.trim(), datum: f.elements.datum.value, faellig: f.elements.faellig.value, netto, ust: ku() ? 0 : (ustIn ? num(ustIn) : r2(netto * 0.19)) });
+  r.kunde = { name: f.elements.k_name.value.trim(), adresse: '' };
+  if (f.elements.bezahlt.checked) { r.status = 'bezahlt'; r.bezahltAm = r.datum; }
+  if (!r.nr || !netto) return toast('Bitte Rechnungsnummer und Nettobetrag eintragen.');
+  const fi = await storeFile('r'); if (fi) Object.assign(r, fi);
+  merkeKunde(r.kunde);
+  S.rechnungen.push(r);
+  await save(); closeDlg(); tab = 'rechnungen'; render(); toast('Rechnung hinterlegt');
+}
+
+/* ---------- Druck / PDF ---------- */
+function druck(d, titel) {
+  const f = S.firma, s = summen(d);
+  const absender = [f.name, f.strasse, [f.plz, f.ort].join(' ')].filter((x) => x && x.trim()).join(' · ');
+  const isRe = d.typ !== 'angebot';
+  $('#druck').innerHTML = `
+    <div class="kopf"><div><div class="absender">${esc(absender)}</div><div style="white-space:pre-line"><b>${esc(d.kunde.name)}</b>\n${esc(d.kunde.adresse)}${d.kunde.ustid ? '\nUSt-IdNr.: ' + esc(d.kunde.ustid) : ''}</div></div>
+    <div>${f.logo ? `<img class="logo" src="${esc(f.logo)}" alt="">` : ''}<table class="meta"><tr><td>${isRe ? 'Rechnungsnr.' : 'Angebotsnr.'}</td><td><b>${esc(d.nr)}</b></td></tr><tr><td>Datum</td><td>${dat(d.datum)}</td></tr>
+    ${isRe ? `<tr><td>Leistungsdatum</td><td>${dat(d.leistungsdatum)}</td></tr>` : `<tr><td>Gültig bis</td><td>${dat(d.gueltigBis)}</td></tr>`}
+    ${f.steuernr ? `<tr><td>Steuernr.</td><td>${esc(f.steuernr)}</td></tr>` : ''}${f.ustid ? `<tr><td>USt-IdNr.</td><td>${esc(f.ustid)}</td></tr>` : ''}</table></div></div>
+    <h1>${titel}</h1>
+    ${d.stornoVon ? `<p>Stornorechnung zur Rechnung ${esc((S.rechnungen.find((x) => x.id === d.stornoVon) || {}).nr || '')}.</p>` : ''}
+    <table class="p"><tr><th>Pos.</th><th>Beschreibung</th><th class="r">Menge</th><th class="r">Einzelpreis</th>${d.ku ? '' : '<th class="r">USt</th>'}<th class="r">Betrag</th></tr>
+    ${d.positionen.map((p, i) => `<tr><td>${i + 1}</td><td>${esc(p.text)}</td><td class="r">${String(p.menge).replace('.', ',')} ${esc(p.einheit)}</td><td class="r">${eur(num(p.preis))}</td>${d.ku ? '' : `<td class="r">${num(p.ust)} %</td>`}<td class="r">${eur(r2(num(p.menge) * num(p.preis)))}</td></tr>`).join('')}</table>
+    <div class="sum"><div><span>Netto</span><span>${eur(s.netto)}</span></div>
+    ${d.ku ? '' : Object.keys(s.proSatz).sort((a, b) => b - a).map((k) => `<div><span>USt ${k} %</span><span>${eur(r2(s.proSatz[k] * k / 100))}</span></div>`).join('')}
+    <div class="g"><span>Gesamtbetrag</span><span>${eur(s.brutto)}</span></div></div>
+    ${d.ku ? `<p>${KU_HINWEIS}</p>` : ''}
+    ${RC[d.rc] ? `<p>${RC[d.rc].hinweis}</p>` : ''}
+    ${isRe && d.typ !== 'gutschrift' && d.faellig ? `<p>Bitte überweisen Sie den Betrag bis zum ${dat(d.faellig)} unter Angabe der Rechnungsnummer${f.iban ? ' auf das unten genannte Konto' : ''}.</p>` : ''}
+    ${d.hinweis ? `<p style="white-space:pre-line">${esc(d.hinweis)}</p>` : ''}
+    ${fussHtml()}`;
+  const alt = document.title; document.title = (d.nr || titel).replace(/[^\w-]+/g, '_');
+  window.print();
+  setTimeout(() => { document.title = alt; }, 500);
+}
+
+/* ---------- E-Rechnung (XRechnung 3.0, UBL) ---------- */
+function kundenAdresse(t) {
+  const z = String(t || '').split('\n').map((l) => l.trim()).filter(Boolean);
+  const last = z.length > 1 ? z[z.length - 1] : '';
+  const m = last.match(/^(?:D-?\s*)?(\d{5})\s+(.+)$/);
+  return { strasse: z.length > 1 ? z.slice(0, -1).join(', ') : z[0] || '', plz: m ? m[1] : '', ort: m ? m[2] : last };
+}
+/* Was die XRechnung zusätzlich zu § 14 UStG braucht, sonst lehnt das Prüfprogramm des Empfängers sie ab */
+function eRechnungFehlt(r) {
+  const f = S.firma, k = kundenAdresse(r.kunde.adresse), m = [];
+  if (!f.email) m.push(['Deine E-Mail-Adresse', 'firma']);
+  if (!f.tel || (f.tel.match(/\d/g) || []).length < 3) m.push(['Deine Telefonnummer', 'firma']);
+  if (!f.strasse || !f.plz || !f.ort) m.push(['Deine vollständige Anschrift', 'firma']);
+  if (!f.iban) m.push(['Deine IBAN (für die Zahlungsangaben)', 'firma']);
+  if (!r.kunde.email) m.push(['E-Mail-Adresse des Kunden', 'kunde']);
+  if (!k.plz || !k.ort) m.push(['Kundenanschrift mit PLZ und Ort in der letzten Zeile', 'kunde']);
+  return m;
+}
+
+function xrechnung(r) {
+  const f = S.firma, s = summen(r), x = (v) => esc(v || '');
+  const a = (n) => n.toFixed(2);
+  const credit = r.typ === 'gutschrift';
+  const adr = kundenAdresse;
+  const k = adr(r.kunde.adresse);
+  const kat = (satz) => r.ku ? 'E' : RC[r.rc] ? RC[r.rc].xml : (satz > 0 ? 'S' : 'Z');
+  const sub = r.ku ? [[0, s.netto]] : Object.entries(s.proSatz).map(([k2, v]) => [Number(k2), v]);
+  const taxSub = sub.map(([satz, basis]) => `
+      <cac:TaxSubtotal><cbc:TaxableAmount currencyID="EUR">${a(r2(basis))}</cbc:TaxableAmount><cbc:TaxAmount currencyID="EUR">${a(r2(basis * satz / 100))}</cbc:TaxAmount>
+        <cac:TaxCategory><cbc:ID>${kat(satz)}</cbc:ID><cbc:Percent>${satz}</cbc:Percent>${r.ku ? '<cbc:TaxExemptionReason>Kleinunternehmer gemäß § 19 UStG</cbc:TaxExemptionReason>' : RC[r.rc] ? `<cbc:TaxExemptionReason>${RC[r.rc].hinweis}</cbc:TaxExemptionReason>` : ''}<cac:TaxScheme><cbc:ID>VAT</cbc:ID></cac:TaxScheme></cac:TaxCategory></cac:TaxSubtotal>`).join('');
+  const lines = r.positionen.map((p, i) => `
+  <cac:InvoiceLine><cbc:ID>${i + 1}</cbc:ID><cbc:InvoicedQuantity unitCode="${/std/i.test(p.einheit) ? 'HUR' : /tag/i.test(p.einheit) ? 'DAY' : 'C62'}">${num(p.menge)}</cbc:InvoicedQuantity><cbc:LineExtensionAmount currencyID="EUR">${a(r2(num(p.menge) * num(p.preis)))}</cbc:LineExtensionAmount>
+    <cac:Item><cbc:Name>${x(p.text)}</cbc:Name><cac:ClassifiedTaxCategory><cbc:ID>${kat(num(p.ust))}</cbc:ID><cbc:Percent>${r.ku ? 0 : num(p.ust)}</cbc:Percent><cac:TaxScheme><cbc:ID>VAT</cbc:ID></cac:TaxScheme></cac:ClassifiedTaxCategory></cac:Item>
+    <cac:Price><cbc:PriceAmount currencyID="EUR">${a(num(p.preis))}</cbc:PriceAmount></cac:Price></cac:InvoiceLine>`).join('');
+  const orig = r.stornoVon ? S.rechnungen.find((y) => y.id === r.stornoVon) : null;
+  return `<?xml version="1.0" encoding="UTF-8"?>
+<ubl:Invoice xmlns:ubl="urn:oasis:names:specification:ubl:schema:xsd:Invoice-2" xmlns:cac="urn:oasis:names:specification:ubl:schema:xsd:CommonAggregateComponents-2" xmlns:cbc="urn:oasis:names:specification:ubl:schema:xsd:CommonBasicComponents-2">
+  <cbc:CustomizationID>urn:cen.eu:en16931:2017#compliant#urn:xeinkauf.de:kosit:xrechnung_3.0</cbc:CustomizationID>
+  <cbc:ProfileID>urn:fdc:peppol.eu:2017:poacc:billing:01:1.0</cbc:ProfileID>
+  <cbc:ID>${x(r.nr)}</cbc:ID>
+  <cbc:IssueDate>${r.datum}</cbc:IssueDate>
+  ${r.faellig && !credit ? `<cbc:DueDate>${r.faellig}</cbc:DueDate>` : ''}
+  <cbc:InvoiceTypeCode>${credit ? 384 : 380}</cbc:InvoiceTypeCode>
+  ${r.ku ? `<cbc:Note>${KU_HINWEIS}</cbc:Note>` : ''}${r.hinweis ? `<cbc:Note>${x(r.hinweis)}</cbc:Note>` : ''}
+  <cbc:DocumentCurrencyCode>EUR</cbc:DocumentCurrencyCode>
+  <cbc:BuyerReference>${x(r.kunde.leitweg || r.leitwegId || r.nr)}</cbc:BuyerReference>
+  ${orig ? `<cac:BillingReference><cac:InvoiceDocumentReference><cbc:ID>${x(orig.nr)}</cbc:ID><cbc:IssueDate>${orig.datum}</cbc:IssueDate></cac:InvoiceDocumentReference></cac:BillingReference>` : ''}
+  <cac:AccountingSupplierParty><cac:Party>
+    ${f.email ? `<cbc:EndpointID schemeID="EM">${x(f.email)}</cbc:EndpointID>` : ''}
+    <cac:PostalAddress><cbc:StreetName>${x(f.strasse)}</cbc:StreetName><cbc:CityName>${x(f.ort)}</cbc:CityName><cbc:PostalZone>${x(f.plz)}</cbc:PostalZone><cac:Country><cbc:IdentificationCode>DE</cbc:IdentificationCode></cac:Country></cac:PostalAddress>
+    ${f.ustid ? `<cac:PartyTaxScheme><cbc:CompanyID>${x(f.ustid)}</cbc:CompanyID><cac:TaxScheme><cbc:ID>VAT</cbc:ID></cac:TaxScheme></cac:PartyTaxScheme>` : ''}
+    ${f.steuernr ? `<cac:PartyTaxScheme><cbc:CompanyID>${x(f.steuernr)}</cbc:CompanyID><cac:TaxScheme><cbc:ID>FC</cbc:ID></cac:TaxScheme></cac:PartyTaxScheme>` : ''}
+    <cac:PartyLegalEntity><cbc:RegistrationName>${x(f.name)}</cbc:RegistrationName></cac:PartyLegalEntity>
+    <cac:Contact><cbc:Name>${x(f.inhaber || f.name)}</cbc:Name><cbc:Telephone>${x(f.tel || '-')}</cbc:Telephone><cbc:ElectronicMail>${x(f.email || '-')}</cbc:ElectronicMail></cac:Contact>
+  </cac:Party></cac:AccountingSupplierParty>
+  <cac:AccountingCustomerParty><cac:Party>
+    ${r.kunde.email ? `<cbc:EndpointID schemeID="EM">${x(r.kunde.email)}</cbc:EndpointID>` : ''}
+    <cac:PostalAddress><cbc:StreetName>${x(k.strasse)}</cbc:StreetName><cbc:CityName>${x(k.ort)}</cbc:CityName><cbc:PostalZone>${x(k.plz)}</cbc:PostalZone><cac:Country><cbc:IdentificationCode>DE</cbc:IdentificationCode></cac:Country></cac:PostalAddress>
+    ${r.kunde.ustid ? `<cac:PartyTaxScheme><cbc:CompanyID>${x(r.kunde.ustid)}</cbc:CompanyID><cac:TaxScheme><cbc:ID>VAT</cbc:ID></cac:TaxScheme></cac:PartyTaxScheme>` : ''}
+    <cac:PartyLegalEntity><cbc:RegistrationName>${x(r.kunde.name)}</cbc:RegistrationName></cac:PartyLegalEntity>
+  </cac:Party></cac:AccountingCustomerParty>
+  <cac:Delivery><cbc:ActualDeliveryDate>${r.leistungsdatum || r.datum}</cbc:ActualDeliveryDate></cac:Delivery>
+  ${f.iban ? `<cac:PaymentMeans><cbc:PaymentMeansCode>58</cbc:PaymentMeansCode><cbc:PaymentID>${x(r.nr)}</cbc:PaymentID><cac:PayeeFinancialAccount><cbc:ID>${x(f.iban.replace(/\s/g, ''))}</cbc:ID>${f.bank ? `<cbc:Name>${x(f.name)}</cbc:Name>` : ''}${f.bic ? `<cac:FinancialInstitutionBranch><cbc:ID>${x(f.bic)}</cbc:ID></cac:FinancialInstitutionBranch>` : ''}</cac:PayeeFinancialAccount></cac:PaymentMeans>` : ''}
+  ${r.faellig && !credit ? `<cac:PaymentTerms><cbc:Note>Zahlbar bis ${dat(r.faellig)}</cbc:Note></cac:PaymentTerms>` : ''}
+  <cac:TaxTotal><cbc:TaxAmount currencyID="EUR">${a(s.ust)}</cbc:TaxAmount>${taxSub}
+  </cac:TaxTotal>
+  <cac:LegalMonetaryTotal><cbc:LineExtensionAmount currencyID="EUR">${a(s.netto)}</cbc:LineExtensionAmount><cbc:TaxExclusiveAmount currencyID="EUR">${a(s.netto)}</cbc:TaxExclusiveAmount><cbc:TaxInclusiveAmount currencyID="EUR">${a(s.brutto)}</cbc:TaxInclusiveAmount><cbc:PayableAmount currencyID="EUR">${a(s.brutto)}</cbc:PayableAmount></cac:LegalMonetaryTotal>${lines}
+</ubl:Invoice>
+`;
+}
+function download(name, text, type) {
+  const blob = text instanceof Blob ? text : new Blob([text], { type: type || 'application/octet-stream' });
+  const url = URL.createObjectURL(blob);
+  const aEl = document.createElement('a'); aEl.href = url; aEl.download = name; document.body.appendChild(aEl); aEl.click(); aEl.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 4000);
+}
+
+/* ---------- Sicherung ---------- */
+const blobToData = (b) => new Promise((res) => { const fr = new FileReader(); fr.onload = () => res(fr.result); fr.readAsDataURL(b); });
+async function backup() {
+  const keys = (await idbKeys()).filter((k) => String(k).startsWith('datei:'));
+  const dateien = {};
+  for (const k of keys) { const d = await idbGet(k); if (d) dateien[k] = { name: d.name, type: d.type, data: await blobToData(d.blob) }; }
+  S.letzteSicherung = heute(); await save();
+  download(`steuer-cockpit-sicherung-${heute()}.json`, JSON.stringify({ app: 'steuer-cockpit', erstellt: new Date().toISOString(), state: S, dateien }), 'application/json');
+  render(); toast('Sicherung heruntergeladen');
+}
+function restore() {
+  const inp = document.createElement('input'); inp.type = 'file'; inp.accept = 'application/json,.json';
+  inp.onchange = async () => {
+    try {
+      const j = JSON.parse(await inp.files[0].text());
+      if (j.app !== 'steuer-cockpit' || !j.state) throw new Error('kein Format');
+      if (!confirm('Die Sicherung ersetzt alle Daten auf diesem Gerät. Fortfahren?')) return;
+      for (const [k, d] of Object.entries(j.dateien || {})) { const blob = await (await fetch(d.data)).blob(); await idbSet(k, { name: d.name, type: d.type, blob }); }
+      S = Object.assign(leer(), j.state, { firma: Object.assign(leer().firma, j.state.firma || {}), steuer: Object.assign(leer().steuer, j.state.steuer || {}) }); migriere(); await save(); render(); toast('Sicherung eingespielt');
+    } catch (e) { toast('Diese Datei ist keine Sicherung des Steuer-Cockpits.'); }
+  };
+  inp.click();
+}
+
+/* ---------- Aktionen ---------- */
+const ACT = {
+  tab: (el) => { tab = el.dataset.k; closeDlg(); render(); window.scrollTo(0, 0); },
+  filter: (el) => { filter[el.dataset.f] = el.dataset.k; render(); },
+  menu: vMenu,
+  close: closeDlg,
+  'new-an': () => { edit = Object.assign(neuesDoc('angebot'), { neu: true }); vEditor(); },
+  'new-re': () => { edit = Object.assign(neuesDoc('rechnung'), { neu: true }); vEditor(); },
+  'new-be': () => vBeleg(null),
+  'new-ext': vExtern,
+  'open-an': (el) => vDetailAn(el.dataset.id),
+  'open-re': (el) => vDetailRe(el.dataset.id),
+  'open-be': (el) => vBeleg(JSON.parse(JSON.stringify(S.belege.find((b) => b.id === el.dataset.id)))),
+  'edit-an': (el) => { edit = JSON.parse(JSON.stringify(S.angebote.find((a) => a.id === el.dataset.id))); vEditor(); },
+  'pos-add': () => { readEditor(); edit.positionen.push({ text: '', menge: 1, einheit: edit.positionen.length ? edit.positionen[edit.positionen.length - 1].einheit : 'Stk.', preis: 0, ust: edit.positionen.length ? edit.positionen[edit.positionen.length - 1].ust : 19 }); $('#posList').innerHTML = edit.positionen.map(posHtml).join(''); refreshEditor(); const ins = $('#posList').querySelectorAll('[name=p_text]'); ins[ins.length - 1].focus(); },
+  'pos-del': (el) => { readEditor(); edit.positionen.splice(Number(el.dataset.i), 1); if (!edit.positionen.length) edit.positionen.push({ text: '', menge: 1, einheit: 'Stk.', preis: 0, ust: 19 }); $('#posList').innerHTML = edit.positionen.map(posHtml).join(''); refreshEditor(); },
+  'save-doc': () => saveDoc(false),
+  stellen: () => saveDoc(true),
+  'del-doc': async () => {
+    if (!confirm(edit.typ === 'angebot' ? 'Angebot löschen?' : 'Entwurf löschen?')) return;
+    const coll = edit.typ === 'angebot' ? 'angebote' : 'rechnungen';
+    S[coll] = S[coll].filter((x) => x.id !== edit.id); await save(); closeDlg(); render();
+  },
+  'an-status': async (el) => { const a = S.angebote.find((x) => x.id === el.dataset.id); a.status = el.dataset.k; await save(); vDetailAn(a.id); render(); },
+  'an-to-re': (el) => {
+    const a = S.angebote.find((x) => x.id === el.dataset.id);
+    const r = neuesDoc('rechnung');
+    Object.assign(r, { kunde: JSON.parse(JSON.stringify(a.kunde)), positionen: JSON.parse(JSON.stringify(a.positionen)), ausAngebot: a.id, hinweis: '', neu: true, ku: a.ku });
+    edit = r; vEditor(); toast('Positionen aus dem Angebot übernommen');
+  },
+  bezahlt: async (el) => { const r = S.rechnungen.find((x) => x.id === el.dataset.id); r.status = 'bezahlt'; r.bezahltAm = ($('#bezDat') || {}).value || heute(); await save(); vDetailRe(r.id); render(); toast('Als bezahlt markiert'); },
+  unbezahlt: async (el) => { const r = S.rechnungen.find((x) => x.id === el.dataset.id); r.status = 'offen'; delete r.bezahltAm; for (const b of S.bank) if (b.rechnungId === r.id) b.rechnungId = null; await save(); vDetailRe(r.id); render(); },
+  storno: async (el) => {
+    const r = S.rechnungen.find((x) => x.id === el.dataset.id);
+    if (!confirm(`Rechnung ${r.nr} stornieren? Es wird eine Stornorechnung mit negativen Beträgen erstellt.`)) return;
+    let g;
+    if (r.extern) { g = { id: uid(), typ: 'gutschrift', extern: true, nr: naechsteNr('RE', heute().slice(0, 4)), datum: heute(), kunde: r.kunde, netto: -num(r.netto), ust: -num(r.ust), status: 'offen', stornoVon: r.id }; }
+    else { g = JSON.parse(JSON.stringify(r)); Object.assign(g, { id: uid(), typ: 'gutschrift', nr: naechsteNr('RE', heute().slice(0, 4)), datum: heute(), status: 'offen', stornoVon: r.id, hinweis: '', ausAngebot: null }); delete g.bezahltAm; delete g.stornoId; g.positionen = g.positionen.map((p) => Object.assign(p, { menge: -num(p.menge) })); }
+    r.status = 'storniert'; r.stornoId = g.id;
+    S.rechnungen.push(g); await save(); vDetailRe(g.id); render(); toast(`Stornorechnung ${g.nr} erstellt`);
+  },
+  'del-ext': async (el) => { if (!confirm('Hinterlegte Rechnung entfernen?')) return; const r = S.rechnungen.find((x) => x.id === el.dataset.id); if (r.dateiId) await idbDel('datei:' + r.dateiId); S.rechnungen = S.rechnungen.filter((x) => x.id !== r.id); await save(); closeDlg(); render(); },
+  print: (el) => {
+    if (el.dataset.t === 'an') druck(S.angebote.find((x) => x.id === el.dataset.id), 'Angebot');
+    else { const r = S.rechnungen.find((x) => x.id === el.dataset.id); druck(r, r.typ === 'gutschrift' ? 'Stornorechnung' : 'Rechnung'); }
+  },
+  xml: (el) => {
+    const r = S.rechnungen.find((x) => x.id === el.dataset.id), m = eRechnungFehlt(r);
+    if (m.length) return vERechnungFehlt(r, m);
+    download(`${r.nr}.xml`, xrechnung(r), 'application/xml'); toast('E-Rechnung gespeichert');
+  },
+  'kunde-nach': async (el) => {
+    const r = S.rechnungen.find((x) => x.id === el.dataset.id), f = $('#nachForm');
+    r.kunde.email = f.elements.k_email.value.trim() || r.kunde.email;
+    r.kunde.leitweg = f.elements.k_leitweg.value.trim();
+    const plz = f.elements.k_plz.value.trim(), ort = f.elements.k_ort.value.trim();
+    if (plz && ort) { const k = kundenAdresse(r.kunde.adresse); r.kunde.adresse = (k.strasse ? k.strasse.split(', ').join('\n') + '\n' : '') + plz + ' ' + ort; }
+    merkeKunde(r.kunde); await save();
+    const m = eRechnungFehlt(r); if (m.length) return vERechnungFehlt(r, m);
+    download(`${r.nr}.xml`, xrechnung(r), 'application/xml'); toast('E-Rechnung gespeichert'); vDetailRe(r.id);
+  },
+  mahnen: (el) => vMahnen(el.dataset.id),
+  'mahn-save': saveMahnung,
+  'mahn-print': (el) => { const r = S.rechnungen.find((x) => x.id === el.dataset.id); druckMahnung(r, r.mahnungen[Number(el.dataset.i)]); },
+  file: async (el) => {
+    const d = await idbGet('datei:' + el.dataset.id); if (!d) return toast('Datei nicht gefunden.');
+    const url = URL.createObjectURL(d.blob); const w = window.open(url, '_blank'); if (!w) download(d.name, d.blob); setTimeout(() => URL.revokeObjectURL(url), 60000);
+  },
+  'save-be': saveBeleg,
+  'del-be': async (el) => { if (!confirm('Beleg löschen?')) return; const b = S.belege.find((x) => x.id === el.dataset.id); if (b.dateiId) await idbDel('datei:' + b.dateiId); for (const x of S.bank || []) if (x.belegId === b.id) x.belegId = null; S.belege = S.belege.filter((x) => x.id !== b.id); await save(); closeDlg(); render(); },
+  'bk-beleg': (el) => {
+    const x = S.bank.find((y) => y.id === el.dataset.id); if (!x) return;
+    const l = S.lieferanten.find((y) => (x.gegenpartei || '').toLowerCase().includes(y.name.toLowerCase()));
+    vBeleg({ id: uid(), datum: x.datum, lieferant: l ? l.name : x.gegenpartei || '', brutto: -num(x.betrag), ustSatz: 19, vorsteuer: '', kategorie: (l && l.kategorie) || '', rc: (l && l.rc) || '', notiz: x.zweck || '', zahlweg: 'konto', buchungId: x.id });
+    edit._neu = true; calcVst();
+  },
+  'be-kamera': () => waehleDateien({ accept: 'image/*', kamera: true }),
+  'be-dateien': () => waehleDateien({ multiple: true }),
+  'be-ergaenzen': () => { filter.be = 'fehlt'; tab = 'belege'; closeDlg(); render(); window.scrollTo(0, 0); },
+  'rf-wizard': () => { wiz = {}; vWizard(); },
+  wiz: (el) => { const k = el.dataset.k; for (const x of WZ_ORDNUNG.slice(WZ_ORDNUNG.indexOf(k))) delete wiz[x]; wiz[k] = el.dataset.v; vWizard(); },
+  'wiz-back': () => { const fr = wizFragen(wiz).filter((x) => wiz[x]); delete wiz[fr[fr.length - 1]]; vWizard(); },
+  'wiz-ok': async (el) => {
+    leseFirma();
+    const kuEl = $('#wizKu');
+    S.firma.rechtsform = el.dataset.k; S.firma.kleinunternehmer = kuEl ? kuEl.checked : false;
+    await save(); closeDlg(); tab = 'firma'; render(); toast('Rechtsform übernommen');
+  },
+  'logo-del': async () => { leseFirma(); S.firma.logo = ''; await save(); render(); toast('Logo entfernt'); },
+  kontakte: (el) => vKontakte(el.dataset.k),
+  kontakt: (el) => vKontakt(el.dataset.id),
+  'kontakt-save': saveKontakt,
+  'kontakt-del': async () => {
+    if (!confirm(`${edit.name} löschen? Bestehende Rechnungen und Belege bleiben unverändert.`)) return;
+    S[kTyp] = S[kTyp].filter((x) => x.id !== edit.id); await save(); render(); vKontakte();
+  },
+  'kunde-doc': (el) => {
+    const k = S.kunden.find((x) => x.id === el.dataset.id);
+    edit = Object.assign(neuesDoc(el.dataset.k), { neu: true });
+    edit.kunde = { name: k.name, adresse: k.adresse || '', ustid: k.ustid || '', email: k.email || '' };
+    vEditor();
+  },
+  'save-ext': saveExtern,
+  'bank-import': bankImport,
+  'open-bk': (el) => vBuchung(el.dataset.id),
+  'bk-zu': async (el) => {
+    const b = S.bank.find((x) => x.id === el.dataset.id), r = S.rechnungen.find((x) => x.id === el.dataset.k);
+    b.rechnungId = r.id; r.status = 'bezahlt'; r.bezahltAm = b.datum;
+    await save(); vBuchung(b.id); render(); toast(`Rechnung ${r.nr} als bezahlt markiert`);
+  },
+  'bk-los': async (el) => {
+    const b = S.bank.find((x) => x.id === el.dataset.id), r = S.rechnungen.find((x) => x.id === b.rechnungId);
+    if (r && r.status === 'bezahlt') { r.status = 'offen'; delete r.bezahltAm; }
+    b.rechnungId = null; await save(); vBuchung(b.id); render();
+  },
+  backup, restore,
+  'st-jahr': (el) => { stJahr = Number(el.dataset.k); render(); },
+  'st-done': async (el) => { const k = el.dataset.k; if (S.steuer.erledigt[k]) delete S.steuer.erledigt[k]; else S.steuer.erledigt[k] = heute(); await save(); render(); toast(S.steuer.erledigt[k] ? 'Als erledigt markiert' : 'Wieder offen'); },
+  'st-copy': async (el) => { try { await navigator.clipboard.writeText(el.dataset.k); toast(`${el.dataset.k} kopiert`); } catch (err) { toast('Kopieren geht hier nicht, bitte abtippen.'); } },
+  'st-csv': (el) => stCsv(el.dataset.k),
+  'st-zm': (el) => stZm(el.dataset.k),
+  'st-print': (el) => stPrint(el.dataset.k),
+  'st-ics': stIcs,
+  wipe: async () => { if (!confirm('Wirklich alle Daten auf diesem Gerät löschen? Das kann nicht rückgängig gemacht werden.')) return; for (const k of await idbKeys()) await idbDel(k); S = leer(); render(); toast('Alle Daten gelöscht'); }
+};
+document.addEventListener('click', (e) => {
+  const el = e.target.closest('[data-act]'); if (!el) return;
+  const fn = ACT[el.dataset.act]; if (!fn) return;
+  e.preventDefault();
+  Promise.resolve(fn(el)).catch((err) => { console.error(err); toast('Da ist etwas schiefgegangen.'); });
+});
+document.addEventListener('input', (e) => {
+  if (e.target.closest('#edForm')) refreshEditor();
+  if (e.target.closest('#beForm')) calcVst();
+  if (e.target.name === 'lieferant' && e.target.closest('#beForm')) {
+    const l = S.lieferanten.find((x) => x.name.toLowerCase() === e.target.value.trim().toLowerCase());
+    if (l) lieferantVorgaben(l, e.target.form);
+  }
+  if (e.target.name === 'k_name' && e.target.closest('#edForm')) {
+    const k = S.kunden.find((x) => x.name === e.target.value);
+    if (k) { const f = $('#edForm'); if (!f.elements.k_adresse.value) f.elements.k_adresse.value = k.adresse || ''; if (!f.elements.k_ustid.value) f.elements.k_ustid.value = k.ustid || ''; if (!f.elements.k_email.value) f.elements.k_email.value = k.email || ''; if (f.elements.k_leitweg && !f.elements.k_leitweg.value) f.elements.k_leitweg.value = k.leitweg || ''; refreshEditor(); }
+  }
+});
+document.addEventListener('change', async (e) => {
+  if (e.target.name === 'rc' && e.target.closest('#edForm')) { readEditor(); vEditor(); return; }
+  if (e.target.name === 'rc' && e.target.closest('#beForm')) calcVst();
+  if (e.target.id === 'stZr') { stZr = e.target.value; render(); return; }
+  if (e.target.closest('#stForm')) { saveSteuer(); return; }
+  if (e.target.id === 'fileIn') { pendingFile = e.target.files[0] || null; zeigeDatei(pendingFile); }
+  if (e.target.id === 'logoIn' && e.target.files[0]) {
+    try { const logo = await logoVerkleinern(e.target.files[0]); leseFirma(); S.firma.logo = logo; await save(); render(); toast('Logo gespeichert'); }
+    catch (err) { console.error(err); toast('Dieses Bild konnte nicht gelesen werden.'); }
+  }
+  if (e.target.closest('#firmaForm') && (e.target.name === 'rechtsform' || e.target.name === 'kleinunternehmer')) { saveFirma(false); }
+});
+document.addEventListener('submit', (e) => { if (e.target.id === 'firmaForm') { e.preventDefault(); saveFirma(true); } });
+function leseFirma() {
+  const f = $('#firmaForm'); if (!f) return;
+  for (const k of Object.keys(S.firma)) {
+    const el = f.elements[k]; if (!el) continue;
+    S.firma[k] = el.type === 'checkbox' ? el.checked : (['zahlungsziel', 'angebotTage', 'basiszins'].includes(k) ? num(el.value) : el.value.trim());
+  }
+}
+/* Logo auf höchstens 600 × 200 Pixel verkleinern und als Bild-Daten speichern */
+function logoVerkleinern(file) {
+  return new Promise((res, rej) => {
+    const url = URL.createObjectURL(file), img = new Image();
+    img.onload = () => {
+      const w = img.naturalWidth || 600, h = img.naturalHeight || 200, z = Math.min(1, 600 / w, 200 / h);
+      const c = document.createElement('canvas'); c.width = Math.max(1, Math.round(w * z)); c.height = Math.max(1, Math.round(h * z));
+      c.getContext('2d').drawImage(img, 0, 0, c.width, c.height); URL.revokeObjectURL(url);
+      res(c.toDataURL('image/png'));
+    };
+    img.onerror = () => { URL.revokeObjectURL(url); rej(new Error('Bild nicht lesbar')); };
+    img.src = url;
+  });
+}
+document.addEventListener('dragover', (e) => { if (!e.dataTransfer || ![...e.dataTransfer.types].includes('Files')) return; e.preventDefault(); const z = $('#dropZone'); if (z && !dlg.open) z.classList.add('on'); });
+document.addEventListener('dragleave', (e) => { if (!e.relatedTarget) { const z = $('#dropZone'); if (z) z.classList.remove('on'); } });
+document.addEventListener('drop', (e) => {
+  if (!e.dataTransfer || !e.dataTransfer.files.length) return;
+  e.preventDefault(); const z = $('#dropZone'); if (z) z.classList.remove('on');
+  if (dlg.open) { if ($('#fileIn')) { pendingFile = e.dataTransfer.files[0]; zeigeDatei(pendingFile); } return; }
+  dateienRein(e.dataTransfer.files).catch((err) => { console.error(err); toast('Die Dateien konnten nicht gespeichert werden.'); });
+});
+async function saveFirma(msg) {
+  leseFirma();
+  await save(); render(); if (msg) { toast('Firmendaten gespeichert'); window.scrollTo(0, 0); }
+}
+
+load().then(render).catch((e) => { console.error(e); $('#app').innerHTML = '<div class="card"><b>Der Speicher dieses Browsers ist nicht verfügbar.</b><p class="muted">Im privaten Modus oder bei blockierten Website-Daten kann die App nichts speichern. Bitte normal öffnen.</p></div>'; });
+})();
+</script>
+</body>
+</html>
