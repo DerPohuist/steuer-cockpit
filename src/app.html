@@ -100,7 +100,7 @@ textarea { min-height: 70px; resize: vertical; }
 .checks li.ok::before { content: "✓ "; color: var(--good); font-weight: 700; }
 .checks li.miss::before { content: "✗ "; color: var(--bad); font-weight: 700; }
 nav.tabs { position: fixed; left: 0; right: 0; bottom: 0; z-index: 6; background: var(--panel); border-top: 1px solid var(--line); padding-bottom: env(safe-area-inset-bottom, 0px); }
-nav.tabs .row { max-width: 860px; margin: 0 auto; display: grid; grid-template-columns: repeat(5, 1fr); }
+nav.tabs .row { max-width: 860px; margin: 0 auto; display: grid; grid-template-columns: repeat(6, 1fr); }
 nav.tabs button { border: 0; border-radius: 0; background: none; padding: 9px 2px 10px; font-size: 12px; font-weight: 600; color: var(--muted); display: grid; justify-items: center; gap: 2px; }
 nav.tabs button svg { width: 22px; height: 22px; }
 nav.tabs button[aria-current="page"] { color: var(--accent); }
@@ -197,7 +197,7 @@ function leer() {
   return {
     v: 1,
     firma: { name: '', inhaber: '', strasse: '', plz: '', ort: '', steuernr: '', ustid: '', email: '', tel: '', iban: '', bic: '', bank: '', rechtsform: '', kleinunternehmer: false, turnus: 'monat', dauerfrist: false, zahlungsziel: 14, angebotTage: 30, basiszins: 1.27 },
-    angebote: [], rechnungen: [], belege: [], kunden: [], zaehler: {}, letzteSicherung: null
+    angebote: [], rechnungen: [], belege: [], kunden: [], bank: [], zaehler: {}, letzteSicherung: null
   };
 }
 let S = leer();
@@ -295,14 +295,15 @@ const ICONS = {
   angebote: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3H6a1 1 0 0 0-1 1v16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V8z"/><path d="M14 3v5h5M9 13h6M9 17h4"/></svg>',
   rechnungen: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3h12v18l-3-2-3 2-3-2-3 2z"/><path d="M9 8h6M9 12h6M9 16h3"/></svg>',
   belege: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="6" width="18" height="14" rx="2"/><circle cx="12" cy="13" r="3.5"/><path d="M8 6l1.5-2h5L16 6"/></svg>',
+  bank: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 10l9-6 9 6M5 10v8M9.5 10v8M14.5 10v8M19 10v8M3 21h18"/></svg>',
   firma: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 21V5a1 1 0 0 1 1-1h9a1 1 0 0 1 1 1v16M15 9h4a1 1 0 0 1 1 1v11M3 21h18M8 8h3M8 12h3M8 16h3"/></svg>'
 };
-const TABS = [['start', 'Übersicht'], ['angebote', 'Angebote'], ['rechnungen', 'Rechnungen'], ['belege', 'Belege'], ['firma', 'Firma']];
+const TABS = [['start', 'Übersicht'], ['angebote', 'Angebote'], ['rechnungen', 'Rechnungen'], ['belege', 'Belege'], ['bank', 'Bank'], ['firma', 'Firma']];
 
 function render() {
   $('#tabs').innerHTML = TABS.map(([k, t]) => `<button data-act="tab" data-k="${k}"${k === tab ? ' aria-current="page"' : ''}>${ICONS[k]}<span>${t}</span></button>`).join('');
   $('#firmname').textContent = S.firma.name || '';
-  const v = { start: vStart, angebote: vAngebote, rechnungen: vRechnungen, belege: vBelege, firma: vFirma }[tab];
+  const v = { start: vStart, angebote: vAngebote, rechnungen: vRechnungen, belege: vBelege, bank: vBank, firma: vFirma }[tab];
   $('#app').innerHTML = v();
 }
 
@@ -360,8 +361,8 @@ function vStart() {
     </details>
   </div>`}
   <details class="card"><summary>Was kann die App schon, was kommt noch?</summary>
-    <p class="small" style="margin-top:8px"><b>Schon da:</b> Angebote und Rechnungen schreiben, als PDF drucken, als E-Rechnung (XRechnung) speichern, Angebot mit einem Tipp in eine Rechnung umwandeln, Storno per Stornorechnung, Belege und alte Rechnungen hochladen, Umsatzsteuer schätzen, Sicherung.</p>
-    <p class="small"><b>Kommt noch:</b> Login und Speicherung auf einem Server, Texterkennung für Belege, Bankabgleich, Buchungen nach SKR03/SKR04, Abgabe über ELSTER, Jahreserklärungen.</p>
+    <p class="small" style="margin-top:8px"><b>Schon da:</b> Angebote und Rechnungen schreiben, als PDF drucken, als E-Rechnung (XRechnung) speichern, Angebot mit einem Tipp in eine Rechnung umwandeln, Storno per Stornorechnung, Belege und alte Rechnungen hochladen, Kontoauszüge (CSV) einlesen und Zahlungen Rechnungen zuordnen, Umsatzsteuer schätzen, Sicherung.</p>
+    <p class="small"><b>Kommt noch:</b> Login und Speicherung auf einem Server, Texterkennung für Belege, direkte Qonto-Verbindung, Buchungen nach SKR03/SKR04, Abgabe über ELSTER, Jahreserklärungen.</p>
     <p class="small muted">Deine Daten liegen nur in diesem Browser auf diesem Gerät. Andere Geräte sehen sie nicht. Lade regelmäßig eine Sicherung herunter. Die Ablage hier ist noch keine GoBD-konforme Archivierung.</p>
   </details>`;
 }
@@ -418,6 +419,135 @@ function vBelege() {
       : `<div class="empty">Noch kein Beleg.<div class="btns" style="justify-content:center"><button class="primary" data-act="new-be">Beleg hochladen</button></div></div>`}
     <p class="small muted" style="margin-top:8px">Betrag, Datum und Steuersatz trägst du vorerst selbst ein. Die automatische Texterkennung kommt später.</p>
   </div>`;
+}
+
+/* ---------- Bank ---------- */
+// Spaltennamen aus Bank-Exporten (Qonto auf Deutsch, Englisch, Französisch; dazu übliche Namen anderer Banken)
+const BANK_SPALTEN = {
+  id: ['transaction id', 'transaktions-id', 'transaktions id', 'id de la transaction', 'id de transaction'],
+  datum: ['settlement date', 'datum der abwicklung', 'abwicklungsdatum', 'date de règlement', 'buchungstag', 'buchungsdatum', 'operation date', 'datum des vorgangs', 'valuta', 'datum', 'date'],
+  betrag: ['total amount (incl', 'gesamtbetrag (inkl', 'montant total (ttc', 'gesamtbetrag', 'betrag', 'amount', 'montant', 'umsatz'],
+  gegenpartei: ['counterparty', 'gegenpartei', 'contrepartie', 'beguenstigter', 'begünstigter', 'empfänger', 'auftraggeber', 'name'],
+  zweck: ['reference', 'referenz', 'référence', 'verwendungszweck', 'buchungstext', 'libellé', 'label', 'beschreibung'],
+  seite: ['side', 'richtung', 'sens', 'soll/haben'],
+  status: ['status', 'statut']
+};
+function csvZeilen(text) {
+  text = text.replace(/^﻿/, '');
+  const erste = text.split(/\r?\n/)[0] || '';
+  const sep = [';', ',', '\t'].map((c) => [c, erste.split(c).length]).sort((a, b) => b[1] - a[1])[0][0];
+  const rows = []; let row = [], cell = '', q = false;
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (q) { if (c === '"') { if (text[i + 1] === '"') { cell += '"'; i++; } else q = false; } else cell += c; }
+    else if (c === '"') q = true;
+    else if (c === sep) { row.push(cell); cell = ''; }
+    else if (c === '\n' || c === '\r') { if (c === '\r' && text[i + 1] === '\n') i++; row.push(cell); rows.push(row); row = []; cell = ''; }
+    else cell += c;
+  }
+  if (cell || row.length) { row.push(cell); rows.push(row); }
+  return rows;
+}
+function bankDatum(s) {
+  s = String(s || '').trim();
+  let m = s.match(/^(\d{4})-(\d{2})-(\d{2})/); if (m) return `${m[1]}-${m[2]}-${m[3]}`;
+  m = s.match(/^(\d{1,2})[./-](\d{1,2})[./-](\d{2,4})/); if (m) return `${m[3].length === 2 ? '20' + m[3] : m[3]}-${m[2].padStart(2, '0')}-${m[1].padStart(2, '0')}`;
+  return '';
+}
+function bankBetrag(s) {
+  s = String(s || '').replace(/[−–]/g, '-').replace(/[^\d,.+-]/g, '');
+  if (!/\d/.test(s)) return NaN;
+  s = s.lastIndexOf(',') > s.lastIndexOf('.') ? s.replace(/\./g, '').replace(',', '.') : s.replace(/,/g, '');
+  const n = parseFloat(s); return isFinite(n) ? r2(n) : NaN;
+}
+const kurzHash = (s) => { let h = 5381; for (let i = 0; i < s.length; i++) h = ((h * 33) ^ s.charCodeAt(i)) >>> 0; return h.toString(36); };
+function bankAusCsv(text) {
+  const rows = csvZeilen(text).filter((r) => r.some((c) => c.trim()));
+  if (rows.length < 2) throw new Error('In der Datei stehen keine Buchungen.');
+  const kopf = rows[0].map((h) => h.trim().toLowerCase());
+  const col = {}, belegt = new Set();
+  for (const [f, worte] of Object.entries(BANK_SPALTEN)) {
+    for (const w of worte) {
+      const i = kopf.findIndex((h, j) => !belegt.has(j) && h.includes(w) && !(f === 'betrag' && /vat|mwst|ust\b|tva|excl|exkl|\bht\b|netto/.test(h) && !/inkl|incl|ttc/.test(h)));
+      if (i >= 0) { col[f] = i; belegt.add(i); break; }
+    }
+  }
+  if (col.datum == null || col.betrag == null) throw new Error('Spalten für Datum und Betrag nicht gefunden. Bitte den Konto-Export als CSV wählen.');
+  const zelle = (r, f) => col[f] == null ? '' : String(r[col[f]] || '').trim();
+  const out = [], zaehl = {}; let uebersprungen = 0;
+  for (const r of rows.slice(1)) {
+    const datum = bankDatum(zelle(r, 'datum')); let betrag = bankBetrag(zelle(r, 'betrag'));
+    if (!datum || !isFinite(betrag) || /declin|reject|revers|pending|abgelehnt|storniert|ausstehend|refus|annul|en attente/i.test(zelle(r, 'status'))) { uebersprungen++; continue; }
+    if (betrag > 0 && /debit|débit|soll|lastschrift|ausgang/i.test(zelle(r, 'seite'))) betrag = -betrag;
+    const gegenpartei = zelle(r, 'gegenpartei'), zweck = zelle(r, 'zweck');
+    let id = zelle(r, 'id') ? 'q:' + zelle(r, 'id') : '';
+    if (!id) { const h = 'h:' + kurzHash([datum, betrag, gegenpartei, zweck].join('|')); zaehl[h] = (zaehl[h] || 0) + 1; id = h + '-' + zaehl[h]; }
+    out.push({ id, datum, betrag, gegenpartei, zweck, belegId: null, rechnungId: null });
+  }
+  return { buchungen: out, uebersprungen };
+}
+function bankImport() {
+  const inp = document.createElement('input'); inp.type = 'file'; inp.accept = '.csv,text/csv';
+  inp.onchange = async () => {
+    const file = inp.files[0]; if (!file) return;
+    try {
+      const { buchungen, uebersprungen } = bankAusCsv(await file.text());
+      const da = new Set(S.bank.map((b) => b.id));
+      const neu = buchungen.filter((b) => !da.has(b.id));
+      S.bank.push(...neu); await save();
+      filter.bank = 'zuordnen'; tab = 'bank'; render();
+      const vorschl = neu.filter((b) => bankTreffer(b).length).length;
+      toast(`${neu.length} neue Buchung${neu.length === 1 ? '' : 'en'}${buchungen.length - neu.length ? `, ${buchungen.length - neu.length} schon vorhanden` : ''}${uebersprungen ? `, ${uebersprungen} übersprungen` : ''}${vorschl ? `. ${vorschl} ${vorschl === 1 ? 'passt' : 'passen'} zu offenen Rechnungen.` : ''}`);
+    } catch (e) { toast(e.message || 'Die Datei konnte nicht gelesen werden.'); }
+  };
+  inp.click();
+}
+const offeneRe = () => S.rechnungen.filter((r) => r.typ !== 'gutschrift' && ['offen', 'ueberfaellig'].includes(reStatus(r).k));
+// Offene Rechnungen, die zu einem Zahlungseingang passen: Rechnungsnummer im Verwendungszweck zählt mehr als gleicher Betrag
+function bankTreffer(b) {
+  if (b.betrag <= 0 || b.rechnungId) return [];
+  const z = (b.zweck + ' ' + b.gegenpartei).toLowerCase();
+  return offeneRe().map((r) => ({ r, p: (r.nr && z.includes(String(r.nr).toLowerCase()) ? 2 : 0) + (Math.abs(summen(r).brutto - b.betrag) < 0.01 ? 1 : 0) }))
+    .filter((x) => x.p).sort((a, c) => c.p - a.p).map((x) => x.r);
+}
+const bankOffen = (b) => b.betrag > 0 ? !b.rechnungId : !b.belegId;
+function vBank() {
+  const f = filter.bank || 'zuordnen';
+  const all = S.bank.slice().sort((a, b) => (b.datum || '').localeCompare(a.datum || ''));
+  const list = all.filter((b) => f === 'alle' || (f === 'ein' ? b.betrag > 0 : f === 'aus' ? b.betrag < 0 : bankOffen(b)));
+  const passt = all.filter((b) => bankTreffer(b).length);
+  const monat = heute().slice(0, 7);
+  const dM = all.filter((b) => b.datum.startsWith(monat));
+  const ein = dM.filter((b) => b.betrag > 0).reduce((s, b) => s + b.betrag, 0), aus = dM.filter((b) => b.betrag < 0).reduce((s, b) => s + b.betrag, 0);
+  return `
+  <h1>Bank</h1>
+  <div class="status"><div class="big">${all.length ? (passt.length ? `<span class="pill warn">Zu tun</span> ${passt.length} Zahlung${passt.length > 1 ? 'en passen' : ' passt'} zu offenen Rechnungen` : `${all.filter(bankOffen).length} Buchungen ohne Zuordnung`) : 'Noch keine Kontoauszüge'}</div>
+  <p class="small muted" style="margin-top:4px">${all.length ? `${MONATE[new Date().getMonth()]}: ${eur(ein)} rein, ${eur(-aus)} raus. Letzte Buchung ${dat(all[0].datum)}.` : 'Lade den Kontoauszug als CSV hoch. Bei Qonto: Transaktionen, Exportieren, CSV.'}</p>
+  <div class="btns"><button class="primary" data-act="bank-import">Kontoauszug (CSV) hochladen</button></div></div>
+  ${all.length ? `<div class="card">
+    ${chips('bank', [['zuordnen', 'Ohne Zuordnung'], ['ein', 'Eingänge'], ['aus', 'Ausgänge'], ['alle', 'Alle']])}
+    ${list.length ? `<ul class="list">${list.map((b) => { const t = bankTreffer(b); const re = b.rechnungId && S.rechnungen.find((r) => r.id === b.rechnungId);
+      const pill = re ? `<span class="pill good">${esc(re.nr)}</span>` : t.length ? '<span class="pill warn">Rechnung passt</span>' : b.belegId ? '<span class="pill good">Beleg</span>' : '';
+      return `<li><button class="item" data-act="open-bk" data-id="${esc(b.id)}"><div class="grow"><div class="t">${esc(b.gegenpartei || 'Ohne Namen')}</div><div class="s">${dat(b.datum)}${b.zweck ? ' · ' + esc(b.zweck) : ''}</div></div><div><div class="amt" style="color:${b.betrag > 0 ? 'var(--good)' : 'inherit'}">${eur(b.betrag)}</div><div style="text-align:right">${pill}</div></div></button></li>`; }).join('')}</ul>`
+      : '<div class="empty">In dieser Ansicht ist nichts.</div>'}
+  </div>` : ''}
+  <details class="card"><summary>Und die direkte Verbindung zu Qonto?</summary><p class="small muted" style="margin-top:6px">Kommt in einem späteren Schritt über einen kleinen Server, der deinen Qonto-Schlüssel sicher aufbewahrt. Bis dahin lädst du den Export hoch. Doppelte Buchungen erkennt die App und übernimmt sie nicht noch einmal.</p></details>`;
+}
+function vBuchung(id) {
+  const b = S.bank.find((x) => x.id === id); if (!b) return;
+  const re = b.rechnungId && S.rechnungen.find((r) => r.id === b.rechnungId);
+  const be = b.belegId && S.belege.find((x) => x.id === b.belegId);
+  const t = bankTreffer(b), rest = b.betrag > 0 && !re ? offeneRe().filter((r) => !t.includes(r)) : [];
+  const reBtn = (r, gut) => `<li><button class="item" data-act="bk-zu" data-id="${esc(b.id)}" data-k="${r.id}"><div class="grow"><div class="t">${esc(r.kunde.name || 'Ohne Kunde')}</div><div class="s">${esc(r.nr)} · ${dat(r.datum)}</div></div><div><div class="amt">${eur(summen(r).brutto)}</div><div style="text-align:right">${gut ? '<span class="pill good">passt</span>' : ''}</div></div></button></li>`;
+  openDlg(`${head(b.betrag > 0 ? 'Zahlungseingang' : 'Ausgabe')}<div class="dlg-body">
+    <p style="font-size:1.4rem"><b>${eur(b.betrag)}</b></p>
+    <p>${esc(b.gegenpartei || 'Ohne Namen')}<br><span class="small muted">${dat(b.datum)}${b.zweck ? ' · ' + esc(b.zweck) : ''}</span></p>
+    ${re ? `<div class="card"><b>Bezahlt damit:</b> <a href="#" data-act="open-re" data-id="${re.id}">Rechnung ${esc(re.nr)}</a> an ${esc(re.kunde.name || 'Kunde')}
+      <div class="btns"><button data-act="bk-los" data-id="${esc(b.id)}">Zuordnung lösen</button></div></div>` : ''}
+    ${b.betrag > 0 && !re ? `<div class="card"><b>Welche Rechnung wurde damit bezahlt?</b>
+      ${t.length + rest.length ? `<ul class="list">${t.map((r) => reBtn(r, true)).join('')}${rest.map((r) => reBtn(r, false)).join('')}</ul>` : '<p class="small muted">Keine offene Rechnung vorhanden. Vielleicht eine Privateinlage oder Erstattung.</p>'}</div>` : ''}
+    ${b.betrag < 0 ? (be ? `<p>Beleg: <a href="#" data-act="open-be" data-id="${be.id}">${esc(be.lieferant || 'Beleg')} vom ${dat(be.datum)}</a></p>` : '<p class="small muted">Zu dieser Ausgabe gehört noch kein Beleg. Belege ordnest du im Bereich Belege zu.</p>') : ''}
+  </div>`);
 }
 
 /* ---------- Firma ---------- */
@@ -1031,7 +1161,7 @@ const ACT = {
     edit = r; vEditor(); toast('Positionen aus dem Angebot übernommen');
   },
   bezahlt: async (el) => { const r = S.rechnungen.find((x) => x.id === el.dataset.id); r.status = 'bezahlt'; r.bezahltAm = ($('#bezDat') || {}).value || heute(); await save(); vDetailRe(r.id); render(); toast('Als bezahlt markiert'); },
-  unbezahlt: async (el) => { const r = S.rechnungen.find((x) => x.id === el.dataset.id); r.status = 'offen'; delete r.bezahltAm; await save(); vDetailRe(r.id); render(); },
+  unbezahlt: async (el) => { const r = S.rechnungen.find((x) => x.id === el.dataset.id); r.status = 'offen'; delete r.bezahltAm; for (const b of S.bank) if (b.rechnungId === r.id) b.rechnungId = null; await save(); vDetailRe(r.id); render(); },
   storno: async (el) => {
     const r = S.rechnungen.find((x) => x.id === el.dataset.id);
     if (!confirm(`Rechnung ${r.nr} stornieren? Es wird eine Stornorechnung mit negativen Beträgen erstellt.`)) return;
@@ -1071,6 +1201,18 @@ const ACT = {
   'save-be': saveBeleg,
   'del-be': async (el) => { if (!confirm('Beleg löschen?')) return; const b = S.belege.find((x) => x.id === el.dataset.id); if (b.dateiId) await idbDel('datei:' + b.dateiId); S.belege = S.belege.filter((x) => x.id !== b.id); await save(); closeDlg(); render(); },
   'save-ext': saveExtern,
+  'bank-import': bankImport,
+  'open-bk': (el) => vBuchung(el.dataset.id),
+  'bk-zu': async (el) => {
+    const b = S.bank.find((x) => x.id === el.dataset.id), r = S.rechnungen.find((x) => x.id === el.dataset.k);
+    b.rechnungId = r.id; r.status = 'bezahlt'; r.bezahltAm = b.datum;
+    await save(); vBuchung(b.id); render(); toast(`Rechnung ${r.nr} als bezahlt markiert`);
+  },
+  'bk-los': async (el) => {
+    const b = S.bank.find((x) => x.id === el.dataset.id), r = S.rechnungen.find((x) => x.id === b.rechnungId);
+    if (r && r.status === 'bezahlt') { r.status = 'offen'; delete r.bezahltAm; }
+    b.rechnungId = null; await save(); vBuchung(b.id); render();
+  },
   backup, restore,
   wipe: async () => { if (!confirm('Wirklich alle Daten auf diesem Gerät löschen? Das kann nicht rückgängig gemacht werden.')) return; for (const k of await idbKeys()) await idbDel(k); S = leer(); render(); toast('Alle Daten gelöscht'); }
 };
