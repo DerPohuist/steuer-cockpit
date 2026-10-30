@@ -14,6 +14,7 @@
 :root {
   --bg: #f3f5f8; --panel: #ffffff; --fg: #141a21; --muted: #5d6876; --line: #dbe0e6;
   --accent: #1f5fbf; --accent-fg: #ffffff; --soft: #eaf1fb;
+  --ch-ein: #2a78d6; --ch-aus: #eb6834;
   --good: #1d7a46; --good-bg: #e5f4ea; --warn: #8a5a00; --warn-bg: #fdf1d8; --bad: #b3261e; --bad-bg: #fbe6e4;
   color-scheme: light;
 }
@@ -21,6 +22,7 @@
   :root {
     --bg: #0f1720; --panel: #17212c; --fg: #e8edf2; --muted: #9aa6b3; --line: #29343f;
     --accent: #6ea2f2; --accent-fg: #0f1720; --soft: #1b2a3b;
+    --ch-ein: #3987e5; --ch-aus: #d95926;
     --good: #6fcf97; --good-bg: #16302a; --warn: #f2c25b; --warn-bg: #362b13; --bad: #f08a80; --bad-bg: #3a1d1b;
     color-scheme: dark;
   }
@@ -55,6 +57,24 @@ p { margin: 0 0 8px; }
 .tile .q { font-size: 13px; color: var(--muted); }
 .tile .v { font-size: 1.2rem; font-weight: 700; margin: 2px 0; font-variant-numeric: tabular-nums; }
 .tile .e { font-size: 12.5px; color: var(--muted); }
+.ch-titel { font-size: 14px; margin: 16px 0 6px; }
+.ch-legende { display: flex; gap: 14px; font-size: 13px; color: var(--muted); margin-bottom: 4px; }
+.ch-sw { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 5px; vertical-align: -1px; }
+.ch-sw.ein, .ch-ein { background: var(--ch-ein); fill: var(--ch-ein); } .ch-sw.aus, .ch-aus { background: var(--ch-aus); fill: var(--ch-aus); }
+.chart { width: 100%; height: auto; display: block; touch-action: pan-y; overflow: visible; }
+.chart .ch-grid { stroke: var(--line); stroke-width: 1; } .chart .ch-null { stroke: var(--muted); stroke-width: 1; }
+.chart .ch-ax { fill: var(--muted); font-size: 12px; } .chart .ch-zukunft { opacity: .45; }
+.chart .ch-wert { fill: var(--fg); font-size: 13px; font-weight: 700; }
+.chart .ch-hl { fill: transparent; } .chart .ch-hl.on { fill: var(--soft); }
+.chart .ch-hit { fill: transparent; cursor: pointer; }
+.chart .ch-linie { fill: none; stroke: var(--fg); stroke-width: 2; stroke-linejoin: round; }
+.chart .ch-punkt { fill: var(--fg); stroke: var(--panel); stroke-width: 2; }
+.ch-info { min-height: 2.6em; margin: 4px 0 0; color: var(--muted); } .ch-info b { color: var(--fg); }
+.ch-kat { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.ch-kat li { display: grid; grid-template-columns: minmax(0, 9.5em) 1fr auto; gap: 8px; align-items: center; font-size: 13.5px; }
+.ch-kn { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ch-kb i { display: block; height: 10px; border-radius: 0 4px 4px 0; background: var(--ch-aus); }
+.ch-kv { font-variant-numeric: tabular-nums; text-align: right; }
 .pill { display: inline-block; font-size: 12px; font-weight: 600; padding: 2px 8px; border-radius: 999px; background: var(--soft); color: var(--accent); white-space: nowrap; }
 .pill.good { background: var(--good-bg); color: var(--good); }
 .pill.warn { background: var(--warn-bg); color: var(--warn); }
@@ -424,6 +444,7 @@ function zm(von, bis) {
 function gewinn(jahr) {
   const bilanz = BILANZ.includes(S.firma.rechtsform), j = String(jahr);
   let ein = 0, offen = 0, nOffen = 0;
+  const mEin = Array(12).fill(0), mAus = Array(12).fill(0), mon = (d) => Number(d.slice(5, 7)) - 1;
   for (const r of S.rechnungen) {
     if (!zaehlt(r)) continue;
     const s = summen(r);
@@ -432,7 +453,7 @@ function gewinn(jahr) {
       if (r.typ === 'gutschrift') { const o = S.rechnungen.find((x) => x.id === r.stornoVon); tag = o && o.bezahltAm ? r.datum : ''; }
       else tag = r.bezahltAm || '';
     }
-    if (tag.startsWith(j)) ein += s.netto;
+    if (tag.startsWith(j)) { ein += s.netto; mEin[mon(tag)] += s.netto; }
     if ((r.datum || '').startsWith(j) && r.typ !== 'gutschrift' && ['offen', 'ueberfaellig'].includes(reStatus(r).k)) { offen += s.brutto; nOffen++; }
   }
   const kat = {}, gross = [], ohne = [];
@@ -443,13 +464,13 @@ function gewinn(jahr) {
     if (!num(b.brutto)) ohne.push(b);
     const k = b.kategorie || 'Ohne Kategorie';
     kat[k] = r2((kat[k] || 0) + netto);
-    aus += netto;
+    aus += netto; mAus[mon(b.datum)] += netto;
     if (k === 'Bewirtung') bewirt += netto;
     if (netto > 800 && !['Miete', 'Versicherung', 'Fremdleistung', 'Werbung', 'Telefon und Internet', 'Wareneinkauf'].includes(k)) gross.push(b);
   }
   const nichtAbz = r2(bewirt * 0.3);
   ein = r2(ein); aus = r2(aus);
-  return { bilanz, ein, aus, nichtAbz, gewinn: r2(ein - aus + nichtAbz), kat, gross, ohne, offen: r2(offen), nOffen };
+  return { bilanz, ein, aus, nichtAbz, gewinn: r2(ein - aus + nichtAbz), kat, gross, ohne, offen: r2(offen), nOffen, mEin: mEin.map(r2), mAus: mAus.map(r2) };
 }
 
 /* Grobe Steuerschätzung. Tarif nach § 32a EStG, Grundtabelle (ledig), ohne andere Einkünfte und Abzüge */
@@ -594,6 +615,7 @@ function vSteuern() {
       ${gw.gross.length ? `<li class="miss">${gw.gross.length} Beleg${gw.gross.length > 1 ? 'e' : ''} über 800 € netto (${gw.gross.slice(0, 3).map((b) => esc(b.lieferant || 'ohne Name')).join(', ')}). Geräte und andere Anschaffungen werden über mehrere Jahre abgeschrieben, das prüft der Steuerberater.</li>` : ''}
       ${gw.ohne.length ? `<li class="miss">${gw.ohne.length} Beleg${gw.ohne.length > 1 ? 'e' : ''} ohne Betrag fehlen in der Rechnung.</li>` : ''}</ul>` : ''}
     ${Object.keys(gw.kat).length ? `<details><summary>Ausgaben nach Kategorie</summary><table class="tab">${Object.entries(gw.kat).sort((a, b) => b[1] - a[1]).map(([k, v]) => `<tr><td>${esc(k)}</td><td style="text-align:right">${eur(v)}</td></tr>`).join('')}</table></details>` : ''}
+    <div class="btns"><button data-act="paket" data-k="${jahr}">Jahrespaket ${jahr} (ZIP mit Listen und Belegen)</button></div>
   </div>
 
   <div class="card">
@@ -1350,6 +1372,7 @@ function vStart() {
     <div class="tile"><div class="q">Offene Angebote</div><div class="v">${eur(angSum)}</div><div class="e">netto, ${angOffen.length} Angebot${angOffen.length === 1 ? '' : 'e'} warten auf Antwort</div></div>
     <div class="tile"><div class="q">${ku() ? 'Umsatzsteuer' : 'Umsatzsteuer ' + esc(z.name)}</div><div class="v">${ku() ? '0,00 €' : eur(z.zahl)}</div><div class="e">${ku() ? 'Kleinunternehmer: keine Voranmeldung' : `${z.zahl < 0 ? 'Erstattung' : 'zu zahlen'}, Frist ${dat(z.frist)} (Schätzung)`}</div></div>
   </div>
+  ${hatDaten ? vZahlen() : ''}
   ${ku() ? '' : `<div class="card">
     <h2>Wie viel Umsatzsteuer fällt für ${esc(z.name)} an?</h2>
     <p>${z.zahl >= 0 ? `Voraussichtlich <b>${eur(z.zahl)}</b> ans Finanzamt` : `Voraussichtlich <b>${eur(-z.zahl)}</b> Erstattung vom Finanzamt`}, Abgabe und Zahlung bis <b>${dat(z.frist)}</b> (in ${tageBis(z.frist)} Tagen).</p>
@@ -1361,11 +1384,113 @@ function vStart() {
     </details>
   </div>`}
   <details class="card"><summary>Was kann die App schon, was kommt noch?</summary>
-    <p class="small" style="margin-top:8px"><b>Schon da:</b> Angebote und Rechnungen schreiben, als PDF drucken, als E-Rechnung (XRechnung) speichern, Angebot mit einem Tipp in eine Rechnung umwandeln, Storno per Stornorechnung, Belege und alte Rechnungen hochladen, Kontoauszüge (CSV) einlesen und Zahlungen Rechnungen zuordnen, Umsatzsteuer-Voranmeldung mit ELSTER-Kennzahlen, Zusammenfassende Meldung, EÜR bzw. Gewinn-Vorschau, Steuerschätzung, Fristen mit Kalender-Erinnerung, Sicherung.</p>
+    <p class="small" style="margin-top:8px"><b>Schon da:</b> Angebote und Rechnungen schreiben, als PDF drucken, als E-Rechnung (XRechnung) speichern, Angebot mit einem Tipp in eine Rechnung umwandeln, Storno per Stornorechnung, Belege und alte Rechnungen hochladen, Kontoauszüge (CSV) einlesen und Zahlungen Rechnungen zuordnen, Umsatzsteuer-Voranmeldung mit ELSTER-Kennzahlen, Zusammenfassende Meldung, EÜR bzw. Gewinn-Vorschau, Steuerschätzung, Fristen mit Kalender-Erinnerung, Diagramme zu Einnahmen und Ausgaben, Jahrespaket als ZIP für Excel und Steuerberater, Sicherung.</p>
     <p class="small"><b>Kommt noch:</b> Login und Speicherung auf einem Server, Texterkennung für Belege, direkte Qonto-Verbindung, Buchungen nach SKR03/SKR04, direkte Abgabe über ELSTER, vollständige Jahreserklärungen.</p>
     <p class="small muted">Deine Daten liegen nur in diesem Browser auf diesem Gerät. Andere Geräte sehen sie nicht. Lade regelmäßig eine Sicherung herunter. Die Ablage hier ist noch keine GoBD-konforme Archivierung.</p>
   </details>`;
 }
+
+/* ---------- Zahlen und Diagramme ---------- */
+const MON_K = ['Jan', 'Feb', 'Mär', 'Apr', 'Mai', 'Jun', 'Jul', 'Aug', 'Sep', 'Okt', 'Nov', 'Dez'];
+const euro0 = (n) => Math.round(n).toLocaleString('de-DE') + ' €';
+// Runde Achsenwerte (1, 2, 2,5, 5 × 10ⁿ), damit die Linien bei glatten Beträgen liegen
+function achse(min, max) {
+  if (max <= min) max = min + 100;
+  const roh = (max - min) / 4, p = Math.pow(10, Math.floor(Math.log10(roh)));
+  const schritt = [1, 2, 2.5, 5, 10].map((f) => f * p).find((x) => x >= roh);
+  const lo = Math.floor(min / schritt) * schritt, hi = Math.ceil(max / schritt) * schritt, t = [];
+  for (let v = lo; v <= hi + schritt / 2; v += schritt) t.push(Math.round(v));
+  return { lo, hi, t };
+}
+// Balken mit runden Ecken nur am Datenende, gerade an der Grundlinie
+function balken(x, w, y0, y1) {
+  const h = Math.abs(y1 - y0); if (h < 0.5) return '';
+  const r = Math.min(4, w / 2, h), oben = y1 < y0, yE = oben ? y1 : y1, s = oben ? 1 : -1;
+  return `M${x},${y0}V${yE + s * r}Q${x},${yE} ${x + r},${yE}H${x + w - r}Q${x + w},${yE} ${x + w},${yE + s * r}V${y0}Z`;
+}
+// Diagramme in echter Pixelbreite zeichnen, damit die Schrift auf dem Handy nicht schrumpft
+const CH = { w: 640, h: 230, l: 58, r: 8, t: 10, b: 26 };
+function chMass(a) {
+  const m = $('main'); CH.w = Math.max(260, Math.min(820, (m ? m.clientWidth : innerWidth) - 62));
+  CH.l = Math.max(...a.t.map((v) => euro0(v).length)) * 7 + 10;
+  CH.h = CH.w < 500 ? 190 : 230;
+}
+const monK = (i) => CH.w < 420 ? MON_K[i][0] : MON_K[i];
+function chartMonate(ein, aus, bis) {
+  const a = achse(Math.min(0, ...ein, ...aus), Math.max(0, ...ein, ...aus)); chMass(a);
+  const { w, h, l, r, t, b } = CH, pw = w - l - r, ph = h - t - b;
+  const y = (v) => t + ph - (v - a.lo) / (a.hi - a.lo) * ph, gw = pw / 12, bw = Math.min(18, (gw - 8) / 2);
+  let g = a.t.map((v) => `<line x1="${l}" x2="${w - r}" y1="${y(v)}" y2="${y(v)}" class="${v === 0 ? 'ch-null' : 'ch-grid'}"/><text x="${l - 6}" y="${y(v) + 4}" text-anchor="end" class="ch-ax">${euro0(v)}</text>`).join('');
+  for (let i = 0; i < 12; i++) {
+    const cx = l + gw * i + gw / 2;
+    g += `<rect class="ch-hl" data-hl="${i}" x="${l + gw * i}" y="${t}" width="${gw}" height="${ph}" rx="4"/>`;
+    g += `<path class="ch-ein" d="${balken(cx - bw - 1, bw, y(0), y(ein[i]))}"/><path class="ch-aus" d="${balken(cx + 1, bw, y(0), y(aus[i]))}"/>`;
+    g += `<text x="${cx}" y="${h - 8}" text-anchor="middle" class="ch-ax${i > bis ? ' ch-zukunft' : ''}">${monK(i)}</text>`;
+    g += `<rect class="ch-hit" data-mon="${i}" x="${l + gw * i}" y="0" width="${gw}" height="${h}"><title>${MONATE[i]}: Einnahmen ${eur(ein[i])}, Ausgaben ${eur(aus[i])}</title></rect>`;
+  }
+  return `<svg class="chart" viewBox="0 0 ${w} ${h}" role="img" aria-label="Einnahmen und Ausgaben je Monat">${g}</svg>`;
+}
+function chartVerlauf(werte, bis) {
+  const v = werte.slice(0, bis + 1), a = achse(Math.min(0, ...v), Math.max(0, ...v)); chMass(a);
+  const { w, l, r, t, b } = CH, h = CH.h - 30, pw = w - l - r, ph = h - t - b;
+  const y = (x) => t + ph - (x - a.lo) / (a.hi - a.lo) * ph, gw = pw / 12, x = (i) => l + gw * i + gw / 2;
+  let g = a.t.map((z) => `<line x1="${l}" x2="${w - r}" y1="${y(z)}" y2="${y(z)}" class="${z === 0 ? 'ch-null' : 'ch-grid'}"/><text x="${l - 6}" y="${y(z) + 4}" text-anchor="end" class="ch-ax">${euro0(z)}</text>`).join('');
+  for (let i = 0; i < 12; i++) g += `<rect class="ch-hl" data-hl="${i}" x="${l + gw * i}" y="${t}" width="${gw}" height="${ph}" rx="4"/><text x="${x(i)}" y="${h - 8}" text-anchor="middle" class="ch-ax${i > bis ? ' ch-zukunft' : ''}">${monK(i)}</text>`;
+  g += `<polyline class="ch-linie" points="${v.map((z, i) => `${x(i)},${y(z)}`).join(' ')}"/>`;
+  g += v.map((z, i) => `<circle class="ch-punkt" data-hl="${i}" cx="${x(i)}" cy="${y(z)}" r="4"/>`).join('');
+  const le = v.length - 1;
+  g += `<text x="${le > 9 ? x(le) - 8 : x(le) + 8}" y="${y(v[le]) - 8}" text-anchor="${le > 9 ? 'end' : 'start'}" class="ch-wert">${eur(v[le])}</text>`;
+  for (let i = 0; i < 12; i++) g += `<rect class="ch-hit" data-mon="${i}" x="${l + gw * i}" y="0" width="${gw}" height="${h}"><title>${i <= bis ? `Ende ${MONATE[i]}: ${eur(v[i])}` : MONATE[i]}</title></rect>`;
+  return `<svg class="chart" viewBox="0 0 ${w} ${h}" role="img" aria-label="Gewinn seit Jahresanfang">${g}</svg>`;
+}
+let zahlenInfo = null;
+function vZahlen() {
+  const y0 = new Date().getFullYear(), j = Number(filter.zJahr) || y0, gw = gewinn(j), vj = gewinn(j - 1);
+  const bis = j === y0 ? new Date().getMonth() : 11;
+  const hatJahr = gw.ein || gw.aus;
+  const uber = gw.mEin.map((e, i) => r2(e - gw.mAus[i]));
+  const kum = []; uber.reduce((s, x, i) => (kum[i] = r2(s + x)), 0);
+  const sum = (arr) => r2(arr.slice(0, bis + 1).reduce((s, x) => s + x, 0));
+  const vEin = sum(vj.mEin), vAus = sum(vj.mAus);
+  const vergl = (jetzt, vor) => !vor ? '' : `${jetzt >= vor ? '+' : '−'}${Math.abs(Math.round((jetzt - vor) / Math.abs(vor) * 100))} % zu ${j - 1}${bis < 11 ? ` (Jan bis ${MON_K[bis]})` : ''}`;
+  const kat = Object.entries(gw.kat).filter(([, x]) => x > 0).sort((a, b) => b[1] - a[1]);
+  const top = kat.slice(0, 6); if (kat.length > 6) top.push(['Weitere', r2(kat.slice(6).reduce((s, [, x]) => s + x, 0))]);
+  const katMax = top.length ? top[0][1] : 1;
+  zahlenInfo = { j, ein: gw.mEin, aus: gw.mAus, uber, kum, bis };
+  return `<div class="card">
+    <h2>Einnahmen und Ausgaben ${j}</h2>
+    <div class="filters" role="group">${[y0, y0 - 1, y0 - 2].map((x) => `<button class="chip" data-act="filter" data-f="zJahr" data-k="${x}" aria-pressed="${x === j}">${x}</button>`).join('')}</div>
+    ${hatJahr ? `<div class="tiles" style="margin:10px 0 4px">
+      <div class="tile"><div class="q">Einnahmen</div><div class="v">${eur(gw.ein)}</div><div class="e">${vergl(gw.mEin.slice(0, bis + 1).reduce((s, x) => s + x, 0), vEin)}</div></div>
+      <div class="tile"><div class="q">Ausgaben</div><div class="v">${eur(gw.aus)}</div><div class="e">${vergl(gw.mAus.slice(0, bis + 1).reduce((s, x) => s + x, 0), vAus)}</div></div>
+      <div class="tile"><div class="q">Gewinn</div><div class="v" style="color:${gw.gewinn < 0 ? 'var(--bad)' : 'inherit'}">${eur(gw.gewinn)}</div><div class="e">${gw.gewinn < 0 ? 'Verlust' : 'vor Steuern'}</div></div>
+      <div class="tile"><div class="q">Bester Monat</div><div class="v">${MON_K[uber.indexOf(Math.max(...uber.slice(0, bis + 1)))]}</div><div class="e">${eur(Math.max(...uber.slice(0, bis + 1)))} Überschuss</div></div>
+    </div>
+    <h3 class="ch-titel">Pro Monat</h3>
+    <div class="ch-legende"><span><i class="ch-sw ein"></i>Einnahmen</span><span><i class="ch-sw aus"></i>Ausgaben</span></div>
+    <div class="ch-box" data-chart="monate">${chartMonate(gw.mEin, gw.mAus, bis)}</div>
+    <p class="ch-info small" id="chInfo" aria-live="polite">Tippe auf einen Monat, um die Zahlen zu sehen.</p>
+    <h3 class="ch-titel">Gewinn seit Jahresanfang</h3>
+    <div class="ch-box" data-chart="verlauf">${chartVerlauf(kum, bis)}</div>
+    ${top.length ? `<h3 class="ch-titel">Wofür das Geld rausging</h3>
+    <ul class="ch-kat">${top.map(([k, x]) => `<li><span class="ch-kn">${esc(k)}</span><span class="ch-kb"><i style="width:${Math.max(2, x / katMax * 100)}%"></i></span><span class="ch-kv">${eur(x)}</span></li>`).join('')}</ul>` : ''}
+    <details><summary>Als Tabelle</summary><table class="tab"><tr><th>Monat</th><th style="text-align:right">Einnahmen</th><th style="text-align:right">Ausgaben</th><th style="text-align:right">Überschuss</th></tr>
+      ${MONATE.map((m, i) => `<tr><td>${m}</td><td style="text-align:right">${eur(gw.mEin[i])}</td><td style="text-align:right">${eur(gw.mAus[i])}</td><td style="text-align:right">${eur(uber[i])}</td></tr>`).join('')}
+      <tr><td><b>Summe</b></td><td style="text-align:right"><b>${eur(gw.ein)}</b></td><td style="text-align:right"><b>${eur(gw.aus)}</b></td><td style="text-align:right"><b>${eur(r2(gw.ein - gw.aus))}</b></td></tr></table></details>
+    <p class="small muted" style="margin-top:8px">Alle Beträge netto, ohne Umsatzsteuer. ${gw.bilanz ? 'Einnahmen nach Rechnungsdatum.' : 'Einnahmen zählen, wenn das Geld da ist, wie in der EÜR. Offene Rechnungen sind noch nicht dabei.'} Ausgaben nach Belegdatum.${gw.nichtAbz ? ` Im Gewinn sind 30 % der Bewirtung (${eur(gw.nichtAbz)}) wieder hinzugerechnet, weil sie steuerlich nicht zählen.` : ''}</p>
+    <div class="btns"><button data-act="paket" data-k="${j}">Jahrespaket ${j} herunterladen (ZIP)</button></div>`
+    : `<p class="muted" style="margin-top:8px">Für ${j} gibt es noch keine bezahlten Rechnungen und keine Belege. Sobald welche da sind, siehst du hier Diagramme wie in einem Buchhaltungsprogramm.</p>`}
+  </div>`;
+}
+function zeigeMonat(i) {
+  const z = zahlenInfo, el = $('#chInfo'); if (!z || !el) return;
+  document.querySelectorAll('.ch-hl').forEach((r) => r.classList.toggle('on', Number(r.dataset.hl) === i));
+  el.innerHTML = i > z.bis ? `${MONATE[i]} ${z.j}: noch nicht erreicht.` : `<b>${MONATE[i]} ${z.j}:</b> <span class="ch-sw ein"></span>Einnahmen ${eur(z.ein[i])} · <span class="ch-sw aus"></span>Ausgaben ${eur(z.aus[i])} · Überschuss <b>${eur(z.uber[i])}</b> · seit Jahresanfang ${eur(z.kum[i])}`;
+}
+let chBreite = 0;
+addEventListener('resize', () => { clearTimeout(chBreite); chBreite = setTimeout(() => { if (tab === 'start' && $('.chart') && !dlg.open) render(); }, 250); });
+document.addEventListener('pointerover', (e) => { const h = e.target.closest && e.target.closest('[data-mon]'); if (h) zeigeMonat(Number(h.dataset.mon)); });
+document.addEventListener('pointerout', (e) => { if (e.pointerType === 'mouse' && e.target.closest && e.target.closest('[data-mon]') && !(e.relatedTarget && e.relatedTarget.closest && e.relatedTarget.closest('[data-mon]'))) document.querySelectorAll('.ch-hl.on').forEach((r) => r.classList.remove('on')); });
 
 /* ---------- Listen ---------- */
 function chips(name, opts) {
@@ -1624,7 +1749,14 @@ function vFirma() {
   <div class="card">
     <h2>Sind meine Daten sicher?</h2>
     <p>Alles liegt nur in diesem Browser auf diesem Gerät${S.letzteSicherung ? `, letzte Sicherung am ${dat(S.letzteSicherung)}` : ', noch keine Sicherung'}.</p>
+    <p class="small">${dauerhaft ? '<span class="pill good">Dauerhaft gespeichert</span> Der Browser löscht die Daten nicht von selbst, auch wenn der Speicher knapp wird.' : `<span class="pill warn">Nicht fest gespeichert</span> Der Browser darf die Daten bei Platzmangel löschen, Safari auch nach 7 Tagen ohne Nutzung. Lege die App auf den Home-Bildschirm und lade regelmäßig eine Sicherung herunter. <button class="chip" data-act="speicher-fest">Dauerhaft speichern</button>`}</p>
     <div class="btns"><button data-act="backup">Sicherung herunterladen</button><button data-act="restore">Sicherung einspielen</button></div>
+    <p class="small muted" style="margin-top:6px">Die Sicherung ist eine Datei mit allen Daten und Belegen. Speichere sie auf deinem Computer, in iCloud oder Google Drive. Auf einem anderen Gerät spielst du sie mit „Sicherung einspielen“ ein.</p>
+  </div>
+  <div class="card">
+    <h2>Daten für Excel und Steuerberater</h2>
+    <p class="small muted">Das Jahrespaket ist eine ZIP-Datei mit Listen aller Einnahmen, Ausgaben und Bankbuchungen (öffnen sich in Excel) und allen Belegen als PDF oder Foto, sauber nach Datum benannt. Für ELSTER gibt es im Reiter Steuern neben jeder Kennzahl einen Knopf zum Kopieren.</p>
+    <div class="btns">${[0, 1, 2].map((d) => new Date().getFullYear() - d).map((y) => `<button data-act="paket" data-k="${y}">Jahrespaket ${y}</button>`).join('')}</div>
     <details><summary>Weitere Daten</summary>
       <div class="btns"><button class="danger" data-act="wipe">Alle Daten auf diesem Gerät löschen</button></div>
     </details>
@@ -2345,7 +2477,7 @@ async function backup() {
   const keys = (await idbKeys()).filter((k) => String(k).startsWith('datei:'));
   const dateien = {};
   for (const k of keys) { const d = await idbGet(k); if (d) dateien[k] = { name: d.name, type: d.type, data: await blobToData(d.blob) }; }
-  S.letzteSicherung = heute(); await save();
+  S.letzteSicherung = heute(); await save(); speicherFest();
   download(`steuer-cockpit-sicherung-${heute()}.json`, JSON.stringify({ app: 'steuer-cockpit', erstellt: new Date().toISOString(), state: S, dateien }), 'application/json');
   render(); toast('Sicherung heruntergeladen');
 }
@@ -2361,6 +2493,83 @@ function restore() {
     } catch (e) { toast('Diese Datei ist keine Sicherung des Steuer-Cockpits.'); }
   };
   inp.click();
+}
+
+/* ---------- Jahrespaket: ZIP mit Listen für Excel und allen Dateien ---------- */
+const CRC_T = (() => { const t = new Uint32Array(256); for (let n = 0; n < 256; n++) { let c = n; for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1; t[n] = c >>> 0; } return t; })();
+function crc32(u) { let c = 0xffffffff; for (let i = 0; i < u.length; i++) c = CRC_T[(c ^ u[i]) & 255] ^ (c >>> 8); return (c ^ 0xffffffff) >>> 0; }
+// Einfaches ZIP ohne Kompression (Belege sind als JPG/PDF ohnehin schon gepackt)
+function zipBlob(files) {
+  const enc = new TextEncoder(), teile = [], zentral = [], d = new Date();
+  const zeit = (d.getHours() << 11) | (d.getMinutes() << 5) | (d.getSeconds() >> 1), tag = ((d.getFullYear() - 1980) << 9) | ((d.getMonth() + 1) << 5) | d.getDate();
+  let off = 0;
+  for (const f of files) {
+    const n = enc.encode(f.name), data = typeof f.data === 'string' ? enc.encode(f.data) : f.data, crc = crc32(data), len = data.length;
+    const h = new DataView(new ArrayBuffer(30));
+    [[0, 0x04034b50, 4], [4, 20, 2], [6, 0x0800, 2], [10, zeit, 2], [12, tag, 2], [14, crc, 4], [18, len, 4], [22, len, 4], [26, n.length, 2]].forEach(([o, v, s]) => s === 4 ? h.setUint32(o, v, true) : h.setUint16(o, v, true));
+    const c = new DataView(new ArrayBuffer(46));
+    [[0, 0x02014b50, 4], [4, 20, 2], [6, 20, 2], [8, 0x0800, 2], [12, zeit, 2], [14, tag, 2], [16, crc, 4], [20, len, 4], [24, len, 4], [28, n.length, 2], [42, off, 4]].forEach(([o, v, s]) => s === 4 ? c.setUint32(o, v, true) : c.setUint16(o, v, true));
+    teile.push(h, n, data); zentral.push(c, n);
+    off += 30 + n.length + len;
+  }
+  const zl = zentral.reduce((a, x) => a + x.byteLength, 0), e = new DataView(new ArrayBuffer(22));
+  [[0, 0x06054b50, 4], [8, files.length, 2], [10, files.length, 2], [12, zl, 4], [16, off, 4]].forEach(([o, v, s]) => s === 4 ? e.setUint32(o, v, true) : e.setUint16(o, v, true));
+  return new Blob([...teile, ...zentral, e], { type: 'application/zip' });
+}
+// Tabelle als CSV für Excel: Semikolon, Komma als Dezimalzeichen, BOM für Umlaute
+const csvText = (rows) => '﻿' + rows.map((r) => r.map((v) => typeof v === 'number' ? v.toFixed(2).replace('.', ',') : '"' + String(v == null ? '' : v).replace(/"/g, '""') + '"').join(';')).join('\r\n') + '\r\n';
+const dateiName = (s) => String(s || '').replace(/[\\/:*?"<>|\u0000-\u001f]+/g, '_').replace(/\s+/g, ' ').trim().slice(0, 60) || 'ohne-Name';
+async function paket(j) {
+  j = Number(j) || new Date().getFullYear();
+  toast('Jahrespaket wird erstellt …');
+  const gw = gewinn(j), y = String(j), files = [], namen = new Set();
+  const frei = (n) => { let x = n, i = 2; const p = n.lastIndexOf('.'); while (namen.has(x)) x = p > 0 ? `${n.slice(0, p)} (${i++})${n.slice(p)}` : `${n} (${i++})`; namen.add(x); return x; };
+  const endung = (name, typ) => (String(name || '').match(/\.[a-z0-9]{2,5}$/i) || [''])[0] || ({ 'application/pdf': '.pdf', 'image/jpeg': '.jpg', 'image/png': '.png', 'application/xml': '.xml' }[typ] || '');
+  async function datei(ordner, id, basis) {
+    const d = id && await idbGet('datei:' + id); if (!d) return '';
+    const n = frei(`${ordner}/${dateiName(basis)}${endung(d.name, d.type)}`);
+    files.push({ name: n, data: new Uint8Array(await d.blob.arrayBuffer()) });
+    return n;
+  }
+  const zahlweg = Object.fromEntries(ZAHLWEGE);
+  const aus = [['Datum', 'Lieferant', 'Kategorie', 'Netto', 'Vorsteuer', 'Brutto', 'Steuersatz %', 'Bezahlt über', 'Notiz', 'Datei im Paket']];
+  for (const b of S.belege.filter((x) => (x.datum || '').startsWith(y)).sort((a, c) => a.datum.localeCompare(c.datum))) {
+    const f = await datei('Belege', b.dateiId, `${b.datum} ${b.lieferant || 'Beleg'}${num(b.brutto) ? ' ' + num(b.brutto).toFixed(2).replace('.', ',') : ''}`);
+    aus.push([dat(b.datum), b.lieferant, b.kategorie, r2(num(b.brutto) - num(b.vorsteuer)), num(b.vorsteuer), num(b.brutto), String(num(b.ustSatz)), zahlweg[b.zahlweg || 'konto'] || '', b.notiz, f]);
+  }
+  const ein = [['Rechnungsnr.', 'Art', 'Rechnungsdatum', 'Bezahlt am', 'Kunde', 'Netto', 'Umsatzsteuer', 'Brutto', 'Status', 'Datei im Paket']];
+  for (const r of S.rechnungen.filter((x) => zaehlt(x) && ((x.datum || '').startsWith(y) || (x.bezahltAm || '').startsWith(y))).sort((a, c) => (a.datum || '').localeCompare(c.datum || ''))) {
+    const s = summen(r);
+    let f = '';
+    if (r.dateiId) f = await datei('Rechnungen', r.dateiId, r.nr || 'Rechnung');
+    else if (!r.extern) { try { f = frei(`Rechnungen/${dateiName(r.nr)}.xml`); files.push({ name: f, data: xrechnung(r) }); } catch (e) { f = ''; } }
+    ein.push([r.nr, r.typ === 'gutschrift' ? 'Stornorechnung' : r.extern ? 'Hinterlegt' : 'Rechnung', dat(r.datum), r.bezahltAm ? dat(r.bezahltAm) : '', r.kunde && r.kunde.name, s.netto, s.ust, s.brutto, reStatus(r).t, f]);
+  }
+  const bank = [['Datum', 'Gegenpartei', 'Verwendungszweck', 'Betrag', 'Zugeordnet']];
+  for (const b of (S.bank || []).filter((x) => (x.datum || '').startsWith(y)).sort((a, c) => a.datum.localeCompare(c.datum))) {
+    const re = b.rechnungId && S.rechnungen.find((r) => r.id === b.rechnungId), be = b.belegId && S.belege.find((x) => x.id === b.belegId);
+    bank.push([dat(b.datum), b.gegenpartei, b.zweck, b.betrag, re ? 'Rechnung ' + re.nr : be ? 'Beleg ' + (be.lieferant || '') : '']);
+  }
+  const mon = [['Monat', 'Einnahmen netto', 'Ausgaben netto', 'Überschuss']].concat(MONATE.map((m, i) => [m, gw.mEin[i], gw.mAus[i], r2(gw.mEin[i] - gw.mAus[i])]));
+  mon.push(['Summe', gw.ein, gw.aus, r2(gw.ein - gw.aus)]);
+  if (gw.nichtAbz) mon.push(['plus 30 % Bewirtung (nicht abziehbar)', '', '', gw.nichtAbz]);
+  mon.push(['Gewinn', '', '', gw.gewinn], [], ['Ausgaben nach Kategorie']);
+  for (const [k, v] of Object.entries(gw.kat).sort((a, b) => b[1] - a[1])) mon.push([k, '', v]);
+  files.unshift(
+    { name: `Uebersicht-${y}.csv`, data: csvText(mon) },
+    { name: `Einnahmen-${y}.csv`, data: csvText(ein) },
+    { name: `Ausgaben-${y}.csv`, data: csvText(aus) },
+    ...(bank.length > 1 ? [{ name: `Bank-${y}.csv`, data: csvText(bank) }] : []),
+    { name: 'LIESMICH.txt', data: `Jahrespaket ${y} aus dem Steuer-Cockpit${S.firma.name ? ' für ' + S.firma.name : ''}, erstellt am ${dat(heute())}.\r\n\r\nUebersicht: Einnahmen, Ausgaben und Überschuss je Monat, Ausgaben nach Kategorie.\r\nEinnahmen: alle Rechnungen des Jahres. Ausgaben: alle Belege des Jahres.\r\nBank: Buchungen aus den eingelesenen Kontoauszügen.\r\nDie CSV-Dateien öffnen sich in Excel, Numbers oder LibreOffice.\r\nIm Ordner Belege liegen die hochgeladenen Belege, in Rechnungen hinterlegte Rechnungen und E-Rechnungen (XML).\r\nIn der Spalte "Datei im Paket" steht, welche Datei zu welcher Zeile gehört.\r\nBeträge netto ohne Umsatzsteuer, sofern nicht anders angegeben.\r\n` });
+  download(`Steuer-Cockpit-${y}${S.firma.name ? '-' + dateiName(S.firma.name).replace(/\s+/g, '-') : ''}.zip`, zipBlob(files));
+  toast(`Jahrespaket ${y} heruntergeladen`);
+}
+
+/* Den Browser bitten, die Daten nicht bei Platzmangel zu löschen */
+let dauerhaft = null;
+async function speicherFest() {
+  try { if (navigator.storage && navigator.storage.persist) dauerhaft = (await navigator.storage.persisted()) || (await navigator.storage.persist()); } catch (e) {}
+  return dauerhaft;
 }
 
 /* ---------- Aktionen ---------- */
@@ -2483,6 +2692,8 @@ const ACT = {
     b.rechnungId = null; await save(); vBuchung(b.id); render();
   },
   backup, restore,
+  paket: (el) => paket(el.dataset.k),
+  'speicher-fest': async () => { const ok = await speicherFest(); render(); toast(ok ? 'Der Browser behält die Daten jetzt dauerhaft.' : 'Der Browser hat abgelehnt. Lege die App auf den Home-Bildschirm und sichere regelmäßig.'); },
   'est-open': () => { tab = 'est'; closeDlg(); render(); window.scrollTo(0, 0); },
   'est-go': async (el) => { estDaten().schritt = el.dataset.k; await save(); render(); window.scrollTo(0, 0); },
   'est-jahr': (el) => { estJahr = Number(el.dataset.k); estDaten().schritt = 'start'; render(); },
@@ -2587,7 +2798,7 @@ dlg.addEventListener('close', () => { if (updateWartet) location.reload(); });
 setInterval(pruefeUpdate, 15 * 60 * 1000);
 pruefeUpdate();
 
-load().then(render).catch((e) => { console.error(e); $('#app').innerHTML = '<div class="card"><b>Der Speicher dieses Browsers ist nicht verfügbar.</b><p class="muted">Im privaten Modus oder bei blockierten Website-Daten kann die App nichts speichern. Bitte normal öffnen.</p></div>'; });
+load().then(() => { render(); if (S.rechnungen.length + S.belege.length + S.bank.length) speicherFest().then(() => { if (tab === 'firma' && !dlg.open) render(); }); }).catch((e) => { console.error(e); $('#app').innerHTML = '<div class="card"><b>Der Speicher dieses Browsers ist nicht verfügbar.</b><p class="muted">Im privaten Modus oder bei blockierten Website-Daten kann die App nichts speichern. Bitte normal öffnen.</p></div>'; });
 })();
 </script>
 </body>
