@@ -1258,7 +1258,50 @@ function render() {
   $('#tabs').innerHTML = TABS.map(([k, t]) => `<button data-act="tab" data-k="${k}"${k === tab || (tab === 'est' && k === 'steuern') ? ' aria-current="page"' : ''}>${ICONS[k]}<span>${t}</span></button>`).join('');
   $('#firmname').textContent = S.firma.name || '';
   const v = { start: vStart, angebote: vAngebote, rechnungen: vRechnungen, belege: vBelege, bank: vBank, steuern: vSteuern, firma: vFirma, est: vEst }[tab];
-  $('#app').innerHTML = v();
+  $('#app').innerHTML = (S.beispiel ? `<div class="status" style="background:var(--soft);border-color:var(--accent)"><b>Du siehst Beispieldaten einer Musterfirma.</b><p class="small muted" style="margin:4px 0 8px">Schau dich in allen Reitern um und probier alles aus. So sieht man, was wo eingetragen wird.</p><button class="primary" data-act="beispiel-weg">Beispieldaten löschen und selbst starten</button></div>` : '') + v();
+}
+
+/* ---------- Beispieldaten (Musterfirma zum Ansehen) ---------- */
+function beispielDaten() {
+  const B = leer(), t = heute(), tag = (n) => plusTage(t, n);
+  B.beispiel = true; B.letzteSicherung = t;
+  Object.assign(B.firma, { name: 'Muster Werbetechnik', inhaber: 'Max Muster', strasse: 'Musterstraße 12', plz: '75172', ort: 'Pforzheim', steuernr: '41/123/45678', ustid: 'DE123456789', email: 'info@muster-werbetechnik.de', tel: '07231 123456', iban: 'DE02 1203 0000 0000 2020 51', bic: 'BYLADEM1001', bank: 'Musterbank', rechtsform: 'einzel' });
+  const K = [
+    { id: uid(), name: 'Bäckerei Sonnenschein GmbH', adresse: 'Hauptstraße 5\n75175 Pforzheim', ustid: '', email: 'buero@baeckerei-sonnenschein.de', leitweg: '', land: '' },
+    { id: uid(), name: 'Autohaus Weber KG', adresse: 'Industriestraße 20\n75179 Pforzheim', ustid: '', email: 'einkauf@autohaus-weber.de', leitweg: '', land: '' },
+    { id: uid(), name: 'Café Lindenhof', adresse: 'Lindenallee 3\n75172 Pforzheim', ustid: '', email: 'hallo@cafe-lindenhof.de', leitweg: '', land: '' }
+  ];
+  B.kunden = K;
+  B.lieferanten = [
+    { id: uid(), name: 'Telekom Deutschland GmbH', adresse: '', ustid: '', email: '', tel: '', kategorie: 'Telefon und Internet', rc: '', notiz: '' },
+    { id: uid(), name: 'Druckerei Schmidt', adresse: '', ustid: '', email: '', tel: '', kategorie: 'Wareneinkauf', rc: '', notiz: '' },
+    { id: uid(), name: 'Shell Station Pforzheim', adresse: '', ustid: '', email: '', tel: '', kategorie: 'Fahrzeug und Reise', rc: '', notiz: '' }
+  ];
+  const kd = (k) => ({ name: k.name, adresse: k.adresse, ustid: k.ustid, email: k.email, leitweg: '', land: '' });
+  const nr = (art, d) => { const S0 = S; S = B; const n = naechsteNr(art, d.slice(0, 4)); S = S0; return n; };
+  const doc = (typ, k, datum, pos, extra) => Object.assign({ id: uid(), typ, nr: '', datum, leistungsdatum: datum, faellig: '', gueltigBis: '', kunde: kd(k), positionen: pos, hinweis: '', status: 'offen', ku: false }, extra);
+  const a1 = doc('angebot', K[1], tag(-50), [{ text: 'Fahrzeugbeschriftung Transporter, beidseitig', menge: 2, einheit: 'Stk.', preis: 890, ust: 19 }, { text: 'Montage', menge: 4, einheit: 'Std.', preis: 65, ust: 19 }], { gueltigBis: tag(-20), status: 'abgerechnet' });
+  const a2 = doc('angebot', K[2], tag(-6), [{ text: 'Schaufensterfolie mit Logo', menge: 1, einheit: 'pauschal', preis: 480, ust: 19 }, { text: 'Speisekarten, Druck', menge: 200, einheit: 'Stk.', preis: 1.2, ust: 19 }], { gueltigBis: tag(24) });
+  a1.nr = nr('AN', a1.datum); a2.nr = nr('AN', a2.datum);
+  B.angebote = [a1, a2];
+  const r1 = doc('rechnung', K[0], tag(-62), [{ text: 'Werbeschild Ladeneingang, Alu-Dibond 120×60 cm', menge: 1, einheit: 'Stk.', preis: 640, ust: 19 }, { text: 'Flyer A5, 1.000 Stück', menge: 1, einheit: 'pauschal', preis: 190, ust: 19 }], { faellig: tag(-48), status: 'bezahlt', bezahltAm: tag(-50), gestelltAm: tag(-62) });
+  const r2_ = doc('rechnung', K[1], tag(-40), a1.positionen.map((p) => Object.assign({}, p)), { faellig: tag(-26), gestelltAm: tag(-40), ausAngebot: a1.id });
+  const r3 = doc('rechnung', K[0], tag(-5), [{ text: 'Aufkleber Tüten-Verschluss, 2.000 Stück', menge: 1, einheit: 'pauschal', preis: 260, ust: 19 }], { faellig: tag(9), gestelltAm: tag(-5) });
+  for (const r of [r1, r2_, r3]) r.nr = nr('RE', r.datum);
+  B.rechnungen = [r1, r2_, r3];
+  const be = (lieferant, datum, brutto, kategorie, notiz) => ({ id: uid(), datum, lieferant, brutto, ustSatz: 19, vorsteuer: r2(brutto - brutto / 1.19), kategorie, notiz, zahlweg: 'konto', buchungId: null, hochgeladen: datum });
+  const b1 = be('Telekom Deutschland GmbH', tag(-12), 59.5, 'Telefon und Internet', 'Mobilfunk und Internet');
+  const b2 = be('Druckerei Schmidt', tag(-35), 357, 'Wareneinkauf', 'Folien und Druck für Autohaus Weber');
+  const b3 = be('Shell Station Pforzheim', tag(-8), 89.2, 'Fahrzeug und Reise', 'Tanken Firmenwagen');
+  B.belege = [b1, b2, b3];
+  const bk = (datum, betrag, gegenpartei, zweck, extra) => Object.assign({ id: 'bsp:' + uid(), datum, betrag, gegenpartei, zweck, belegId: null, rechnungId: null }, extra);
+  const k1 = bk(tag(-50), summen(r1).brutto, K[0].name, 'Rechnung ' + r1.nr, { rechnungId: r1.id });
+  const k2 = bk(tag(-11), -59.5, 'Telekom Deutschland GmbH', 'Kundenkonto 1234567', { belegId: b1.id });
+  const k3 = bk(tag(-34), -357, 'Druckerei Schmidt', 'RG 2026-418', { belegId: b2.id });
+  const k4 = bk(tag(-3), -24.99, 'Amazon EU S.a.r.l.', 'Bestellung 302-4455667');
+  b1.buchungId = k2.id; b2.buchungId = k3.id;
+  B.bank = [k1, k2, k3, k4];
+  return B;
 }
 
 /* ---------- Übersicht ---------- */
@@ -1300,6 +1343,7 @@ function vStart() {
     <h2>Das musst du tun</h2>
     ${todos.length ? `<ul class="todo">${todos.map((t) => `<li><span class="dot ${t.c}"></span><div class="grow"><div><b>${t.t}</b></div><div class="small muted">${t.s}</div></div>${t.act ? `<button data-act="${t.act}" data-k="${t.k || ''}" data-id="${t.id || ''}">${t.b}</button>` : ''}</li>`).join('')}</ul>` : '<p class="muted">Nichts zu tun. Neue Angebote, Rechnungen und Belege legst du über den Plus-Knopf an.</p>'}
   </div>
+  ${!S.beispiel && !S.firma.name && !hatDaten ? `<div class="card"><h2>Erst mal ansehen, wie es befüllt aussieht?</h2><p class="muted">Lädt eine Musterfirma mit Angeboten, Rechnungen, Belegen und Bankbuchungen. Du kannst sie jederzeit wieder löschen.</p><div class="btns"><button data-act="beispiel">Beispieldaten laden</button></div></div>` : ''}
   <div class="tiles">
     <div class="tile"><div class="q">Was ist noch offen?</div><div class="v">${eur(offenSum)}</div><div class="e">${offen.length} Rechnung${offen.length === 1 ? '' : 'en'}, davon ${ueber.length} überfällig</div></div>
     <div class="tile"><div class="q">Umsatz ${jahr}</div><div class="v">${eur(umsatzJahr)}</div><div class="e">netto, aus gestellten Rechnungen${ku() ? `; Grenze ${eur(KU_GRENZE)}` : ''}</div></div>
@@ -2424,6 +2468,8 @@ const ACT = {
     vEditor();
   },
   'save-ext': saveExtern,
+  beispiel: async () => { S = beispielDaten(); for (const f of fristen()) if (f.datum < heute()) S.steuer.erledigt[f.key] = true; await save(); tab = 'start'; render(); window.scrollTo(0, 0); toast('Beispieldaten geladen'); },
+  'beispiel-weg': async () => { if (!confirm('Beispieldaten löschen und mit einer leeren App starten?')) return; S = leer(); await save(); tab = 'start'; render(); window.scrollTo(0, 0); toast('Beispieldaten gelöscht'); },
   'bank-import': bankImport,
   'open-bk': (el) => vBuchung(el.dataset.id),
   'bk-zu': async (el) => {
