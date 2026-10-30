@@ -10,4 +10,4 @@ Web-App für Angebote, Rechnungen und Belege. Statische Seite über GitHub Pages
 - `version.json`: Versionsnummer des letzten Builds. Die App prüft sie beim Öffnen und lädt sich bei einer neuen Version selbst neu.
 - `sw.js`, `manifest.json`, Icons: damit die App aufs Handy installiert werden kann und offline startet.
 
-Daten liegen nur im Browser des Geräts (IndexedDB). Sicherung als JSON über den Reiter „Firma“.
+Daten liegen nur im Browser des Geräts (IndexedDB); die App bittet den Browser, sie dauerhaft zu behalten. Sicherung als JSON über den Reiter „Firma“. Jahrespaket als ZIP (CSV-Listen für Excel plus alle Belege) über „Firma“ oder „Steuern“. Diagramme zu Einnahmen und Ausgaben auf der Übersicht.
