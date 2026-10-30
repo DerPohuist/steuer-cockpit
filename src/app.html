@@ -80,6 +80,10 @@ p { margin: 0 0 8px; }
 .pill.warn { background: var(--warn-bg); color: var(--warn); }
 .pill.bad { background: var(--bad-bg); color: var(--bad); }
 .pill.grey { background: var(--line); color: var(--muted); }
+.bar { position: relative; height: 10px; border-radius: 5px; background: var(--line); overflow: hidden; margin: 6px 0 2px; }
+.bar i { display: block; height: 100%; border-radius: 5px; background: var(--good); }
+.bar i.warn { background: var(--warn); } .bar i.bad { background: var(--bad); }
+.bar b { position: absolute; top: 0; bottom: 0; width: 2px; background: var(--fg); opacity: .5; }
 .list { list-style: none; margin: 0; padding: 0; }
 .list li { border-top: 1px solid var(--line); }
 .list li:first-child { border-top: 0; }
@@ -220,7 +224,7 @@ const RECHTSFORMEN = {
   gmbh: { label: 'GmbH', gewinn: 'Bilanz und GuV nach HGB', jahr: 'Körperschaftsteuer, Gewerbesteuer, Umsatzsteuer, E-Bilanz', extra: 'Jahresabschluss offenlegen; Lohnsteuer für das Geschäftsführergehalt.' }
 };
 const KU_HINWEIS = 'Gemäß § 19 UStG wird keine Umsatzsteuer berechnet (Kleinunternehmerregelung).';
-const KU_GRENZE = 100000;
+const KU_GRENZE = 100000, KU_VORJAHR = 25000;
 const KATEGORIEN = ['Wareneinkauf', 'Büro und Software', 'Telefon und Internet', 'Fahrzeug und Reise', 'Werbung', 'Miete', 'Versicherung', 'Fremdleistung', 'Bewirtung', 'Porto und Versand', 'Bankgebühren', 'Fortbildung', 'Beiträge und Gebühren', 'Anschaffung (Gerät, Möbel)', 'Sonstiges'];
 const ZAHLWEGE = [['konto', 'Geschäftskonto'], ['bar', 'Bar'], ['privat', 'Privat ausgelegt'], ['offen', 'Noch nicht bezahlt']];
 const REGISTER_RF = ['ek', 'ohg', 'ug', 'gmbh'];
@@ -228,9 +232,9 @@ const REGISTER_RF = ['ek', 'ohg', 'ug', 'gmbh'];
 function leer() {
   return {
     v: 2,
-    firma: { name: '', inhaber: '', strasse: '', plz: '', ort: '', steuernr: '', ustid: '', email: '', tel: '', iban: '', bic: '', bank: '', rechtsform: '', registergericht: '', registernr: '', logo: '', kleinunternehmer: false, turnus: 'monat', dauerfrist: false, zahlungsziel: 14, angebotTage: 30, basiszins: 1.27 },
-    angebote: [], rechnungen: [], belege: [], kunden: [], lieferanten: [], bank: [], zaehler: {}, letzteSicherung: null,
-    steuer: { versteuerung: 'soll', hebesatz: 400, berater: false, svz: 0, vzEst: 0, vzGew: 0, erledigt: {} },
+    firma: { name: '', inhaber: '', strasse: '', plz: '', ort: '', steuernr: '', ustid: '', email: '', tel: '', iban: '', bic: '', bank: '', rechtsform: '', registergericht: '', registernr: '', logo: '', kleinunternehmer: false, gruendung: '', turnus: 'monat', dauerfrist: false, zahlungsziel: 14, angebotTage: 30, basiszins: 1.27 },
+    angebote: [], rechnungen: [], belege: [], kunden: [], lieferanten: [], bank: [], vorlagen: [], zaehler: {}, letzteSicherung: null,
+    steuer: { versteuerung: 'soll', hebesatz: 400, berater: false, svz: 0, vzEst: 0, vzGew: 0, erledigt: {}, ruecklageIst: '', kalVorher: 3, kalRe: true, skr: '03', beraterNr: '', mandantNr: '' },
     est: {}
   };
 }
@@ -244,7 +248,7 @@ async function load() {
 }
 /* Ältere Stände: Kunden bekommen eine id, Lieferanten entstehen aus vorhandenen Belegen */
 function migriere() {
-  S.kunden = S.kunden || []; S.lieferanten = S.lieferanten || [];
+  S.kunden = S.kunden || []; S.lieferanten = S.lieferanten || []; S.vorlagen = S.vorlagen || [];
   for (const k of S.kunden) if (!k.id) k.id = uid();
   if ((S.v || 1) < 2) {
     for (const b of S.belege.slice().sort((x, y) => (x.datum || '').localeCompare(y.datum || ''))) merkeLieferant(b.lieferant, b.kategorie, b.rc);
@@ -252,7 +256,7 @@ function migriere() {
   }
   for (const l of S.lieferanten) if (!l.id) l.id = uid();
 }
-async function save() { await idbSet('state', S); }
+async function save() { S.geaendert = new Date().toISOString(); await idbSet('state', S); }
 
 /* ---------- Hilfen ---------- */
 const $ = (sel, root) => (root || document).querySelector(sel);
@@ -569,7 +573,7 @@ function vSteuern() {
   const uj = ustva({ von: jahr + '-01-01', bis: jahr + '-12-31', dez: false });
   const tage = next ? tageBis(next.datum) : 0;
   const fz = (f) => { const t = tageBis(f.datum); return t < 0 ? 'bad' : t <= 14 ? 'warn' : 'grey'; };
-  const fLi = (f) => `<li><span class="dot ${f.erledigt ? 'good' : fz(f)}"></span><div class="grow"><div><b>${dat(f.datum)}</b> ${f.t}${f.erledigt ? ' <span class="pill good">erledigt</span>' : ''}</div><div class="small muted">${f.s}</div></div><button data-act="st-done" data-k="${f.key}">${f.erledigt ? 'Wieder offen' : 'Erledigt'}</button></li>`;
+  const fLi = (f) => `<li><span class="dot ${f.erledigt ? 'good' : fz(f)}"></span><div class="grow"><div><b>${dat(f.datum)}</b> ${f.t}${f.erledigt ? ' <span class="pill good">erledigt</span>' : ''}</div><div class="small muted">${f.s}</div></div><div class="btns" style="margin:0;flex-wrap:nowrap">${f.erledigt || f.datum < heute() ? '' : `<button class="chip" data-act="kal-eins" data-k="${f.key}" aria-label="Nur diesen Termin in den Kalender">📅</button>`}<button data-act="st-done" data-k="${f.key}">${f.erledigt ? 'Wieder offen' : 'Erledigt'}</button></div></li>`;
   const ustCard = !ku() || u.nurRc;
   return `
   <h1>Steuern</h1>
@@ -615,7 +619,7 @@ function vSteuern() {
       ${gw.gross.length ? `<li class="miss">${gw.gross.length} Beleg${gw.gross.length > 1 ? 'e' : ''} über 800 € netto (${gw.gross.slice(0, 3).map((b) => esc(b.lieferant || 'ohne Name')).join(', ')}). Geräte und andere Anschaffungen werden über mehrere Jahre abgeschrieben, das prüft der Steuerberater.</li>` : ''}
       ${gw.ohne.length ? `<li class="miss">${gw.ohne.length} Beleg${gw.ohne.length > 1 ? 'e' : ''} ohne Betrag fehlen in der Rechnung.</li>` : ''}</ul>` : ''}
     ${Object.keys(gw.kat).length ? `<details><summary>Ausgaben nach Kategorie</summary><table class="tab">${Object.entries(gw.kat).sort((a, b) => b[1] - a[1]).map(([k, v]) => `<tr><td>${esc(k)}</td><td style="text-align:right">${eur(v)}</td></tr>`).join('')}</table></details>` : ''}
-    <div class="btns"><button data-act="paket" data-k="${jahr}">Jahrespaket ${jahr} (ZIP mit Listen und Belegen)</button></div>
+    <div class="btns"><button data-act="paket" data-k="${jahr}">Jahrespaket ${jahr} (ZIP mit Listen und Belegen)</button><button data-act="datev">Für den Steuerberater (DATEV)</button></div>
   </div>
 
   <div class="card">
@@ -632,7 +636,7 @@ function vSteuern() {
     <h2>Fristen</h2>
     ${fr.length ? `<ul class="todo">${fr.slice(0, 6).map(fLi).join('')}</ul>${fr.length > 6 ? `<details><summary>${fr.length - 6} weitere</summary><ul class="todo" style="margin-top:8px">${fr.slice(6).map(fLi).join('')}</ul></details>` : ''}` : '<p class="muted">Keine offenen Fristen.</p>'}
     <div class="btns"><button data-act="st-ics">In meinen Kalender übernehmen</button></div>
-    <p class="small muted" style="margin-top:6px">Die Kalender-Datei erinnert dich drei Tage vor jeder Frist. Fällt eine Frist auf ein Wochenende oder einen bundesweiten Feiertag, gilt der nächste Werktag.</p>
+    <p class="small muted" style="margin-top:6px">Die Kalender-Datei funktioniert mit iPhone, Android, Outlook und Google Kalender und erinnert dich rechtzeitig vor jeder Frist. Mit 📅 übernimmst du nur einen Termin. Fällt eine Frist auf ein Wochenende oder einen bundesweiten Feiertag, gilt der nächste Werktag.</p>
   </div>
 
   <details class="card"><summary>Einstellungen für Steuern</summary>
@@ -659,16 +663,55 @@ async function saveSteuer() {
   toast('Gespeichert');
 }
 const icsEsc = (s) => String(s).replace(/<[^>]+>/g, '').replace(/[\\;,]/g, (c) => '\\' + c).replace(/\n/g, '\\n');
-function stIcs() {
+// Zeilen nach RFC 5545 auf 75 Bytes umbrechen, sonst lehnen manche Kalender (Outlook) die Datei ab
+function icsFalten(z) {
+  const enc = new TextEncoder(); if (enc.encode(z).length <= 75) return z;
+  const out = []; let cur = '', n = 0;
+  for (const ch of z) { const l = enc.encode(ch).length; if (n + l > (out.length ? 74 : 75)) { out.push(cur); cur = ''; n = 0; } cur += ch; n += l; }
+  out.push(cur); return out.join('\r\n ');
+}
+function kalTermine(mitRe) {
+  const t = fristen().filter((x) => !x.erledigt && x.datum >= heute()).map((f) => ({ uid: f.key, datum: f.datum, t: f.t, s: f.s }));
+  if (mitRe) for (const r of offeneRe()) if (r.faellig && r.faellig >= heute()) t.push({ uid: 're-' + r.id, datum: r.faellig, t: `Zahlung fällig: ${r.kunde.name || 'Kunde'} ${eur(summen(r).brutto)}`, s: `Rechnung ${r.nr}. Ist das Geld nicht da, erinnert dich das Cockpit ans Mahnen.` });
+  return t.sort((a, b) => a.datum.localeCompare(b.datum));
+}
+function icsDatei(termine, vorher, name) {
   const stamp = new Date().toISOString().replace(/[-:]/g, '').slice(0, 15) + 'Z';
-  const L = ['BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//Steuer-Cockpit//DE', 'CALSCALE:GREGORIAN', 'X-WR-CALNAME:Steuerfristen'];
-  for (const f of fristen().filter((x) => !x.erledigt && x.datum >= heute())) {
-    L.push('BEGIN:VEVENT', `UID:${f.key}@steuer-cockpit`, 'DTSTAMP:' + stamp, 'DTSTART;VALUE=DATE:' + f.datum.replace(/-/g, ''), 'DTEND;VALUE=DATE:' + plusTage(f.datum, 1).replace(/-/g, ''),
-      'SUMMARY:' + icsEsc(f.t), 'DESCRIPTION:' + icsEsc(f.s), 'BEGIN:VALARM', 'ACTION:DISPLAY', 'DESCRIPTION:' + icsEsc(f.t), 'TRIGGER:-P3D', 'END:VALARM', 'END:VEVENT');
+  const L = ['BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//Steuer-Cockpit//DE', 'CALSCALE:GREGORIAN', 'METHOD:PUBLISH', 'X-WR-CALNAME:Steuer-Cockpit'];
+  for (const f of termine) {
+    L.push('BEGIN:VEVENT', `UID:${f.uid}@steuer-cockpit`, 'DTSTAMP:' + stamp, 'LAST-MODIFIED:' + stamp, 'DTSTART;VALUE=DATE:' + f.datum.replace(/-/g, ''), 'DTEND;VALUE=DATE:' + plusTage(f.datum, 1).replace(/-/g, ''),
+      'SUMMARY:' + icsEsc(f.t), 'DESCRIPTION:' + icsEsc(f.s), 'TRANSP:TRANSPARENT');
+    // Erinnerung um 9 Uhr x Tage vorher (bei ganztägigen Terminen zählt der Kalender ab Mitternacht)
+    for (const v of vorher) L.push('BEGIN:VALARM', 'ACTION:DISPLAY', 'DESCRIPTION:' + icsEsc(f.t), v ? `TRIGGER:-PT${v * 24 - 9}H` : 'TRIGGER:PT9H', 'END:VALARM');
+    L.push('END:VEVENT');
   }
   L.push('END:VCALENDAR');
-  download('steuerfristen.ics', L.join('\r\n') + '\r\n', 'text/calendar');
-  toast('Kalender-Datei gespeichert. Öffnen, um die Termine zu übernehmen.');
+  download(name, L.map(icsFalten).join('\r\n') + '\r\n', 'text/calendar');
+}
+function stIcs() {
+  const v = num(S.steuer.kalVorher), n = kalTermine(S.steuer.kalRe !== false).length;
+  openDlg(`${head('Fristen in den Kalender')}<form id="kalForm" class="dlg-body">
+    <p>Die App speichert eine Kalender-Datei (.ics). Öffnest du sie, übernimmt dein Kalender die Termine: iPhone, Android, Outlook und Google Kalender.</p>
+    <div class="grid2" style="margin-top:10px">
+      <label>Erinnern<select name="vorher">${[[0, 'am Tag selbst'], [1, '1 Tag vorher'], [3, '3 Tage vorher'], [7, '1 Woche vorher']].map(([k, t]) => `<option value="${k}"${k === v ? ' selected' : ''}>${t}</option>`).join('')}</select></label>
+      <label class="check" style="align-self:end"><input type="checkbox" name="re"${S.steuer.kalRe !== false ? ' checked' : ''}> Auch Zahlungsziele offener Rechnungen</label>
+    </div>
+    <p class="small muted" style="margin-top:8px">Gerade ${n} Termin${n === 1 ? '' : 'e'}. Lädst du die Datei später noch einmal, werden gleiche Termine aktualisiert statt doppelt angelegt (iPhone, Outlook). Neue Fristen kommen dazu, also am besten jedes Quartal einmal übernehmen.</p>
+    <details><summary>So geht es auf dem Handy und in Outlook</summary><ul class="small" style="margin:8px 0 0;padding-left:20px">
+      <li><b>iPhone:</b> Nach dem Tippen auf „Speichern“ fragt Safari, ob die Termine in den Kalender sollen. „Alle hinzufügen“.</li>
+      <li><b>Android:</b> Die Datei aus „Downloads“ öffnen und Google Kalender wählen.</li>
+      <li><b>Outlook:</b> Die Datei doppelklicken oder unter Datei, Öffnen und exportieren, Importieren.</li>
+      <li><b>Google Kalender im Browser:</b> Einstellungen, Importieren und Exportieren, Datei wählen.</li></ul></details>
+  </form>
+  <div class="dlg-foot"><button class="primary" data-act="kal-ok">Kalender-Datei speichern</button></div>`);
+}
+async function kalSpeichern() {
+  const f = $('#kalForm');
+  S.steuer.kalVorher = num(f.elements.vorher.value); S.steuer.kalRe = f.elements.re.checked; await save();
+  const t = kalTermine(S.steuer.kalRe);
+  if (!t.length) return toast('Gerade gibt es keine kommenden Termine.');
+  icsDatei(t, [S.steuer.kalVorher], 'steuer-cockpit-termine.ics');
+  closeDlg(); toast(`${t.length} Termine gespeichert. Datei öffnen, um sie zu übernehmen.`);
 }
 function stCsv(key) {
   const u = ustva(zrAus(key)), f = S.firma;
@@ -1326,6 +1369,97 @@ function beispielDaten() {
   return B;
 }
 
+/* ---------- Kleinunternehmer-Wächter (§ 19 UStG ab 2025) ---------- */
+/* Gesamtumsatz nach vereinnahmten Entgelten: bezahlte Rechnungen zählen; offene zeigt die App dazu, damit die Warnung früh kommt */
+function kuUmsatz(y, ohneId) {
+  y = String(y); let bezahlt = 0, offen = 0;
+  for (const r of S.rechnungen) {
+    if (!zaehlt(r) || r.id === ohneId) continue;
+    const n = summen(r).netto;
+    if (r.typ === 'gutschrift') { const o = S.rechnungen.find((x) => x.id === r.stornoVon); if (o && o.bezahltAm && (r.datum || '').startsWith(y)) bezahlt += n; else if ((r.datum || '').startsWith(y)) offen += n; continue; }
+    if ((r.bezahltAm || '').startsWith(y)) bezahlt += n;
+    else if (r.status !== 'storniert' && !r.bezahltAm && (r.datum || '').startsWith(y)) offen += n;
+  }
+  return { bezahlt: r2(bezahlt), offen: r2(Math.max(0, offen)), summe: r2(bezahlt + Math.max(0, offen)) };
+}
+function kuWaechter() {
+  const d = new Date(), y0 = d.getFullYear(), jetzt = kuUmsatz(y0), vor = kuUmsatz(y0 - 1);
+  const gruender = Number(S.firma.gruendung) === y0;
+  // Im Gründungsjahr gilt 25.000 € schon im laufenden Jahr, sonst 100.000 €
+  const sofort = gruender ? KU_VORJAHR : KU_GRENZE;
+  const tag = Math.max(1, Math.round((d - new Date(y0, 0, 1)) / 864e5) + 1), jahrTage = new Date(y0, 1, 29).getMonth() === 1 ? 366 : 365;
+  const hoch = tag > 30 ? r2(jetzt.summe / tag * jahrTage) : 0;
+  let wann = '';
+  if (hoch > KU_VORJAHR && jetzt.summe < KU_VORJAHR) { const t = Math.ceil(KU_VORJAHR / (jetzt.summe / tag)); if (t <= jahrTage) wann = MONATE[new Date(y0, 0, t).getMonth()]; }
+  const vorUeber = !gruender && Number(S.firma.gruendung) < y0 && vor.summe > KU_VORJAHR;
+  const c = jetzt.summe > sofort || vorUeber ? 'bad' : jetzt.summe > KU_VORJAHR * 0.8 || hoch > KU_VORJAHR ? 'warn' : 'good';
+  return { y0, jetzt, vor, gruender, sofort, hoch, wann, vorUeber, c };
+}
+function vKuWaechter(W) {
+  const balken = (wert, grenze) => { const p = Math.min(100, Math.round(wert / grenze * 100)); return `<div class="bar" role="img" aria-label="${p} Prozent"><i class="${p >= 100 ? 'bad' : p >= 80 ? 'warn' : ''}" style="width:${p}%"></i></div>`; };
+  const satz = W.jetzt.summe > W.sofort ? `<b>Grenze überschritten.</b> Ab der Rechnung, mit der du über ${eur(W.sofort)} gekommen bist, musst du Umsatzsteuer berechnen und Voranmeldungen abgeben. Nimm im Reiter Firma den Haken bei Kleinunternehmer heraus und sprich mit dem Finanzamt oder Steuerberater.`
+    : W.vorUeber ? `<b>Dein Umsatz ${W.y0 - 1} lag über ${eur(KU_VORJAHR)}.</b> Dann gilt die Regelung ${W.y0} nicht mehr. Bitte mit dem Finanzamt oder Steuerberater klären.`
+    : W.jetzt.summe > KU_VORJAHR ? `Du liegst über ${eur(KU_VORJAHR)}. Dieses Jahr bleibst du Kleinunternehmer, solange du unter ${eur(KU_GRENZE)} bleibst. <b>Ab ${W.y0 + 1} musst du Umsatzsteuer berechnen.</b>`
+    : W.wann ? `Bei deinem Tempo erreichst du ${eur(KU_VORJAHR)} etwa im ${W.wann}. Dann wärst du ab ${W.y0 + 1} kein Kleinunternehmer mehr.`
+    : `Alles im grünen Bereich.${W.hoch ? ` Hochgerechnet kommst du dieses Jahr auf etwa ${eur(W.hoch)}.` : ''}`;
+  return `<div class="card">
+    <h2>Kleinunternehmer-Wächter</h2>
+    <p><span class="pill ${W.c}">${W.c === 'good' ? 'Gut' : W.c === 'warn' ? 'Im Blick behalten' : 'Achtung'}</span> ${satz}</p>
+    <p class="small" style="margin:10px 0 0">Umsatz ${W.y0}: <b>${eur(W.jetzt.summe)}</b> von ${eur(KU_VORJAHR)}${W.jetzt.offen ? ` <span class="muted">(davon ${eur(W.jetzt.offen)} noch nicht bezahlt)</span>` : ''}</p>
+    ${balken(W.jetzt.summe, KU_VORJAHR)}
+    <p class="small muted" style="margin:0">${W.gruender ? 'Im Gründungsjahr gilt diese Grenze schon jetzt.' : `Entscheidet, ob du ${W.y0 + 1} noch Kleinunternehmer bist.`}</p>
+    ${W.gruender ? '' : `<p class="small" style="margin:10px 0 0">Harte Grenze im laufenden Jahr: ${eur(W.jetzt.summe)} von ${eur(KU_GRENZE)}</p>${balken(W.jetzt.summe, KU_GRENZE)}<p class="small muted" style="margin:0">Darüber gilt sofort die normale Umsatzsteuer, schon ab der Rechnung, die die Grenze reißt.</p>`}
+    <p class="small muted" style="margin-top:10px">${(Number(S.firma.gruendung) || 0) < W.y0 && (W.vor.summe || S.firma.gruendung) ? `Vorjahr ${W.y0 - 1}: ${eur(W.vor.summe)}${W.vor.summe > KU_VORJAHR ? ' über' : ' unter'} der Grenze von ${eur(KU_VORJAHR)}. ` : ''}Gezählt werden Nettobeträge aus deinen Rechnungen, sobald das Geld da ist. Rechnungen aus anderen Programmen hinterlegst du über den Plus-Knopf, damit die Summe stimmt.${S.firma.gruendung ? '' : ' Trag im Reiter Firma ein, in welchem Jahr du gegründet hast, dann rechnet der Wächter genauer.'}</p>
+  </div>`;
+}
+
+/* ---------- Steuer-Rücklage ---------- */
+/* Was an Umsatzsteuer und Einkommensteuer schon angefallen, aber noch nicht bezahlt ist */
+function ruecklage() {
+  const y0 = new Date().getFullYear(), h = heute(), E = S.steuer.erledigt || {}, rf = S.firma.rechtsform;
+  const teile = [];
+  let ust = 0; const zr = [];
+  for (let n = S.firma.turnus === 'quartal' ? -5 : -14; n <= 0; n++) {
+    const z = zrAus(zrRel(n));
+    if (E['ustva-' + z.key] || Number(z.von.slice(0, 4)) < y0 - 1) continue;
+    const u = ustva(z);
+    if ((!ku() || u.nurRc) && u.zahl > 0) { ust += u.zahl; zr.push(z.name); }
+  }
+  if (ust) teile.push(['Umsatzsteuer, noch nicht ans Finanzamt gezahlt', r2(ust), zr.length > 3 ? `${zr.length} Zeiträume, ${zr[0]} bis ${zr[zr.length - 1]}` : zr.join(', ')]);
+  const faelligBisher = (y, monate, tag) => monate.filter((m) => `${y}-${String(m).padStart(2, '0')}-${tag}` <= h).length;
+  const gw = gewinn(y0), sch = schaetzung(y0, gw.gewinn);
+  const vz = r2(faelligBisher(y0, [3, 6, 9, 12], '10') * num(S.steuer.vzEst) + faelligBisher(y0, [2, 5, 8, 11], '15') * num(S.steuer.vzGew));
+  const est = Math.max(0, r2(sch.summe - vz));
+  if (est) teile.push([`${KAPITAL.includes(rf) ? 'Körperschaft- und Gewerbesteuer' : rf && rf !== 'freiberufler' ? 'Einkommen- und Gewerbesteuer' : 'Einkommensteuer'} auf den Gewinn ${y0} bis heute`, est, `Gewinn bisher ${eur(gw.gewinn)}${vz ? `, Vorauszahlungen ${eur(vz)} schon abgezogen` : ''}`]);
+  const vj = y0 - 1;
+  if (!E['jahr-' + vj] && jahresFrist(vj) >= h) {
+    const gv = gewinn(vj), sv = schaetzung(vj, gv.gewinn), rest = Math.max(0, r2(sv.summe - 4 * num(S.steuer.vzEst) - 4 * num(S.steuer.vzGew)));
+    if (rest && gv.ein) teile.push([`Mögliche Nachzahlung für ${vj}`, rest, 'bis die Steuererklärung erledigt ist; Vorauszahlungen abgezogen']);
+  }
+  const soll = r2(teile.reduce((a, x) => a + x[1], 0));
+  const istRoh = S.steuer.ruecklageIst, ist = istRoh === '' || istRoh == null ? null : num(istRoh);
+  const c = ist == null ? 'grey' : ist >= soll ? 'good' : ist >= soll * 0.75 ? 'warn' : 'bad';
+  // Faustregel: welcher Anteil der Zahlungseingänge dieses Jahres an Steuern hängt
+  const eingang = S.rechnungen.filter((r) => zaehlt(r) && r.typ !== 'gutschrift' && (r.bezahltAm || '').startsWith(String(y0))).reduce((a, r) => a + summen(r).brutto, 0);
+  const uj = ustva({ von: y0 + '-01-01', bis: y0 + '-12-31', dez: false });
+  const quote = eingang > 500 ? Math.min(60, Math.round((Math.max(0, ku() ? 0 : uj.zahl) + sch.summe) / eingang * 100)) : 0;
+  return { teile, soll, ist, c, fehlt: ist == null ? 0 : Math.max(0, r2(soll - ist)), quote, personen: sch.personen };
+}
+function vRuecklage(R) {
+  const proz = R.soll ? Math.min(100, Math.round((R.ist || 0) / R.soll * 100)) : 100;
+  const status = R.ist == null ? 'Trag ein, wie viel du schon zurückgelegt hast' : R.c === 'good' ? 'Genug zurückgelegt' : `Es fehlen ${eur(R.fehlt)}`;
+  return `<div class="card">
+    <h2>Steuer-Rücklage</h2>
+    <p><span class="pill ${R.c}">${R.c === 'good' ? 'Gut' : R.c === 'warn' ? 'Knapp' : R.c === 'bad' ? 'Zu wenig' : 'Offen'}</span> ${status}</p>
+    <p style="margin-top:6px">Zurücklegen solltest du jetzt <b>${eur(R.soll)}</b>.</p>
+    ${R.ist != null && R.soll ? `<div class="bar" role="img" aria-label="${proz} Prozent der Rücklage vorhanden"><i class="${R.c}" style="width:${proz}%"></i></div><p class="small muted" style="margin:0">${eur(R.ist)} von ${eur(R.soll)} da</p>` : ''}
+    <label style="margin-top:10px">So viel liegt auf deinem Konto für Steuern (€)<input id="ruIst" inputmode="decimal" value="${R.ist == null ? '' : esc(String(R.ist).replace('.', ','))}" placeholder="z. B. Tagesgeld oder Unterkonto"></label>
+    ${R.teile.length ? `<table class="tab" style="margin-top:10px">${R.teile.map(([t, v, s]) => `<tr><td>${t}${s ? `<div class="small muted">${esc(s)}</div>` : ''}</td><td style="text-align:right;white-space:nowrap">${eur(v)}</td></tr>`).join('')}</table>` : '<p class="small muted" style="margin-top:8px">Gerade ist keine Steuer offen.</p>'}
+    ${R.quote ? `<p class="small" style="margin-top:8px"><b>Faustregel für dich:</b> Leg von jedem Zahlungseingang rund ${R.quote} % zur Seite.</p>` : ''}
+    <p class="small muted" style="margin-top:6px">Grobe Schätzung wie im Reiter Steuern, ohne Kirchensteuer und Krankenversicherung.${R.personen ? ' Bei Personengesellschaften zahlt jeder Gesellschafter seine Einkommensteuer selbst, die ist hier nicht drin.' : ''} Abgegebene Voranmeldungen markierst du im Reiter Steuern, dann zählen sie nicht mehr.</p>
+  </div>`;
+}
+
 /* ---------- Übersicht ---------- */
 function vStart() {
   const jahr = String(new Date().getFullYear());
@@ -1349,9 +1483,14 @@ function vStart() {
   if (entw.length) todos.push({ c: 'warn', t: `${entw.length} Rechnungsentwurf${entw.length > 1 ? 'e' : ''} noch nicht gestellt`, s: 'Erst nach „Rechnung stellen“ bekommt sie eine Nummer und zählt zum Umsatz.', act: 'tab', k: 'rechnungen', b: 'Ansehen' });
   const beFehlt = S.belege.filter(belegFehlt);
   if (beFehlt.length) todos.push({ c: 'warn', t: `${beFehlt.length} Beleg${beFehlt.length > 1 ? 'e' : ''} unvollständig`, s: 'Betrag oder Kategorie fehlen. Sonst fehlen Ausgaben und Vorsteuer in der Rechnung.', act: 'be-ergaenzen', b: 'Ergänzen' });
+  const luecke = belegLuecken().filter((x) => x.fehlt && x.k < heute().slice(0, 7)).slice(0, 3);
+  if (luecke.length) todos.push({ c: 'warn', t: `Belege fehlen: ${luecke.map((x) => `${MONATE[Number(x.k.slice(5, 7)) - 1]} ${x.fehlt}`).join(', ')}`, s: `${eur(luecke.reduce((a, x) => a + x.summe, 0))} Ausgaben auf dem Konto ohne Beleg. Ohne Beleg zählen sie nicht als Betriebsausgabe.`, act: 'abgleich', k: luecke[0].k, b: 'Abgleichen' });
   const hatDaten = S.rechnungen.length + S.angebote.length + S.belege.length > 0;
   if (hatDaten && (!S.letzteSicherung || tageBis(S.letzteSicherung) < -14)) todos.push({ c: 'warn', t: 'Sicherung herunterladen', s: S.letzteSicherung ? `Letzte Sicherung am ${dat(S.letzteSicherung)}.` : 'Deine Daten liegen nur in diesem Browser. Eine Sicherung schützt vor Verlust.', act: 'backup', b: 'Sichern' });
-  if (ku() && umsatzJahr > KU_GRENZE * 0.8) todos.push({ c: umsatzJahr > KU_GRENZE ? 'bad' : 'warn', t: 'Kleinunternehmer-Grenze im Blick behalten', s: `Umsatz ${jahr}: ${eur(umsatzJahr)} von ${eur(KU_GRENZE)}. Darüber gilt die Regelung ab sofort nicht mehr.` });
+  const R = hatDaten ? ruecklage() : null;
+  if (R && R.c === 'bad') todos.push({ c: 'warn', t: `Steuer-Rücklage aufstocken: es fehlen ${eur(R.fehlt)}`, s: `Zurücklegen solltest du ${eur(R.soll)}, da sind ${eur(R.ist)}.` });
+  const W = ku() ? kuWaechter() : null;
+  if (W && W.c !== 'good') todos.push({ c: W.c, t: W.jetzt.summe > W.sofort ? 'Kleinunternehmer-Grenze überschritten' : W.vorUeber ? `Umsatz ${W.y0 - 1} über ${eur(KU_VORJAHR)}` : 'Kleinunternehmer-Grenze im Blick behalten', s: `Umsatz ${W.y0}: ${eur(W.jetzt.summe)}. Details im Kleinunternehmer-Wächter weiter unten.` });
 
   const ampel = ueber.length ? { c: 'bad', t: `${ueber.length} Rechnung${ueber.length > 1 ? 'en' : ''} überfällig` } : todos.length ? { c: 'warn', t: `${todos.length} Sache${todos.length > 1 ? 'n' : ''} zu erledigen` } : { c: 'good', t: 'Alles erledigt' };
 
@@ -1368,10 +1507,12 @@ function vStart() {
   ${!S.beispiel && !S.firma.name && !hatDaten ? `<div class="card"><h2>Erst mal ansehen, wie es befüllt aussieht?</h2><p class="muted">Lädt eine Musterfirma mit Angeboten, Rechnungen, Belegen und Bankbuchungen. Du kannst sie jederzeit wieder löschen.</p><div class="btns"><button data-act="beispiel">Beispieldaten laden</button></div></div>` : ''}
   <div class="tiles">
     <div class="tile"><div class="q">Was ist noch offen?</div><div class="v">${eur(offenSum)}</div><div class="e">${offen.length} Rechnung${offen.length === 1 ? '' : 'en'}, davon ${ueber.length} überfällig</div></div>
-    <div class="tile"><div class="q">Umsatz ${jahr}</div><div class="v">${eur(umsatzJahr)}</div><div class="e">netto, aus gestellten Rechnungen${ku() ? `; Grenze ${eur(KU_GRENZE)}` : ''}</div></div>
+    <div class="tile"><div class="q">Umsatz ${jahr}</div><div class="v">${eur(umsatzJahr)}</div><div class="e">netto, aus gestellten Rechnungen${ku() ? `; Grenze ${eur(KU_VORJAHR)} fürs nächste Jahr` : ''}</div></div>
     <div class="tile"><div class="q">Offene Angebote</div><div class="v">${eur(angSum)}</div><div class="e">netto, ${angOffen.length} Angebot${angOffen.length === 1 ? '' : 'e'} warten auf Antwort</div></div>
     <div class="tile"><div class="q">${ku() ? 'Umsatzsteuer' : 'Umsatzsteuer ' + esc(z.name)}</div><div class="v">${ku() ? '0,00 €' : eur(z.zahl)}</div><div class="e">${ku() ? 'Kleinunternehmer: keine Voranmeldung' : `${z.zahl < 0 ? 'Erstattung' : 'zu zahlen'}, Frist ${dat(z.frist)} (Schätzung)`}</div></div>
   </div>
+  ${W ? vKuWaechter(W) : ''}
+  ${R ? vRuecklage(R) : ''}
   ${hatDaten ? vZahlen() : ''}
   ${ku() ? '' : `<div class="card">
     <h2>Wie viel Umsatzsteuer fällt für ${esc(z.name)} an?</h2>
@@ -1384,8 +1525,8 @@ function vStart() {
     </details>
   </div>`}
   <details class="card"><summary>Was kann die App schon, was kommt noch?</summary>
-    <p class="small" style="margin-top:8px"><b>Schon da:</b> Angebote und Rechnungen schreiben, als PDF drucken, als E-Rechnung (XRechnung) speichern, Angebot mit einem Tipp in eine Rechnung umwandeln, Storno per Stornorechnung, Belege und alte Rechnungen hochladen, Kontoauszüge (CSV) einlesen und Zahlungen Rechnungen zuordnen, Umsatzsteuer-Voranmeldung mit ELSTER-Kennzahlen, Zusammenfassende Meldung, EÜR bzw. Gewinn-Vorschau, Steuerschätzung, Fristen mit Kalender-Erinnerung, Diagramme zu Einnahmen und Ausgaben, Jahrespaket als ZIP für Excel und Steuerberater, Sicherung.</p>
-    <p class="small"><b>Kommt noch:</b> Login und Speicherung auf einem Server, Texterkennung für Belege, direkte Qonto-Verbindung, Buchungen nach SKR03/SKR04, direkte Abgabe über ELSTER, vollständige Jahreserklärungen.</p>
+    <p class="small" style="margin-top:8px"><b>Schon da:</b> Angebote und Rechnungen schreiben, als PDF drucken, als E-Rechnung (XRechnung) speichern, Angebot mit einem Tipp in eine Rechnung umwandeln, Storno per Stornorechnung, Belege und alte Rechnungen hochladen, Kontoauszüge (CSV) einlesen und Zahlungen Rechnungen zuordnen, Umsatzsteuer-Voranmeldung mit ELSTER-Kennzahlen, Zusammenfassende Meldung, EÜR bzw. Gewinn-Vorschau, Steuerschätzung, Fristen als Kalender-Datei für Handy und Outlook, Steuer-Rücklage mit Ampel, Kleinunternehmer-Wächter, Beleg-Abgleich mit dem Konto, wiederkehrende Rechnungen und Ausgaben, Diagramme zu Einnahmen und Ausgaben, Jahrespaket als ZIP, Export im DATEV-Format für den Steuerberater, Sicherung und Umzug auf ein anderes Gerät.</p>
+    <p class="small"><b>Kommt noch:</b> Login und Speicherung auf einem Server, Texterkennung für Belege, direkte Qonto-Verbindung, direkte Abgabe über ELSTER, vollständige Jahreserklärungen.</p>
     <p class="small muted">Deine Daten liegen nur in diesem Browser auf diesem Gerät. Andere Geräte sehen sie nicht. Lade regelmäßig eine Sicherung herunter. Die Ablage hier ist noch keine GoBD-konforme Archivierung.</p>
   </details>`;
 }
@@ -1528,7 +1669,8 @@ function vRechnungen() {
     ${chips('re', [['offen', 'Offen'], ['bezahlt', 'Bezahlt'], ['alle', 'Alle']])}
     ${list.length ? `<ul class="list">${list.map((r) => { const st = reStatus(r); return `<li><button class="item" data-act="open-re" data-id="${r.id}"><div class="grow"><div class="t">${esc(r.kunde.name || 'Ohne Kunde')}</div><div class="s">${esc(r.nr || 'ohne Nummer')} · ${dat(r.datum)}${r.extern ? ' · hinterlegt' : ''}${mahnStufe(r) && !['bezahlt', 'storniert'].includes(st.k) ? ' · ' + MAHN[mahnStufe(r)].t : ''}</div></div><div><div class="amt">${eur(summen(r).brutto)}</div><div style="text-align:right"><span class="pill ${st.c}">${st.t}</span></div></div></button></li>`; }).join('')}</ul>`
       : `<div class="empty">${S.rechnungen.length ? 'In dieser Ansicht ist nichts.' : 'Noch keine Rechnung.'}<div class="btns" style="justify-content:center"><button class="primary" data-act="new-re">Rechnung erstellen</button><button data-act="new-ext">Vorhandene hinterlegen</button></div></div>`}
-  </div>`;
+  </div>
+  <div class="btns" style="margin-bottom:12px"><button data-act="vorlagen">Wiederkehrende Rechnungen (${S.vorlagen.filter((v) => v.art === 'rechnung').length})</button></div>`;
 }
 const belegFehlt = (b) => !num(b.brutto) || !b.kategorie;
 function vBelege() {
@@ -1569,7 +1711,7 @@ function vBelege() {
   ${kat.length ? `<details class="card"><summary>Ausgaben ${jahr} nach Kategorie</summary>
     <ul class="list" style="margin-top:6px">${kat.map(([k, x]) => `<li><button class="item" data-act="filter" data-f="be" data-k="${esc(k)}"><div class="grow"><div class="t">${esc(k)}</div><div class="s">${x.n} Beleg${x.n > 1 ? 'e' : ''}</div></div><div><div class="amt">${eur(x.brutto)}</div><div class="s" style="text-align:right">${x.vst ? 'VSt ' + eur(x.vst) : ''}</div></div></button></li>`).join('')}</ul>
     <p class="small muted" style="margin-top:6px">Tippe auf eine Kategorie, um nur deren Belege zu sehen.</p></details>` : ''}
-  <div class="btns" style="margin-bottom:12px"><button data-act="kontakte" data-k="lieferanten">Lieferanten (${S.lieferanten.length})</button></div>`;
+  <div class="btns" style="margin-bottom:12px"><button data-act="kontakte" data-k="lieferanten">Lieferanten (${S.lieferanten.length})</button><button data-act="vorlagen">Wiederkehrende Ausgaben (${S.vorlagen.filter((v) => v.art === 'beleg').length})</button></div>`;
 }
 
 /* ---------- Bank ---------- */
@@ -1661,7 +1803,43 @@ function bankTreffer(b) {
   return offeneRe().map((r) => ({ r, p: (r.nr && z.includes(String(r.nr).toLowerCase()) ? 2 : 0) + (Math.abs(summen(r).brutto - b.betrag) < 0.01 ? 1 : 0) }))
     .filter((x) => x.p).sort((a, c) => c.p - a.p).map((x) => x.r);
 }
-const bankOffen = (b) => b.betrag > 0 ? !b.rechnungId : !b.belegId;
+const bankOffen = (b) => !b.ohneBeleg && (b.betrag > 0 ? !b.rechnungId : !b.belegId);
+/* Beleg-Abgleich: zu jeder Ausgabe auf dem Konto gehört ein Beleg, außer sie braucht keinen */
+const OHNE_AUS = ['Steuer ans Finanzamt oder die Gemeinde', 'Privatentnahme', 'Umbuchung auf ein eigenes Konto', 'Lohn oder Gehalt (Abrechnung liegt vor)', 'Kredit, Tilgung oder Leasing laut Vertrag', 'Kontoführung, der Kontoauszug reicht', 'Sonstiges, kein Beleg nötig'];
+const OHNE_EIN = ['Privateinlage', 'Umbuchung von einem eigenen Konto', 'Erstattung oder Gutschrift', 'Kredit oder Darlehen', 'Steuererstattung', 'Sonstiges, keine Rechnung nötig'];
+const fehltBeleg = (b) => b.betrag < 0 && !b.belegId && !b.ohneBeleg;
+// Belege ohne Bankzahlung mit gleichem Betrag, Lieferant im Namen der Gegenseite zählt mit, nächstes Datum zuerst
+function belegTreffer(b) {
+  if (b.betrag >= 0 || b.belegId) return [];
+  const g = (b.gegenpartei + ' ' + b.zweck).toLowerCase(), t = Date.parse(b.datum) || 0;
+  return S.belege.filter((x) => !x.buchungId && Math.abs(num(x.brutto) + b.betrag) < 0.01 && Math.abs((Date.parse(x.datum) || 0) - t) < 45 * 864e5)
+    .map((x) => ({ x, p: (x.lieferant && g.includes(x.lieferant.toLowerCase().split(' ')[0]) ? 0 : 1) * 1e11 + Math.abs((Date.parse(x.datum) || 0) - t) }))
+    .sort((a, c) => a.p - c.p).map((y) => y.x);
+}
+function belegLuecken() {
+  const m = {};
+  for (const b of S.bank) if (b.betrag < 0) { const k = (b.datum || '').slice(0, 7); const x = m[k] = m[k] || { k, n: 0, mit: 0, ohne: 0, fehlt: 0, summe: 0 }; x.n++; if (b.belegId) x.mit++; else if (b.ohneBeleg) x.ohne++; else { x.fehlt++; x.summe -= b.betrag; } }
+  return Object.values(m).sort((a, c) => c.k.localeCompare(a.k));
+}
+const monName = (k) => MONATE[Number(k.slice(5, 7)) - 1] + ' ' + k.slice(0, 4);
+function vAbgleich() {
+  const mon = belegLuecken().slice(0, 12); if (!mon.length) return '';
+  let k = filter.bankMon && mon.some((x) => x.k === filter.bankMon) ? filter.bankMon : (mon.find((x) => x.fehlt && x.k < heute().slice(0, 7)) || mon[0]).k;
+  const M = mon.find((x) => x.k === k);
+  const fehlen = S.bank.filter((b) => (b.datum || '').startsWith(k) && fehltBeleg(b)).sort((a, c) => a.datum.localeCompare(c.datum));
+  const eindeutig = fehlen.filter((b) => belegTreffer(b).length === 1);
+  const gesamt = mon.reduce((a, x) => a + x.fehlt, 0);
+  return `<div class="card" id="abgleich">
+    <h2>Beleg-Abgleich</h2>
+    <p class="small muted">Zu jeder Ausgabe auf dem Konto gehört ein Beleg. Was keinen braucht (Steuerzahlung, Privatentnahme, Umbuchung), markierst du einmal.</p>
+    <label>Monat<select id="bankMon">${mon.map((x) => `<option value="${x.k}"${x.k === k ? ' selected' : ''}>${monName(x.k)}${x.fehlt ? ` · ${x.fehlt} fehlen` : ' ✓'}</option>`).join('')}</select></label>
+    <p style="margin-top:10px">${M.fehlt ? `<span class="pill ${M.k < heute().slice(0, 7) ? 'bad' : 'warn'}">${M.fehlt} fehlen</span> ${eur(M.summe)} ohne Beleg` : '<span class="pill good">Vollständig</span> Zu allen Ausgaben ist ein Beleg da'}</p>
+    <div class="bar"><i class="${M.fehlt ? 'warn' : ''}" style="width:${Math.round((M.mit + M.ohne) / M.n * 100)}%"></i></div>
+    <p class="small muted" style="margin:0">${M.n} Ausgaben: ${M.mit} mit Beleg, ${M.ohne} brauchen keinen${gesamt > M.fehlt ? `. In anderen Monaten fehlen noch ${gesamt - M.fehlt}.` : ''}</p>
+    ${eindeutig.length ? `<div class="btns"><button class="primary" data-act="bk-auto" data-k="${k}">${eindeutig.length} passende${eindeutig.length === 1 ? 'n Beleg' : ' Belege'} verknüpfen</button></div>` : ''}
+    ${fehlen.length ? `<ul class="list" style="margin-top:8px">${fehlen.map((b) => { const t = belegTreffer(b); return `<li><button class="item" data-act="open-bk" data-id="${esc(b.id)}"><div class="grow"><div class="t">${esc(b.gegenpartei || 'Ohne Namen')}</div><div class="s">${dat(b.datum)}${b.zweck ? ' · ' + esc(b.zweck) : ''}</div></div><div><div class="amt">${eur(b.betrag)}</div><div style="text-align:right">${t.length ? '<span class="pill good">Beleg passt</span>' : '<span class="pill warn">Beleg fehlt</span>'}</div></div></button></li>`; }).join('')}</ul>` : ''}
+  </div>`;
+}
 function vBank() {
   const f = filter.bank || 'zuordnen';
   const all = S.bank.slice().sort((a, b) => (b.datum || '').localeCompare(a.datum || ''));
@@ -1675,10 +1853,11 @@ function vBank() {
   <div class="status"><div class="big">${all.length ? (passt.length ? `<span class="pill warn">Zu tun</span> ${passt.length} Zahlung${passt.length > 1 ? 'en passen' : ' passt'} zu offenen Rechnungen` : `${all.filter(bankOffen).length} Buchungen ohne Zuordnung`) : 'Noch keine Kontoauszüge'}</div>
   <p class="small muted" style="margin-top:4px">${all.length ? `${MONATE[new Date().getMonth()]}: ${eur(ein)} rein, ${eur(-aus)} raus. Letzte Buchung ${dat(all[0].datum)}.` : 'Lade den Kontoauszug als CSV hoch. Bei Qonto: Transaktionen, Exportieren, CSV.'}</p>
   <div class="btns"><button class="primary" data-act="bank-import">Kontoauszug (CSV) hochladen</button></div></div>
+  ${vAbgleich()}
   ${all.length ? `<div class="card">
     ${chips('bank', [['zuordnen', 'Ohne Zuordnung'], ['ein', 'Eingänge'], ['aus', 'Ausgänge'], ['alle', 'Alle']])}
     ${list.length ? `<ul class="list">${list.map((b) => { const t = bankTreffer(b); const re = b.rechnungId && S.rechnungen.find((r) => r.id === b.rechnungId);
-      const pill = re ? `<span class="pill good">${esc(re.nr)}</span>` : t.length ? '<span class="pill warn">Rechnung passt</span>' : b.belegId ? '<span class="pill good">Beleg</span>' : '';
+      const pill = re ? `<span class="pill good">${esc(re.nr)}</span>` : t.length ? '<span class="pill warn">Rechnung passt</span>' : b.belegId ? '<span class="pill good">Beleg</span>' : b.ohneBeleg ? '<span class="pill grey">ohne Beleg</span>' : '';
       return `<li><button class="item" data-act="open-bk" data-id="${esc(b.id)}"><div class="grow"><div class="t">${esc(b.gegenpartei || 'Ohne Namen')}</div><div class="s">${dat(b.datum)}${b.zweck ? ' · ' + esc(b.zweck) : ''}</div></div><div><div class="amt" style="color:${b.betrag > 0 ? 'var(--good)' : 'inherit'}">${eur(b.betrag)}</div><div style="text-align:right">${pill}</div></div></button></li>`; }).join('')}</ul>`
       : '<div class="empty">In dieser Ansicht ist nichts.</div>'}
   </div>` : ''}
@@ -1688,7 +1867,7 @@ function vBuchung(id) {
   const b = S.bank.find((x) => x.id === id); if (!b) return;
   const re = b.rechnungId && S.rechnungen.find((r) => r.id === b.rechnungId);
   const be = b.belegId && S.belege.find((x) => x.id === b.belegId);
-  const t = bankTreffer(b), rest = b.betrag > 0 && !re ? offeneRe().filter((r) => !t.includes(r)) : [];
+  const t = bankTreffer(b), rest = b.betrag > 0 && !re ? offeneRe().filter((r) => !t.includes(r)) : [], bt = be ? [] : belegTreffer(b);
   const reBtn = (r, gut) => `<li><button class="item" data-act="bk-zu" data-id="${esc(b.id)}" data-k="${r.id}"><div class="grow"><div class="t">${esc(r.kunde.name || 'Ohne Kunde')}</div><div class="s">${esc(r.nr)} · ${dat(r.datum)}</div></div><div><div class="amt">${eur(summen(r).brutto)}</div><div style="text-align:right">${gut ? '<span class="pill good">passt</span>' : ''}</div></div></button></li>`;
   openDlg(`${head(b.betrag > 0 ? 'Zahlungseingang' : 'Ausgabe')}<div class="dlg-body">
     <p style="font-size:1.4rem"><b>${eur(b.betrag)}</b></p>
@@ -1697,7 +1876,9 @@ function vBuchung(id) {
       <div class="btns"><button data-act="bk-los" data-id="${esc(b.id)}">Zuordnung lösen</button></div></div>` : ''}
     ${b.betrag > 0 && !re ? `<div class="card"><b>Welche Rechnung wurde damit bezahlt?</b>
       ${t.length + rest.length ? `<ul class="list">${t.map((r) => reBtn(r, true)).join('')}${rest.map((r) => reBtn(r, false)).join('')}</ul>` : '<p class="small muted">Keine offene Rechnung vorhanden. Vielleicht eine Privateinlage oder Erstattung.</p>'}</div>` : ''}
-    ${b.betrag < 0 ? (be ? `<p>Beleg: <a href="#" data-act="open-be" data-id="${be.id}">${esc(be.lieferant || 'Beleg')} vom ${dat(be.datum)}</a></p>` : `<p class="small muted">Zu dieser Ausgabe gehört noch kein Beleg.</p><div class="btns"><button class="primary" data-act="bk-beleg" data-id="${esc(b.id)}">Beleg dazu hochladen</button></div>`) : ''}
+    ${b.betrag < 0 && !b.ohneBeleg ? (be ? `<p>Beleg: <a href="#" data-act="open-be" data-id="${be.id}">${esc(be.lieferant || 'Beleg')} vom ${dat(be.datum)}</a></p>` : `${bt.length ? `<div class="card"><b>Gehört einer dieser Belege dazu?</b><ul class="list">${bt.slice(0, 5).map((x) => `<li><button class="item" data-act="bk-verkn" data-id="${esc(b.id)}" data-k="${x.id}"><div class="grow"><div class="t">${esc(x.lieferant || 'Beleg')}</div><div class="s">${dat(x.datum)}${x.kategorie ? ' · ' + esc(x.kategorie) : ''}${x.dateiName ? ' · 📎' : ''}</div></div><div><div class="amt">${eur(num(x.brutto))}</div><div style="text-align:right"><span class="pill good">passt</span></div></div></button></li>`).join('')}</ul></div>` : '<p class="small muted">Zu dieser Ausgabe gehört noch kein Beleg.</p>'}<div class="btns"><button class="primary" data-act="bk-beleg" data-id="${esc(b.id)}">Beleg dazu hochladen</button></div>`) : ''}
+    ${!re && !be ? `<div class="card" style="margin-top:14px">${b.ohneBeleg ? `<p><span class="pill grey">${b.betrag > 0 ? 'Keine Rechnung nötig' : 'Kein Beleg nötig'}</span> ${esc(b.ohneBeleg)}</p><div class="btns"><button data-act="bk-ohne" data-id="${esc(b.id)}" data-k="">Doch ${b.betrag > 0 ? 'eine Rechnung' : 'einen Beleg'} zuordnen</button></div>`
+      : `<label>${b.betrag > 0 ? 'Gehört zu keiner Rechnung, weil' : 'Braucht keinen Beleg, weil'}<select id="ohneGrund"><option value="">Bitte wählen</option>${(b.betrag > 0 ? OHNE_EIN : OHNE_AUS).map((g) => `<option>${g}</option>`).join('')}</select></label><div class="btns"><button data-act="bk-ohne" data-id="${esc(b.id)}" data-k="x">So markieren</button></div>`}</div>` : ''}
   </div>`);
 }
 
@@ -1715,6 +1896,7 @@ function vFirma() {
     <label>Rechtsform<select name="rechtsform"><option value="">Bitte wählen</option>${Object.entries(RECHTSFORMEN).map(([k, v]) => `<option value="${k}"${k === f.rechtsform ? ' selected' : ''}>${v.label}</option>`).join('')}</select></label>
     <div class="btns" style="margin-top:8px"><button type="button" data-act="rf-wizard">${f.rechtsform ? 'Rechtsform prüfen lassen' : 'Unsicher? Assistent starten'}</button></div>
     <label class="check" style="margin-top:10px"><input type="checkbox" name="kleinunternehmer"${f.kleinunternehmer ? ' checked' : ''}> Ich bin Kleinunternehmer (§ 19 UStG, keine Umsatzsteuer auf Rechnungen)</label>
+    <label style="margin-top:10px;max-width:260px">Gegründet im Jahr<input name="gruendung" inputmode="numeric" maxlength="4" value="${esc(f.gruendung)}" placeholder="z. B. 2024"></label>
     ${rf ? `<div class="card" style="background:var(--soft);border:0;margin:12px 0 0"><b>Was gilt für ${esc(rf.label)}?</b>
       <table class="tab" style="margin-top:6px"><tr><td>Gewinnermittlung</td><td>${rf.gewinn}</td></tr><tr><td>Jahreserklärungen</td><td>${rf.jahr}</td></tr><tr><td>Umsatzsteuer</td><td>${f.kleinunternehmer ? 'Keine Voranmeldung und seit 2025 auch keine Jahreserklärung, außer das Finanzamt fordert sie an' : 'Voranmeldung monatlich oder vierteljährlich, Jahreserklärung'}</td></tr><tr><td>Besonderheit</td><td>${rf.extra}</td></tr></table>
       <p class="small muted" style="margin:6px 0 0">Vereinfachte Übersicht, vor der Nutzung mit dem Steuerberater prüfen.</p></div>` : ''}
@@ -1751,12 +1933,21 @@ function vFirma() {
     <p>Alles liegt nur in diesem Browser auf diesem Gerät${S.letzteSicherung ? `, letzte Sicherung am ${dat(S.letzteSicherung)}` : ', noch keine Sicherung'}.</p>
     <p class="small">${dauerhaft ? '<span class="pill good">Dauerhaft gespeichert</span> Der Browser löscht die Daten nicht von selbst, auch wenn der Speicher knapp wird.' : `<span class="pill warn">Nicht fest gespeichert</span> Der Browser darf die Daten bei Platzmangel löschen, Safari auch nach 7 Tagen ohne Nutzung. Lege die App auf den Home-Bildschirm und lade regelmäßig eine Sicherung herunter. <button class="chip" data-act="speicher-fest">Dauerhaft speichern</button>`}</p>
     <div class="btns"><button data-act="backup">Sicherung herunterladen</button><button data-act="restore">Sicherung einspielen</button></div>
-    <p class="small muted" style="margin-top:6px">Die Sicherung ist eine Datei mit allen Daten und Belegen. Speichere sie auf deinem Computer, in iCloud oder Google Drive. Auf einem anderen Gerät spielst du sie mit „Sicherung einspielen“ ein.</p>
+    ${vorherAm ? `<p class="small" style="margin-top:10px"><span class="pill grey">Aufgehoben</span> Der Stand vor dem Einspielen vom ${dat(vorherAm)} ist noch da. <button class="chip" data-act="vorher-zurueck">Rückgängig machen</button> <button class="chip" data-act="vorher-weg">Verwerfen</button></p>` : ''}
+    <p class="small muted" style="margin-top:6px">Die Sicherung ist eine Datei mit allen Daten und Belegen. Speichere sie auf deinem Computer, in iCloud oder Google Drive.</p>
+    <details><summary>Auf ein anderes Gerät umziehen, z. B. vom Laptop aufs Handy</summary><ol class="small" style="margin:8px 0 0;padding-left:20px">
+      <li>Auf dem alten Gerät „Sicherung herunterladen“.</li>
+      <li>Die Datei aufs neue Gerät bringen: per AirDrop, iCloud Drive, Google Drive oder als Mail an dich selbst.</li>
+      <li>Auf dem neuen Gerät das Cockpit öffnen, Reiter Firma, „Sicherung einspielen“ und die Datei wählen. Am Computer kannst du sie auch einfach ins Fenster ziehen.</li>
+      <li>Vor dem Einspielen siehst du, was in der Sicherung steckt. Arbeite danach nur noch auf einem Gerät weiter, sonst laufen die Stände auseinander.</li></ol></details>
   </div>
   <div class="card">
     <h2>Daten für Excel und Steuerberater</h2>
     <p class="small muted">Das Jahrespaket ist eine ZIP-Datei mit Listen aller Einnahmen, Ausgaben und Bankbuchungen (öffnen sich in Excel) und allen Belegen als PDF oder Foto, sauber nach Datum benannt. Für ELSTER gibt es im Reiter Steuern neben jeder Kennzahl einen Knopf zum Kopieren.</p>
     <div class="btns">${[0, 1, 2].map((d) => new Date().getFullYear() - d).map((y) => `<button data-act="paket" data-k="${y}">Jahrespaket ${y}</button>`).join('')}</div>
+    <h3>Du hast einen Steuerberater?</h3>
+    <p class="small muted">Die Kanzlei liest alle Buchungen im DATEV-Format direkt ein, mit SKR 03 oder SKR 04. Die Belege kommen als Dateien mit.</p>
+    <div class="btns"><button class="primary" data-act="datev">Export für den Steuerberater (DATEV)</button></div>
     <details><summary>Weitere Daten</summary>
       <div class="btns"><button class="danger" data-act="wipe">Alle Daten auf diesem Gerät löschen</button></div>
     </details>
@@ -1900,6 +2091,7 @@ function vMenu() {
     <button data-act="new-an"><span class="ic">📝</span><span><span class="t">Angebot erstellen</span><span class="s">Kunde, Positionen, Gültigkeit. Später mit einem Tipp zur Rechnung.</span></span></button>
     <button data-act="new-re"><span class="ic">🧾</span><span><span class="t">Rechnung erstellen</span><span class="s">Pflichtangaben werden geprüft, Nummer kommt automatisch. PDF und E-Rechnung.</span></span></button>
     <button data-act="new-be"><span class="ic">📷</span><span><span class="t">Beleg hochladen</span><span class="s">Foto oder PDF einer Eingangsrechnung, für Ausgaben und Vorsteuer.</span></span></button>
+    <button data-act="vorlagen"><span class="ic">🔁</span><span><span class="t">Wiederkehrend</span><span class="s">Miete, Abos oder monatliche Kundenrechnungen automatisch anlegen.</span></span></button>
     <button data-act="new-ext"><span class="ic">📂</span><span><span class="t">Vorhandene Rechnung hinterlegen</span><span class="s">Alte Ausgangsrechnung aus Word oder einem anderen Programm, damit dein Umsatz vollständig ist.</span></span></button>
   </div></div>`);
 }
@@ -1957,6 +2149,15 @@ function totalsHtml(d) {
     ${d.ku || d.rc ? `<div><span>Umsatzsteuer</span><span>0,00 €</span></div>` : Object.keys(s.proSatz).sort((a, b) => b - a).map((k) => `<div><span>USt ${k} % auf ${eur(s.proSatz[k])}</span><span>${eur(r2(s.proSatz[k] * k / 100))}</span></div>`).join('')}
     <div class="gross"><span>Gesamt</span><span>${eur(s.brutto)}</span></div></div>`;
 }
+// Warnung, wenn genau diese Rechnung die Kleinunternehmer-Grenze reißt
+function kuWarnung(d) {
+  if (!d.ku || d.typ !== 'rechnung' || d.status !== 'entwurf') return '';
+  const y = (d.datum || heute()).slice(0, 4), vorher = kuUmsatz(y, d.id).summe, danach = r2(vorher + summen(d).netto);
+  const grenze = Number(S.firma.gruendung) === Number(y) ? KU_VORJAHR : KU_GRENZE;
+  if (danach > grenze) return `<div class="card" style="margin-top:10px;border-color:var(--bad)"><b style="color:var(--bad)">Mit dieser Rechnung überschreitest du ${eur(grenze)}.</b><p class="small" style="margin:4px 0 0">Umsatz ${y} bisher ${eur(vorher)}, danach ${eur(danach)}. Ab dieser Rechnung gilt die Kleinunternehmerregelung nicht mehr, sie muss schon mit Umsatzsteuer gestellt werden. Nimm im Reiter Firma den Haken bei Kleinunternehmer heraus und leg die Rechnung neu an. Im Zweifel vorher den Steuerberater fragen.</p></div>`;
+  if (vorher <= KU_VORJAHR && danach > KU_VORJAHR && grenze !== KU_VORJAHR) return `<div class="card" style="margin-top:10px;border-color:var(--warn)"><b>Mit dieser Rechnung kommst du über ${eur(KU_VORJAHR)}.</b><p class="small" style="margin:4px 0 0">Dieses Jahr darfst du sie noch ohne Umsatzsteuer stellen. Ab ${Number(y) + 1} bist du aber kein Kleinunternehmer mehr.</p></div>`;
+  return '';
+}
 function vEditor() {
   const d = edit, isRe = d.typ === 'rechnung';
   const locked = isRe && d.status !== 'entwurf';
@@ -1988,6 +2189,7 @@ function vEditor() {
     <button type="button" data-act="pos-add">+ Position</button>
     <div id="totals" style="margin-top:10px">${totalsHtml(d)}</div>
     ${d.ku ? `<p class="small muted">${KU_HINWEIS} Steht automatisch auf dem Dokument.</p>` : ''}
+    <div id="kuWarn">${kuWarnung(d)}</div>
     <label style="margin-top:10px">Text unter den Positionen (optional)<textarea name="hinweis" rows="2" placeholder="${isRe ? 'z. B. Vielen Dank für Ihren Auftrag.' : 'z. B. Wir freuen uns auf Ihre Rückmeldung.'}">${esc(d.hinweis)}</textarea></label>
     ${isRe ? `<div class="card" style="margin-top:12px"><b id="chkHead">${allOk ? 'Alle Pflichtangaben nach § 14 UStG sind da' : 'Es fehlen noch Pflichtangaben'}</b><ul class="checks" id="checks">${checks.map((c) => `<li class="${c[1] ? 'ok' : 'miss'}">${c[0]}</li>`).join('')}</ul>
       ${pflichtFirma().length ? '<p class="small" style="margin:6px 0 0">Deine eigenen Daten trägst du im Reiter <b>Firma</b> ein.</p>' : ''}</div>` : ''}
@@ -2002,6 +2204,7 @@ function vEditor() {
 function refreshEditor() {
   readEditor();
   $('#totals').innerHTML = totalsHtml(edit);
+  if ($('#kuWarn')) $('#kuWarn').innerHTML = kuWarnung(edit);
   document.querySelectorAll('#posList .pos').forEach((el, i) => { el.querySelector('.sum').textContent = eur(r2(num(edit.positionen[i].menge) * num(edit.positionen[i].preis))); });
   if (edit.typ === 'rechnung') {
     const c = pflichtDoc(edit), ok = c.every((x) => x[1]);
@@ -2090,6 +2293,7 @@ function vDetailRe(id) {
   </div>
   <div class="dlg-foot">
     ${!r.extern ? `<button data-act="print" data-id="${r.id}" data-t="re">Drucken / PDF</button><button data-act="xml" data-id="${r.id}">E-Rechnung (XML)</button>` : ''}
+    ${!r.extern && r.typ !== 'gutschrift' && r.status !== 'storniert' ? `<button data-act="vl-neu" data-k="rechnung" data-id="${r.id}">Regelmäßig wiederholen</button>` : ''}
     ${r.typ !== 'gutschrift' && r.status !== 'storniert' ? `<button class="danger" data-act="storno" data-id="${r.id}">Stornieren</button>` : ''}
     ${r.extern ? `<button class="danger" data-act="del-ext" data-id="${r.id}">Entfernen</button>` : ''}
   </div>`);
@@ -2234,7 +2438,7 @@ function vBeleg(b) {
     </div>
     <p class="small muted" style="margin-top:6px">Vorsteuer ist die Umsatzsteuer, die du selbst bezahlt hast. Sie mindert deine Umsatzsteuer-Zahlung. ${ku() ? 'Als Kleinunternehmer darfst du sie nicht abziehen.' : ''}</p>
   </form>
-  <div class="dlg-foot">${neu ? '' : `<button class="danger" data-act="del-be" data-id="${b.id}">Löschen</button>`}<button class="primary" data-act="save-be">Speichern</button></div>`);
+  <div class="dlg-foot">${neu ? '' : `<button class="danger" data-act="del-be" data-id="${b.id}">Löschen</button>${num(b.brutto) ? `<button data-act="vl-neu" data-k="beleg" data-id="${b.id}">Regelmäßig wiederholen</button>` : ''}`}<button class="primary" data-act="save-be">Speichern</button></div>`);
   b._neu = neu;
   if (b.dateiId && /^image\//.test(b.dateiTyp || '')) idbGet('datei:' + b.dateiId).then((d) => { const pv = $('#filePrev'); if (d && pv && !pendingFile && edit === b) pv.insertAdjacentHTML('beforeend', `<img class="preview" alt="Beleg" src="${URL.createObjectURL(d.blob)}">`); });
 }
@@ -2348,6 +2552,91 @@ async function saveExtern() {
   merkeKunde(r.kunde);
   S.rechnungen.push(r);
   await save(); closeDlg(); tab = 'rechnungen'; render(); toast('Rechnung hinterlegt');
+}
+
+/* ---------- Wiederkehrende Rechnungen und Ausgaben ---------- */
+const INTERVALLE = [[1, 'jeden Monat'], [3, 'jedes Quartal'], [6, 'jedes halbe Jahr'], [12, 'jedes Jahr']];
+// Datum n Monate nach start, am gleichen Tag (oder am Monatsende, wenn es den Tag nicht gibt)
+function plusMonate(start, n) {
+  const y = Number(start.slice(0, 4)), m = Number(start.slice(5, 7)) - 1 + n, t = Number(start.slice(8, 10));
+  return iso(new Date(y, m, Math.min(t, new Date(y, m + 1, 0).getDate()), 12));
+}
+const vlNaechste = (v) => plusMonate(v.start, v.k * v.intervall);
+const vlBetrag = (v) => v.art === 'beleg' ? num(v.daten.brutto) : summen(v.daten).brutto;
+// Platzhalter in Texten: {Monat} und {Jahr} des Termins
+const vlText = (t, d) => String(t || '').replace(/\{Monat\}/gi, MONATE[Number(d.slice(5, 7)) - 1]).replace(/\{Jahr\}/gi, d.slice(0, 4));
+/* Beim Öffnen fällige Termine anlegen, auch verpasste (höchstens 24 je Vorlage) */
+async function wiederkehrend() {
+  const h = heute(); let nRe = 0, nBe = 0, entwurf = 0;
+  for (const v of S.vorlagen || []) {
+    for (let i = 0; i < 24 && !v.pause; i++) {
+      const d = vlNaechste(v);
+      if (d > h || (v.ende && d > v.ende)) break;
+      if (v.art === 'rechnung') {
+        const r = neuesDoc('rechnung'), q = JSON.parse(JSON.stringify(v.daten));
+        Object.assign(r, { kunde: q.kunde, positionen: q.positionen.map((x) => Object.assign(x, { text: vlText(x.text, d) })), rc: q.rc || '', hinweis: vlText(q.hinweis, d), ku: ku(), datum: d < h && v.stellen ? h : d, leistungsdatum: d, vorlage: v.id });
+        r.faellig = plusTage(r.datum, num(S.firma.zahlungsziel) || 14);
+        // Hat sich der Kleinunternehmer-Status geändert, erst prüfen lassen
+        if (v.stellen && !!q.ku === ku() && pflichtDoc(r).every((c) => c[1])) { r.nr = naechsteNr('RE', r.datum.slice(0, 4)); r.status = 'offen'; r.gestelltAm = h; }
+        else entwurf++;
+        S.rechnungen.push(r); nRe++;
+      } else {
+        const q = v.daten, br = num(q.brutto), satz = num(q.ustSatz);
+        S.belege.push({ id: uid(), datum: d, lieferant: q.lieferant, brutto: br, ustSatz: satz, vorsteuer: ku() || q.rc ? 0 : r2(br - br / (1 + satz / 100)), kategorie: q.kategorie, rc: q.rc || '', notiz: vlText(q.notiz, d), zahlweg: q.zahlweg || 'konto', hochgeladen: h, vorlage: v.id });
+        nBe++;
+      }
+      v.k++; v.zuletzt = d;
+    }
+  }
+  if (!nRe && !nBe) return 0;
+  await save();
+  toast(`Wiederkehrend angelegt: ${[nRe ? `${nRe} Rechnung${nRe > 1 ? 'en' : ''}${entwurf ? ` (${entwurf} als Entwurf zum Prüfen)` : ''}` : '', nBe ? `${nBe} Ausgabe${nBe > 1 ? 'n' : ''}` : ''].filter(Boolean).join(', ')}`);
+  return nRe + nBe;
+}
+function vVorlagen() {
+  const L = (art) => S.vorlagen.filter((v) => v.art === art);
+  const li = (v) => `<li><button class="item" data-act="vl-edit" data-id="${v.id}"><div class="grow"><div class="t">${esc(v.name)}</div><div class="s">${INTERVALLE.find((x) => x[0] === v.intervall)[1]}${v.pause ? ' · pausiert' : ` · nächstes Mal ${dat(vlNaechste(v))}`}${v.art === 'rechnung' ? (v.stellen ? ' · wird gestellt' : ' · als Entwurf') : ''}</div></div><div class="amt">${eur(vlBetrag(v))}</div></button></li>`;
+  const block = (art, t, leer) => `<h3>${t}</h3>${L(art).length ? `<ul class="list">${L(art).map(li).join('')}</ul>` : `<p class="small muted">${leer}</p>`}`;
+  openDlg(`${head('Wiederkehrend')}<div class="dlg-body">
+    <p class="small muted" style="margin-top:0">Miete, Abos oder monatliche Kundenrechnungen legt die App zum Termin selbst an, sobald du sie öffnest. Verpasste Termine holt sie nach.</p>
+    ${block('rechnung', 'Rechnungen', 'Noch keine. Öffne eine gestellte Rechnung und tippe auf „Regelmäßig wiederholen“.')}
+    ${block('beleg', 'Ausgaben', 'Noch keine. Öffne einen Beleg, z. B. die Miete, und tippe auf „Regelmäßig wiederholen“.')}
+  </div>`);
+}
+let vlEdit = null;
+function vVorlage(v) {
+  vlEdit = v;
+  const isRe = v.art === 'rechnung', neu = !S.vorlagen.includes(v);
+  openDlg(`${head(neu ? 'Regelmäßig wiederholen' : 'Wiederkehrend')}<form id="vlForm" class="dlg-body" autocomplete="off">
+    <p><b>${esc(isRe ? (v.daten.kunde.name || 'Kunde') : (v.daten.lieferant || 'Ausgabe'))}</b> · ${eur(vlBetrag(v))}${isRe ? ' brutto' : ''}</p>
+    <div class="grid2">
+      <label>Name<input name="name" value="${esc(v.name)}"></label>
+      <label>Wie oft?<select name="intervall">${INTERVALLE.map(([k, t]) => `<option value="${k}"${k === v.intervall ? ' selected' : ''}>${t}</option>`).join('')}</select></label>
+      <label>Nächstes Mal am<input type="date" name="naechste" value="${esc(vlNaechste(v))}"></label>
+      <label>Endet am (optional)<input type="date" name="ende" value="${esc(v.ende || '')}"></label>
+      ${isRe ? `<label class="check full"><input type="checkbox" name="stellen"${v.stellen ? ' checked' : ''}> Automatisch stellen, mit Nummer. Sonst liegt sie als Entwurf zum Prüfen bereit.</label>` : ''}
+      ${!neu ? `<label class="check full"><input type="checkbox" name="pause"${v.pause ? ' checked' : ''}> Pausieren</label>` : ''}
+    </div>
+    <p class="small muted" style="margin-top:8px">${isRe ? 'Schreib {Monat} oder {Jahr} in einen Positionstext, dann steht dort der jeweilige Monat, z. B. „Wartung {Monat} {Jahr}“. Kunde und Positionen kommen aus der Rechnung; willst du sie ändern, leg die Wiederholung aus einer neueren Rechnung neu an.' : 'Die Ausgabe wird mit Betrag und Kategorie angelegt. Als Beleg reicht bei Miete oder Abos oft der Vertrag oder eine Jahresrechnung, die du einmal hochlädst. Die Zahlung auf dem Konto findet der Beleg-Abgleich.'}</p>
+  </form>
+  <div class="dlg-foot">${neu ? '' : '<button class="danger" data-act="vl-del">Löschen</button>'}<button class="primary" data-act="vl-save">Speichern</button></div>`);
+}
+function vorlageAus(art, id) {
+  const q = art === 'rechnung' ? S.rechnungen.find((x) => x.id === id) : S.belege.find((x) => x.id === id); if (!q) return;
+  const daten = art === 'rechnung' ? { kunde: JSON.parse(JSON.stringify(q.kunde)), positionen: JSON.parse(JSON.stringify(q.positionen)), ku: !!q.ku, rc: q.rc || '', hinweis: q.hinweis || '' }
+    : { lieferant: q.lieferant, brutto: num(q.brutto), ustSatz: num(q.ustSatz), kategorie: q.kategorie, zahlweg: q.zahlweg === 'offen' ? 'konto' : q.zahlweg || 'konto', rc: q.rc || '', notiz: q.notiz || '' };
+  const basis = art === 'rechnung' ? q.leistungsdatum || q.datum : q.datum;
+  let start = plusMonate(basis || heute(), 1); while (start <= heute()) start = plusMonate(start, 1);
+  vVorlage({ id: uid(), art, name: (art === 'rechnung' ? q.kunde.name : q.lieferant) || (art === 'rechnung' ? 'Rechnung' : 'Ausgabe'), intervall: 1, start, k: 0, ende: '', stellen: false, pause: false, daten });
+}
+async function saveVorlage() {
+  const f = $('#vlForm'), v = vlEdit;
+  const naechste = f.elements.naechste.value;
+  if (!naechste) return toast('Bitte das Datum fürs nächste Mal eintragen.');
+  Object.assign(v, { name: f.elements.name.value.trim() || v.name, intervall: Number(f.elements.intervall.value), ende: f.elements.ende.value, stellen: f.elements.stellen ? f.elements.stellen.checked : false, pause: f.elements.pause ? f.elements.pause.checked : false });
+  if (naechste !== vlNaechste(v)) { v.start = naechste; v.k = 0; }
+  if (!S.vorlagen.includes(v)) S.vorlagen.push(v);
+  await save(); await wiederkehrend(); render(); vVorlagen(); toast('Gespeichert');
 }
 
 /* ---------- Druck / PDF ---------- */
@@ -2472,27 +2761,87 @@ function download(name, text, type) {
 }
 
 /* ---------- Sicherung ---------- */
-const blobToData = (b) => new Promise((res) => { const fr = new FileReader(); fr.onload = () => res(fr.result); fr.readAsDataURL(b); });
-async function backup() {
-  const keys = (await idbKeys()).filter((k) => String(k).startsWith('datei:'));
-  const dateien = {};
-  for (const k of keys) { const d = await idbGet(k); if (d) dateien[k] = { name: d.name, type: d.type, data: await blobToData(d.blob) }; }
-  S.letzteSicherung = heute(); await save(); speicherFest();
-  download(`steuer-cockpit-sicherung-${heute()}.json`, JSON.stringify({ app: 'steuer-cockpit', erstellt: new Date().toISOString(), state: S, dateien }), 'application/json');
-  render(); toast('Sicherung heruntergeladen');
+const blobToData = (b) => new Promise((res, rej) => { const fr = new FileReader(); fr.onload = () => res(fr.result); fr.onerror = () => rej(fr.error); fr.readAsDataURL(b); });
+// Data-URL ohne fetch() zurück in eine Datei: klappt auch bei großen Belegen und in Safari
+function dataToBlob(data, type) {
+  const i = String(data).indexOf(','); if (i < 0) throw new Error('keine Daten');
+  const meta = data.slice(5, i), roh = data.slice(i + 1);
+  let u;
+  if (/;base64/i.test(meta)) { const t = atob(roh.replace(/\s/g, '')); u = new Uint8Array(t.length); for (let k = 0; k < t.length; k++) u[k] = t.charCodeAt(k); }
+  else u = new TextEncoder().encode(decodeURIComponent(roh));
+  return new Blob([u], { type: type || meta.split(';')[0] || 'application/octet-stream' });
 }
+// Dateien, auf die der Stand verweist (Belege, hinterlegte Rechnungen, Unterlagen der Steuererklärung)
+const dateiKeys = (st, alle) => { const j = JSON.stringify(st || {}); return alle.filter((k) => String(k).startsWith('datei:') && j.includes('"' + String(k).slice(6) + '"')); };
+const zaehle = (st) => ({ re: (st.rechnungen || []).length, be: (st.belege || []).length, bank: (st.bank || []).length, an: (st.angebote || []).length });
+async function backup() {
+  const dateien = {};
+  let fehlt = 0;
+  for (const k of dateiKeys(S, await idbKeys())) {
+    const d = await idbGet(k);
+    try { if (d && d.blob) dateien[k] = { name: d.name, type: d.type, data: await blobToData(d.blob) }; } catch (e) { fehlt++; }
+  }
+  S.letzteSicherung = heute(); await save(); speicherFest();
+  const name = `steuer-cockpit-sicherung-${heute()}${S.firma.name ? '-' + dateiName(S.firma.name).replace(/\s+/g, '-') : ''}.json`;
+  download(name, new Blob([JSON.stringify({ app: 'steuer-cockpit', format: 2, erstellt: new Date().toISOString(), anzahl: Object.assign(zaehle(S), { dateien: Object.keys(dateien).length }), state: S, dateien })], { type: 'application/json' }));
+  render(); toast(fehlt ? `Sicherung heruntergeladen, ${fehlt} Datei${fehlt > 1 ? 'en' : ''} nicht lesbar` : 'Sicherung heruntergeladen');
+}
+/* Sicherung einspielen: erst zeigen, was drin ist, dann alles in einem Schritt schreiben. Der alte Stand bleibt zum Rückgängigmachen. */
+let sicherung = null;
 function restore() {
-  const inp = document.createElement('input'); inp.type = 'file'; inp.accept = 'application/json,.json';
-  inp.onchange = async () => {
-    try {
-      const j = JSON.parse(await inp.files[0].text());
-      if (j.app !== 'steuer-cockpit' || !j.state) throw new Error('kein Format');
-      if (!confirm('Die Sicherung ersetzt alle Daten auf diesem Gerät. Fortfahren?')) return;
-      for (const [k, d] of Object.entries(j.dateien || {})) { const blob = await (await fetch(d.data)).blob(); await idbSet(k, { name: d.name, type: d.type, blob }); }
-      S = Object.assign(leer(), j.state, { firma: Object.assign(leer().firma, j.state.firma || {}), steuer: Object.assign(leer().steuer, j.state.steuer || {}) }); migriere(); await save(); render(); toast('Sicherung eingespielt');
-    } catch (e) { toast('Diese Datei ist keine Sicherung des Steuer-Cockpits.'); }
-  };
+  const inp = document.createElement('input'); inp.type = 'file'; inp.accept = '.json,application/json,text/plain';
+  inp.onchange = () => { if (inp.files[0]) sicherungLesen(inp.files[0]); };
   inp.click();
+}
+async function sicherungLesen(file) {
+  let j;
+  try { j = JSON.parse(await file.text()); }
+  catch (e) { return toast('Die Datei ist unvollständig oder beschädigt. Lade die Sicherung noch einmal vollständig herunter.'); }
+  if (!j || j.app !== 'steuer-cockpit' || !j.state) return toast('Diese Datei ist keine Sicherung des Steuer-Cockpits.');
+  sicherung = j;
+  const a = zaehle(j.state), b = zaehle(S), nd = Object.keys(j.dateien || {}).length;
+  const hier = b.re + b.be + b.bank + b.an > 0 && !S.beispiel;
+  const neuer = hier && S.geaendert && j.erstellt && S.geaendert > j.erstellt;
+  const zeile = (x) => `${x.re} Rechnungen, ${x.an} Angebote, ${x.be} Belege, ${x.bank} Bankbuchungen`;
+  openDlg(`${head('Sicherung einspielen')}<div class="dlg-body">
+    <p><b>${esc((j.state.firma && j.state.firma.name) || 'Ohne Firmenname')}</b><br><span class="small muted">Gesichert am ${j.erstellt ? new Date(j.erstellt).toLocaleString('de-DE', { dateStyle: 'medium', timeStyle: 'short' }) : 'unbekannt'}</span></p>
+    <table class="tab"><tr><td>In der Sicherung</td><td>${zeile(a)}, ${nd} Datei${nd === 1 ? '' : 'en'}</td></tr><tr><td>Jetzt auf diesem Gerät</td><td>${hier ? zeile(b) : 'noch nichts'}</td></tr></table>
+    ${neuer ? `<p class="small" style="margin-top:10px"><span class="pill warn">Achtung</span> Auf diesem Gerät wurde nach der Sicherung noch etwas geändert (${new Date(S.geaendert).toLocaleString('de-DE', { dateStyle: 'medium', timeStyle: 'short' })}). Diese Änderungen sind danach weg. Sichere sie vorher, falls du sie brauchst.</p>` : ''}
+    <p class="small muted" style="margin-top:10px">Die Sicherung ersetzt den Stand auf diesem Gerät. ${hier ? 'Der bisherige Stand bleibt aufgehoben, bis du ihn im Reiter Firma verwirfst. So kannst du es rückgängig machen.' : ''}</p>
+  </div>
+  <div class="dlg-foot">${hier ? '<button data-act="backup">Erst dieses Gerät sichern</button>' : ''}<button class="primary" data-act="restore-ok">Jetzt einspielen</button></div>`);
+}
+async function sicherungEinspielen() {
+  const j = sicherung; if (!j) return;
+  toast('Sicherung wird eingespielt …');
+  const neu = Object.assign(leer(), j.state, { firma: Object.assign(leer().firma, j.state.firma || {}), steuer: Object.assign(leer().steuer, j.state.steuer || {}) });
+  const files = []; let kaputt = 0;
+  for (const [k, d] of Object.entries(j.dateien || {})) { try { files.push([k, { name: d.name, type: d.type, blob: dataToBlob(d.data, d.type) }]); } catch (e) { kaputt++; } }
+  const alt = S, hatteDaten = zaehle(alt).re + zaehle(alt).be + zaehle(alt).bank + zaehle(alt).an > 0 && !alt.beispiel;
+  // Alles in einer Transaktion: bricht etwas ab, bleibt der alte Stand vollständig erhalten
+  await kv('readwrite', (st) => { for (const [k, v] of files) st.put(v, k); if (hatteDaten) st.put({ am: heute(), state: alt }, 'state-vorher'); else st.delete('state-vorher'); st.put(neu, 'state'); });
+  S = neu; migriere(); sicherung = null; vorherAm = hatteDaten ? heute() : null;
+  await aufraeumen(); speicherFest();
+  closeDlg(); tab = 'start'; render(); window.scrollTo(0, 0);
+  toast(kaputt ? `Eingespielt. ${kaputt} Datei${kaputt > 1 ? 'en waren' : ' war'} beschädigt.` : 'Sicherung eingespielt');
+}
+// Dateien löschen, auf die weder der jetzige noch der aufgehobene Stand verweist
+async function aufraeumen() {
+  const alle = await idbKeys(), vorher = await idbGet('state-vorher');
+  const behalten = new Set(dateiKeys(S, alle).concat(vorher ? dateiKeys(vorher.state, alle) : []));
+  const weg = alle.filter((k) => String(k).startsWith('datei:') && !behalten.has(k));
+  if (weg.length) await kv('readwrite', (st) => { for (const k of weg) st.delete(k); });
+}
+let vorherAm = null;
+async function vorherZurueck() {
+  const v = await idbGet('state-vorher'); if (!v) return;
+  if (!confirm(`Zurück zum Stand vom ${dat(v.am)}, bevor die Sicherung eingespielt wurde?`)) return;
+  await kv('readwrite', (st) => { st.put(v.state, 'state'); st.delete('state-vorher'); });
+  S = Object.assign(leer(), v.state); migriere(); vorherAm = null; await aufraeumen(); render(); toast('Alter Stand wiederhergestellt');
+}
+async function vorherWeg() {
+  if (!confirm('Den aufgehobenen alten Stand endgültig löschen?')) return;
+  await idbDel('state-vorher'); vorherAm = null; await aufraeumen(); render(); toast('Alter Stand gelöscht');
 }
 
 /* ---------- Jahrespaket: ZIP mit Listen für Excel und allen Dateien ---------- */
@@ -2519,7 +2868,7 @@ function zipBlob(files) {
 // Tabelle als CSV für Excel: Semikolon, Komma als Dezimalzeichen, BOM für Umlaute
 const csvText = (rows) => '﻿' + rows.map((r) => r.map((v) => typeof v === 'number' ? v.toFixed(2).replace('.', ',') : '"' + String(v == null ? '' : v).replace(/"/g, '""') + '"').join(';')).join('\r\n') + '\r\n';
 const dateiName = (s) => String(s || '').replace(/[\\/:*?"<>|\u0000-\u001f]+/g, '_').replace(/\s+/g, ' ').trim().slice(0, 60) || 'ohne-Name';
-async function paket(j) {
+async function paket(j, mitDatev) {
   j = Number(j) || new Date().getFullYear();
   toast('Jahrespaket wird erstellt …');
   const gw = gewinn(j), y = String(j), files = [], namen = new Set();
@@ -2555,14 +2904,120 @@ async function paket(j) {
   if (gw.nichtAbz) mon.push(['plus 30 % Bewirtung (nicht abziehbar)', '', '', gw.nichtAbz]);
   mon.push(['Gewinn', '', '', gw.gewinn], [], ['Ausgaben nach Kategorie']);
   for (const [k, v] of Object.entries(gw.kat).sort((a, b) => b[1] - a[1])) mon.push([k, '', v]);
+  const dv = mitDatev ? datev(j) : null;
   files.unshift(
     { name: `Uebersicht-${y}.csv`, data: csvText(mon) },
     { name: `Einnahmen-${y}.csv`, data: csvText(ein) },
     { name: `Ausgaben-${y}.csv`, data: csvText(aus) },
     ...(bank.length > 1 ? [{ name: `Bank-${y}.csv`, data: csvText(bank) }] : []),
-    { name: 'LIESMICH.txt', data: `Jahrespaket ${y} aus dem Steuer-Cockpit${S.firma.name ? ' für ' + S.firma.name : ''}, erstellt am ${dat(heute())}.\r\n\r\nUebersicht: Einnahmen, Ausgaben und Überschuss je Monat, Ausgaben nach Kategorie.\r\nEinnahmen: alle Rechnungen des Jahres. Ausgaben: alle Belege des Jahres.\r\nBank: Buchungen aus den eingelesenen Kontoauszügen.\r\nDie CSV-Dateien öffnen sich in Excel, Numbers oder LibreOffice.\r\nIm Ordner Belege liegen die hochgeladenen Belege, in Rechnungen hinterlegte Rechnungen und E-Rechnungen (XML).\r\nIn der Spalte "Datei im Paket" steht, welche Datei zu welcher Zeile gehört.\r\nBeträge netto ohne Umsatzsteuer, sofern nicht anders angegeben.\r\n` });
+    ...(dv ? [{ name: `DATEV/EXTF_Buchungsstapel_${y}.csv`, data: dv.csv }, { name: 'DATEV/Kontenzuordnung.csv', data: datevKonten() }, ...(dv.hinweise.length ? [{ name: 'DATEV/Hinweise.txt', data: dv.hinweise.join('\r\n') + '\r\n' }] : [])] : []),
+    { name: 'LIESMICH.txt', data: `Jahrespaket ${y} aus dem Steuer-Cockpit${S.firma.name ? ' für ' + S.firma.name : ''}, erstellt am ${dat(heute())}.\r\n\r\nUebersicht: Einnahmen, Ausgaben und Überschuss je Monat, Ausgaben nach Kategorie.\r\nEinnahmen: alle Rechnungen des Jahres. Ausgaben: alle Belege des Jahres.\r\nBank: Buchungen aus den eingelesenen Kontoauszügen.\r\nDie CSV-Dateien öffnen sich in Excel, Numbers oder LibreOffice.\r\nIm Ordner Belege liegen die hochgeladenen Belege, in Rechnungen hinterlegte Rechnungen und E-Rechnungen (XML).\r\nIn der Spalte "Datei im Paket" steht, welche Datei zu welcher Zeile gehört.\r\n${dv ? `\r\nDATEV: EXTF_Buchungsstapel_${y}.csv im DATEV-Format (Buchungsstapel, SKR ${S.steuer.skr === '04' ? '04' : '03'}, ${S.steuer.versteuerung === 'ist' ? 'Ist' : 'Soll'}-Versteuerung). In DATEV über Bestand, Importieren, Buchungsdaten einlesen. Kontenzuordnung.csv zeigt, welche Kategorie auf welches Konto gebucht ist. Bitte in der Kanzlei prüfen.\r\n` : ''}Beträge netto ohne Umsatzsteuer, sofern nicht anders angegeben.\r\n` });
   download(`Steuer-Cockpit-${y}${S.firma.name ? '-' + dateiName(S.firma.name).replace(/\s+/g, '-') : ''}.zip`, zipBlob(files));
   toast(`Jahrespaket ${y} heruntergeladen`);
+}
+
+/* ---------- DATEV-Buchungsstapel für den Steuerberater ---------- */
+// Konten [SKR03, SKR04]. Erlöskonten sind Automatikkonten (Steuer rechnet DATEV selbst), Aufwand bekommt den BU-Schlüssel 9 (19 % VSt) oder 8 (7 % VSt).
+const KONTO = {
+  bank: [1200, 1800], kasse: [1000, 1600], privat: [1890, 2180], verb: [1600, 3300], ford: [1400, 1200],
+  e19: [8400, 4400], e7: [8300, 4300], ku: [8195, 4185], frei: [8100, 4100],
+  'eu-leistung': [8336, 4336], 'eu-lieferung': [8125, 4125], inland13b: [8337, 4337], drittland: [8338, 4338], ausfuhr: [8120, 4120],
+  gwg: [480, 670], bga: [490, 690], bewirtNa: [4654, 6644]
+};
+const KAT_KONTO = {
+  'Wareneinkauf': [3200, 5200], 'Büro und Software': [4930, 6815], 'Telefon und Internet': [4920, 6805], 'Fahrzeug und Reise': [4530, 6530],
+  'Werbung': [4600, 6600], 'Miete': [4210, 6310], 'Versicherung': [4360, 6400], 'Fremdleistung': [3100, 5900], 'Bewirtung': [4650, 6640],
+  'Porto und Versand': [4910, 6800], 'Bankgebühren': [4970, 6855], 'Fortbildung': [4945, 6821], 'Beiträge und Gebühren': [4380, 6420], 'Sonstiges': [4900, 6300]
+};
+// DATEV erwartet Windows-1252
+const CP1252 = { '€': 0x80, '‚': 0x82, '„': 0x84, '…': 0x85, '‘': 0x91, '’': 0x92, '“': 0x93, '”': 0x94, '–': 0x96, '—': 0x97 };
+function cp1252(t) { const u = new Uint8Array(t.length); let i = 0; for (const ch of t) { const c = ch.charCodeAt(0); u[i++] = CP1252[ch] || (c < 256 ? c : 63); } return u.slice(0, i); }
+function datev(j) {
+  const y = String(j), sk = S.steuer.skr === '04' ? 1 : 0, K = (k) => KONTO[k][sk], ist = S.steuer.versteuerung === 'ist';
+  const zeilen = [], hinweise = [];
+  const bf = (t) => String(t || '').replace(/[^A-Za-z0-9$&%*+\-/]/g, '').slice(0, 36);
+  const txt = (t) => String(t || '').replace(/[\r\n";]+/g, ' ').trim().slice(0, 60);
+  const add = (betrag, konto, gegen, bu, datum, beleg, text) => {
+    betrag = r2(betrag); if (!betrag) return;
+    zeilen.push([Math.abs(betrag).toFixed(2).replace('.', ','), betrag > 0 ? 'S' : 'H', konto, gegen, bu, datum.slice(8, 10) + datum.slice(5, 7), bf(beleg), txt(text)]);
+  };
+  // Ausgangsrechnungen: je Steuersatz eine Zeile, Betrag brutto
+  for (const r of S.rechnungen) {
+    if (!zaehlt(r)) continue;
+    const s = summen(r), art = rcArt(r), kn = r.kunde && r.kunde.name;
+    let tag = r.datum;
+    if (ist) {
+      if (r.typ === 'gutschrift') { const o = S.rechnungen.find((x) => x.id === r.stornoVon); if (!o || !o.bezahltAm) continue; }
+      else { if (!r.bezahltAm) continue; tag = r.bezahltAm; }
+    }
+    const teile = [];
+    if (r.ku) teile.push([K('ku'), s.netto]);
+    else if (art) teile.push([K(art), s.netto]);
+    else {
+      const proSatz = r.extern ? { [s.netto ? Math.round(s.ust / s.netto * 100) : 0]: s.netto } : s.proSatz;
+      for (const k in proSatz) teile.push([Number(k) === 19 ? K('e19') : Number(k) === 7 ? K('e7') : K('frei'), r2(proSatz[k] * (1 + Number(k) / 100))]);
+    }
+    if ((tag || '').startsWith(y)) for (const [konto, b] of teile) add(b, ist ? K('bank') : K('ford'), konto, '', tag, r.nr, `${kn || 'Kunde'} ${r.typ === 'gutschrift' ? 'Storno' : 'Rechnung'} ${r.nr || ''}`);
+    if (!ist && r.typ !== 'gutschrift' && (r.bezahltAm || '').startsWith(y)) add(s.brutto, K('bank'), K('ford'), '', r.bezahltAm, r.nr, `Zahlung ${kn || 'Kunde'} ${r.nr || ''}`);
+  }
+  // Belege: Aufwand an Bank, Kasse, Privateinlage oder Verbindlichkeit
+  let n = 0;
+  for (const b of S.belege.filter((x) => (x.datum || '').startsWith(y)).sort((a, c) => a.datum.localeCompare(c.datum))) {
+    const br = num(b.brutto); n++;
+    if (!br) { hinweise.push(`Beleg ${b.lieferant || ''} vom ${dat(b.datum)} ohne Betrag, nicht übernommen.`); continue; }
+    const gegen = K({ bar: 'kasse', privat: 'privat', offen: 'verb' }[b.zahlweg] || 'bank');
+    const netto = r2(br - num(b.vorsteuer));
+    let konto = KAT_KONTO[b.kategorie] ? KAT_KONTO[b.kategorie][sk] : KAT_KONTO.Sonstiges[sk];
+    if (b.kategorie === 'Anschaffung (Gerät, Möbel)') konto = K(netto <= 800 ? 'gwg' : 'bga');
+    if (!b.kategorie) hinweise.push(`Beleg ${b.lieferant || ''} vom ${dat(b.datum)} ohne Kategorie, auf Sonstiges gebucht.`);
+    const bu = num(b.vorsteuer) && !b.rc ? (num(b.ustSatz) === 7 ? '8' : '9') : '';
+    const text = `${b.lieferant || 'Beleg'}${b.rc ? ' Reverse Charge ' + (b.rc === 'eu' ? 'EU' : 'Ausland') + ', bitte prüfen' : b.kategorie ? ' ' + b.kategorie : ''}`;
+    if (b.rc) hinweise.push(`Beleg ${b.lieferant || ''} vom ${dat(b.datum)}: Reverse Charge, Steuerschlüssel bitte in der Kanzlei setzen.`);
+    const nr = `B${b.datum.replace(/-/g, '')}-${n}`;
+    if (b.kategorie === 'Bewirtung') { const na = r2(br * 0.3); add(r2(br - na), konto, gegen, bu, b.datum, nr, text + ' 70 %'); add(na, K('bewirtNa'), gegen, bu, b.datum, nr, text + ' 30 % nicht abziehbar'); }
+    else add(br, konto, gegen, bu, b.datum, nr, text);
+  }
+  const ts = new Date(), z2 = (x) => String(x).padStart(2, '0');
+  const stamp = `${ts.getFullYear()}${z2(ts.getMonth() + 1)}${z2(ts.getDate())}${z2(ts.getHours())}${z2(ts.getMinutes())}${z2(ts.getSeconds())}000`;
+  const berater = String(S.steuer.beraterNr || '').replace(/\D/g, '') || '1001', mandant = String(S.steuer.mandantNr || '').replace(/\D/g, '') || '1';
+  if (!S.steuer.beraterNr || !S.steuer.mandantNr) hinweise.push('Berater- und Mandantennummer fehlen, Platzhalter 1001 und 1 eingesetzt. Die Kanzlei kann sie beim Einlesen ändern.');
+  const q = (v) => `"${v}"`;
+  const kopf = [q('EXTF'), 700, 21, q('Buchungsstapel'), 13, stamp, '', q('SC'), q('Steuer-Cockpit'), q(''), berater, mandant, y + '0101', 4, y + '0101', y + '1231', q(txt('Steuer-Cockpit ' + y)), q(''), 1, 0, 0, q('EUR'), '', q(''), '', '', q(S.steuer.skr === '04' ? '04' : '03'), '', '', q(''), q('')].join(';');
+  const spalten = ['Umsatz (ohne Soll/Haben-Kz)', 'Soll/Haben-Kennzeichen', 'WKZ Umsatz', 'Kurs', 'Basis-Umsatz', 'WKZ Basis-Umsatz', 'Konto', 'Gegenkonto (ohne BU-Schlüssel)', 'BU-Schlüssel', 'Belegdatum', 'Belegfeld 1', 'Belegfeld 2', 'Skonto', 'Buchungstext'].join(';');
+  const body = zeilen.map((z) => [z[0], q(z[1]), q('EUR'), '', '', q(''), z[2], z[3], q(z[4]), z[5], q(z[6]), q(''), '', q(z[7])].join(';'));
+  return { csv: cp1252([kopf, spalten].concat(body).join('\r\n') + '\r\n'), n: zeilen.length, hinweise };
+}
+function datevKonten() {
+  const sk = S.steuer.skr === '04' ? 1 : 0, n = (k) => String(k).padStart(4, '0');
+  const rows = [['Was', 'Konto SKR ' + (sk ? '04' : '03')]];
+  for (const [k, v] of Object.entries(KAT_KONTO)) rows.push(['Ausgaben: ' + k, n(v[sk])]);
+  for (const [k, t] of [['gwg', 'Anschaffung bis 800 € netto (GWG)'], ['bga', 'Anschaffung über 800 € netto (Betriebsausstattung)'], ['bewirtNa', 'Bewirtung, 30 % nicht abziehbar'], ['e19', 'Erlöse 19 %'], ['e7', 'Erlöse 7 %'], ['ku', 'Erlöse als Kleinunternehmer'], ['eu-leistung', 'Erlöse Dienstleistung EU (Reverse Charge)'], ['eu-lieferung', 'Erlöse Lieferung EU'], ['inland13b', 'Erlöse § 13b Inland'], ['drittland', 'Erlöse Leistung Drittland'], ['ausfuhr', 'Erlöse Ausfuhr'], ['bank', 'Bank'], ['kasse', 'Kasse'], ['privat', 'Privateinlage (privat ausgelegt)'], ['ford', 'Forderungen'], ['verb', 'Verbindlichkeiten (noch nicht bezahlt)']]) rows.push([t, n(KONTO[k][sk])]);
+  return csvText(rows);
+}
+function vDatev() {
+  const y0 = new Date().getFullYear();
+  openDlg(`${head('Export für den Steuerberater')}<form id="dvForm" class="dlg-body" autocomplete="off">
+    <p>Die Datei im DATEV-Format liest die Kanzlei direkt in DATEV ein, mit allen Rechnungen und Belegen als Buchungen. Dazu kommt das Jahrespaket mit Listen und allen Belegen als PDF oder Foto, alles in einer ZIP-Datei.</p>
+    <div class="grid2" style="margin-top:10px">
+      <label>Kontenrahmen der Kanzlei<select name="skr"><option value="03"${S.steuer.skr !== '04' ? ' selected' : ''}>SKR 03</option><option value="04"${S.steuer.skr === '04' ? ' selected' : ''}>SKR 04</option></select></label>
+      <label>Jahr<select name="jahr">${[y0, y0 - 1, y0 - 2].map((y) => `<option${y === y0 - (new Date().getMonth() < 3 ? 1 : 0) ? ' selected' : ''}>${y}</option>`).join('')}</select></label>
+      <label>Beraternummer<input name="beraterNr" inputmode="numeric" value="${esc(S.steuer.beraterNr)}" placeholder="von der Kanzlei"></label>
+      <label>Mandantennummer<input name="mandantNr" inputmode="numeric" value="${esc(S.steuer.mandantNr)}" placeholder="von der Kanzlei"></label>
+    </div>
+    <p class="small muted" style="margin-top:8px">Beraternummer, Mandantennummer und Kontenrahmen bekommst du von der Kanzlei. Fehlen sie, setzt die App Platzhalter ein, die Kanzlei ändert sie beim Einlesen. Welche Kategorie auf welches Konto geht, steht in der Datei Kontenzuordnung im Paket.</p>
+    <p class="small muted">${S.steuer.versteuerung === 'ist' ? 'Ist-Versteuerung: Rechnungen werden am Tag der Zahlung direkt auf das Bankkonto gebucht.' : 'Soll-Versteuerung: Rechnungen werden am Rechnungsdatum als Forderung gebucht, die Zahlung am Zahltag.'} Die Zuordnung ist ein Vorschlag, die Kanzlei prüft und ändert sie bei Bedarf.</p>
+  </form>
+  <div class="dlg-foot"><button data-act="datev-nur">Nur DATEV-Datei</button><button class="primary" data-act="datev-paket">ZIP mit allem</button></div>`);
+}
+async function datevLos(mitPaket) {
+  const f = $('#dvForm');
+  S.steuer.skr = f.elements.skr.value; S.steuer.beraterNr = f.elements.beraterNr.value.trim(); S.steuer.mandantNr = f.elements.mandantNr.value.trim();
+  await save();
+  const j = Number(f.elements.jahr.value);
+  if (mitPaket) { closeDlg(); return paket(j, true); }
+  const d = datev(j);
+  download(`EXTF_Buchungsstapel_${j}.csv`, new Blob([d.csv], { type: 'text/csv' }));
+  closeDlg(); toast(`${d.n} Buchungen für ${j} gespeichert${d.hinweise.length ? `, ${d.hinweise.length} Hinweis${d.hinweise.length > 1 ? 'e' : ''} im ZIP-Export` : ''}`);
 }
 
 /* Den Browser bitten, die Daten nicht bei Platzmangel zu löschen */
@@ -2680,6 +3135,22 @@ const ACT = {
   beispiel: async () => { S = beispielDaten(); for (const f of fristen()) if (f.datum < heute()) S.steuer.erledigt[f.key] = true; await save(); tab = 'start'; render(); window.scrollTo(0, 0); toast('Beispieldaten geladen'); },
   'beispiel-weg': async () => { if (!confirm('Beispieldaten löschen und mit einer leeren App starten?')) return; S = leer(); await save(); tab = 'start'; render(); window.scrollTo(0, 0); toast('Beispieldaten gelöscht'); },
   'bank-import': bankImport,
+  abgleich: (el) => { filter.bankMon = el.dataset.k; tab = 'bank'; closeDlg(); render(); const a = $('#abgleich'); if (a) a.scrollIntoView(); },
+  'bk-verkn': async (el) => {
+    const b = S.bank.find((x) => x.id === el.dataset.id), x = S.belege.find((y) => y.id === el.dataset.k); if (!b || !x) return;
+    b.belegId = x.id; x.buchungId = b.id; if (x.zahlweg === 'offen') x.zahlweg = 'konto'; delete b.ohneBeleg;
+    await save(); vBuchung(b.id); render(); toast('Beleg verknüpft');
+  },
+  'bk-auto': async (el) => {
+    let n = 0;
+    for (const b of S.bank.filter((x) => (x.datum || '').startsWith(el.dataset.k) && fehltBeleg(x))) { const t = belegTreffer(b); if (t.length === 1) { b.belegId = t[0].id; t[0].buchungId = b.id; if (t[0].zahlweg === 'offen') t[0].zahlweg = 'konto'; n++; } }
+    await save(); render(); toast(`${n} Beleg${n === 1 ? '' : 'e'} verknüpft`);
+  },
+  'bk-ohne': async (el) => {
+    const b = S.bank.find((x) => x.id === el.dataset.id); if (!b) return;
+    if (el.dataset.k) { const g = ($('#ohneGrund') || {}).value; if (!g) return toast('Bitte einen Grund wählen.'); b.ohneBeleg = g; } else delete b.ohneBeleg;
+    await save(); vBuchung(b.id); render(); toast(b.ohneBeleg ? 'Markiert' : 'Wieder offen');
+  },
   'open-bk': (el) => vBuchung(el.dataset.id),
   'bk-zu': async (el) => {
     const b = S.bank.find((x) => x.id === el.dataset.id), r = S.rechnungen.find((x) => x.id === el.dataset.k);
@@ -2692,6 +3163,17 @@ const ACT = {
     b.rechnungId = null; await save(); vBuchung(b.id); render();
   },
   backup, restore,
+  vorlagen: vVorlagen,
+  'vl-neu': (el) => vorlageAus(el.dataset.k, el.dataset.id),
+  'vl-edit': (el) => vVorlage(S.vorlagen.find((v) => v.id === el.dataset.id)),
+  'vl-save': saveVorlage,
+  'vl-del': async () => { if (!confirm('Wiederholung löschen? Schon angelegte Rechnungen und Belege bleiben.')) return; S.vorlagen = S.vorlagen.filter((v) => v !== vlEdit); await save(); render(); vVorlagen(); },
+  datev: vDatev,
+  'datev-nur': () => datevLos(false),
+  'datev-paket': () => datevLos(true),
+  'restore-ok': sicherungEinspielen,
+  'vorher-zurueck': vorherZurueck,
+  'vorher-weg': vorherWeg,
   paket: (el) => paket(el.dataset.k),
   'speicher-fest': async () => { const ok = await speicherFest(); render(); toast(ok ? 'Der Browser behält die Daten jetzt dauerhaft.' : 'Der Browser hat abgelehnt. Lege die App auf den Home-Bildschirm und sichere regelmäßig.'); },
   'est-open': () => { tab = 'est'; closeDlg(); render(); window.scrollTo(0, 0); },
@@ -2710,7 +3192,9 @@ const ACT = {
   'st-zm': (el) => stZm(el.dataset.k),
   'st-print': (el) => stPrint(el.dataset.k),
   'st-ics': stIcs,
-  wipe: async () => { if (!confirm('Wirklich alle Daten auf diesem Gerät löschen? Das kann nicht rückgängig gemacht werden.')) return; for (const k of await idbKeys()) await idbDel(k); S = leer(); render(); toast('Alle Daten gelöscht'); }
+  'kal-ok': kalSpeichern,
+  'kal-eins': (el) => { const f = fristen().find((x) => x.key === el.dataset.k); if (!f) return; icsDatei([{ uid: f.key, datum: f.datum, t: f.t, s: f.s }], [num(S.steuer.kalVorher)], `frist-${f.key}.ics`); toast('Termin gespeichert. Datei öffnen, um ihn zu übernehmen.'); },
+  wipe: async () => { if (!confirm('Wirklich alle Daten auf diesem Gerät löschen? Das kann nicht rückgängig gemacht werden.')) return; for (const k of await idbKeys()) await idbDel(k); S = leer(); vorherAm = null; render(); toast('Alle Daten gelöscht'); }
 };
 document.addEventListener('click', (e) => {
   const el = e.target.closest('[data-act]'); if (!el) return;
@@ -2735,6 +3219,8 @@ document.addEventListener('change', async (e) => {
   if (e.target.closest('#estForm') && e.target.name && (e.target.type === 'checkbox' || e.target.tagName === 'SELECT' || e.target.type === 'date')) { estEingabe(e.target); if (e.target.type === 'checkbox' && e.target.name.startsWith('bereiche.')) { await save(); render(); } return; }
   if (e.target.name === 'rc' && e.target.closest('#edForm')) { readEditor(); vEditor(); return; }
   if (e.target.name === 'rc' && e.target.closest('#beForm')) calcVst();
+  if (e.target.id === 'ruIst') { S.steuer.ruecklageIst = e.target.value.trim() === '' ? '' : num(e.target.value); await save(); render(); toast('Gespeichert'); return; }
+  if (e.target.id === 'bankMon') { filter.bankMon = e.target.value; render(); return; }
   if (e.target.id === 'stZr') { stZr = e.target.value; render(); return; }
   if (e.target.closest('#stForm')) { saveSteuer(); return; }
   if (e.target.id === 'fileIn') { pendingFile = e.target.files[0] || null; zeigeDatei(pendingFile); }
@@ -2771,6 +3257,8 @@ document.addEventListener('dragleave', (e) => { if (!e.relatedTarget) { const z 
 document.addEventListener('drop', (e) => {
   if (!e.dataTransfer || !e.dataTransfer.files.length) return;
   e.preventDefault(); const z = $('#dropZone'); if (z) z.classList.remove('on');
+  const js = [...e.dataTransfer.files].find((f) => /\.json$/i.test(f.name) || f.type === 'application/json');
+  if (js && !$('#fileIn')) { sicherungLesen(js); return; }
   if (dlg.open) { if ($('#fileIn')) { pendingFile = e.dataTransfer.files[0]; zeigeDatei(pendingFile); } return; }
   if (tab === 'est') { const s = estDaten().schritt; estDateien(UNTERLAGEN[s] ? s : 'person', e.dataTransfer.files).catch((err) => { console.error(err); toast('Die Dateien konnten nicht gespeichert werden.'); }); return; }
   dateienRein(e.dataTransfer.files).catch((err) => { console.error(err); toast('Die Dateien konnten nicht gespeichert werden.'); });
@@ -2793,12 +3281,12 @@ async function pruefeUpdate() {
     if (dlg.open) updateWartet = true; else location.reload();
   } catch (e) {}
 }
-document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') pruefeUpdate(); });
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') { pruefeUpdate(); wiederkehrend().then((n) => { if (n && !dlg.open) render(); }).catch(() => {}); } });
 dlg.addEventListener('close', () => { if (updateWartet) location.reload(); });
 setInterval(pruefeUpdate, 15 * 60 * 1000);
 pruefeUpdate();
 
-load().then(() => { render(); if (S.rechnungen.length + S.belege.length + S.bank.length) speicherFest().then(() => { if (tab === 'firma' && !dlg.open) render(); }); }).catch((e) => { console.error(e); $('#app').innerHTML = '<div class="card"><b>Der Speicher dieses Browsers ist nicht verfügbar.</b><p class="muted">Im privaten Modus oder bei blockierten Website-Daten kann die App nichts speichern. Bitte normal öffnen.</p></div>'; });
+load().then(async () => { await wiederkehrend(); try { const v = await idbGet('state-vorher'); vorherAm = v ? v.am : null; } catch (e) {} render(); if (S.rechnungen.length + S.belege.length + S.bank.length) speicherFest().then(() => { if (tab === 'firma' && !dlg.open) render(); }); }).catch((e) => { console.error(e); $('#app').innerHTML = '<div class="card"><b>Der Speicher dieses Browsers ist nicht verfügbar.</b><p class="muted">Im privaten Modus oder bei blockierten Website-Daten kann die App nichts speichern. Bitte normal öffnen.</p></div>'; });
 })();
 </script>
 </body>
