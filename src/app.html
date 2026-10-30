@@ -196,7 +196,7 @@ const KATEGORIEN = ['Wareneinkauf', 'Büro und Software', 'Telefon und Internet'
 function leer() {
   return {
     v: 1,
-    firma: { name: '', inhaber: '', strasse: '', plz: '', ort: '', steuernr: '', ustid: '', email: '', tel: '', iban: '', bic: '', bank: '', rechtsform: '', kleinunternehmer: false, turnus: 'monat', dauerfrist: false, zahlungsziel: 14, angebotTage: 30 },
+    firma: { name: '', inhaber: '', strasse: '', plz: '', ort: '', steuernr: '', ustid: '', email: '', tel: '', iban: '', bic: '', bank: '', rechtsform: '', kleinunternehmer: false, turnus: 'monat', dauerfrist: false, zahlungsziel: 14, angebotTage: 30, basiszins: 1.27 },
     angebote: [], rechnungen: [], belege: [], kunden: [], zaehler: {}, letzteSicherung: null
   };
 }
@@ -320,7 +320,9 @@ function vStart() {
   const todos = [];
 
   if (!S.firma.name || !S.firma.rechtsform) todos.push({ c: 'warn', t: 'Firmendaten und Rechtsform eintragen', s: 'Ohne sie fehlen Pflichtangaben auf Rechnungen.', act: 'tab', k: 'firma', b: 'Jetzt eintragen' });
-  for (const r of ueber.slice(0, 5)) todos.push({ c: 'bad', t: `${esc(r.kunde.name || 'Kunde')} zahlt ${eur(summen(r).brutto)} nicht`, s: `Rechnung ${esc(r.nr)}, fällig seit ${dat(r.faellig)}. Zahlung prüfen oder erinnern.`, act: 'open-re', id: r.id, b: 'Öffnen' });
+  for (const r of ueber.filter(mahnenFaellig).slice(0, 5)) todos.push({ c: 'bad', t: `${esc(r.kunde.name || 'Kunde')} zahlt ${eur(summen(r).brutto)} nicht`, s: `Rechnung ${esc(r.nr)}, fällig seit ${dat(r.faellig)}.${mahnStufe(r) ? ` ${MAHN[mahnStufe(r)].t} vom ${dat(letzteMahnung(r).datum)} ist abgelaufen.` : ''} Zahlung prüfen, dann ${MAHN[mahnStufe(r) + 1].t} schicken.`, act: 'mahnen', id: r.id, b: mahnStufe(r) ? 'Mahnen' : 'Erinnern' });
+  for (const r of ueber.filter((x) => !mahnenFaellig(x) && mahnStufe(x) && tageBis(letzteMahnung(x).frist) >= 0).slice(0, 3)) todos.push({ c: 'warn', t: `Warten auf Zahlung von ${esc(r.kunde.name || 'Kunde')}`, s: `${MAHN[mahnStufe(r)].t} zu ${esc(r.nr)} läuft bis ${dat(letzteMahnung(r).frist)}. Danach erinnert dich die App an den nächsten Schritt.`, act: 'open-re', id: r.id, b: 'Öffnen' });
+  for (const r of ueber.filter((x) => mahnStufe(x) >= 3 && tageBis(letzteMahnung(x).frist) < 0).slice(0, 3)) todos.push({ c: 'bad', t: `${esc(r.kunde.name || 'Kunde')} zahlt trotz letzter Mahnung nicht`, s: `Rechnung ${esc(r.nr)}, ${eur(summen(r).brutto)}. Mahnbescheid oder Inkasso prüfen.`, act: 'open-re', id: r.id, b: 'Öffnen' });
   if (!ku() && S.firma.name && tageBis(z.frist) <= 10) todos.push({ c: 'warn', t: `Umsatzsteuer-Voranmeldung ${z.name} bis ${dat(z.frist)} abgeben`, s: `Geschätzte Zahllast ${eur(z.zahl)}. Abgabe vorerst über ELSTER oder den Steuerberater.`, });
   for (const a of angOffen.filter((a) => a.gueltigBis && tageBis(a.gueltigBis) <= 5).slice(0, 3)) todos.push({ c: 'warn', t: `Angebot an ${esc(a.kunde.name || 'Kunde')} läuft in ${tageBis(a.gueltigBis)} Tagen ab`, s: `${esc(a.nr)}, ${eur(summen(a).netto)} netto. Nachfassen?`, act: 'open-an', id: a.id, b: 'Öffnen' });
   const entw = S.rechnungen.filter((r) => r.status === 'entwurf');
@@ -394,10 +396,11 @@ function vRechnungen() {
   return `
   <h1>Rechnungen</h1>
   <div class="status"><div class="big">${offen.length ? `${eur(offen.reduce((s, r) => s + summen(r).brutto, 0))} offen` : 'Alle Rechnungen bezahlt'}</div>
-  <p class="small muted" style="margin-top:4px">${offen.length ? `${offen.length} Rechnung${offen.length > 1 ? 'en' : ''} offen${ueber.length ? `, davon <b style="color:var(--bad)">${ueber.length} überfällig</b>` : ', keine überfällig'}.` : 'Neue Rechnungen legst du über den Plus-Knopf an.'}</p></div>
+  <p class="small muted" style="margin-top:4px">${offen.length ? `${offen.length} Rechnung${offen.length > 1 ? 'en' : ''} offen${ueber.length ? `, davon <b style="color:var(--bad)">${ueber.length} überfällig</b>` : ', keine überfällig'}.` : 'Neue Rechnungen legst du über den Plus-Knopf an.'}</p>
+  ${ueber.length ? `<table class="tab" style="margin-top:8px">${[['Noch nicht fällig', (r) => reStatus(r).k === 'offen'], ['Bis 30 Tage überfällig', (r) => reStatus(r).k === 'ueberfaellig' && verzugTage(r) <= 30], ['31 bis 60 Tage', (r) => verzugTage(r) > 30 && verzugTage(r) <= 60 && reStatus(r).k === 'ueberfaellig'], ['Über 60 Tage', (r) => verzugTage(r) > 60 && reStatus(r).k === 'ueberfaellig']].map(([t, fn]) => { const l = offen.filter(fn); return l.length ? `<tr><td>${t}</td><td>${l.length}</td><td style="text-align:right">${eur(l.reduce((a, x) => a + summen(x).brutto, 0))}</td></tr>` : ''; }).join('')}</table>` : ''}</div>
   <div class="card">
     ${chips('re', [['offen', 'Offen'], ['bezahlt', 'Bezahlt'], ['alle', 'Alle']])}
-    ${list.length ? `<ul class="list">${list.map((r) => { const st = reStatus(r); return `<li><button class="item" data-act="open-re" data-id="${r.id}"><div class="grow"><div class="t">${esc(r.kunde.name || 'Ohne Kunde')}</div><div class="s">${esc(r.nr || 'ohne Nummer')} · ${dat(r.datum)}${r.extern ? ' · hinterlegt' : ''}</div></div><div><div class="amt">${eur(summen(r).brutto)}</div><div style="text-align:right"><span class="pill ${st.c}">${st.t}</span></div></div></button></li>`; }).join('')}</ul>`
+    ${list.length ? `<ul class="list">${list.map((r) => { const st = reStatus(r); return `<li><button class="item" data-act="open-re" data-id="${r.id}"><div class="grow"><div class="t">${esc(r.kunde.name || 'Ohne Kunde')}</div><div class="s">${esc(r.nr || 'ohne Nummer')} · ${dat(r.datum)}${r.extern ? ' · hinterlegt' : ''}${mahnStufe(r) && !['bezahlt', 'storniert'].includes(st.k) ? ' · ' + MAHN[mahnStufe(r)].t : ''}</div></div><div><div class="amt">${eur(summen(r).brutto)}</div><div style="text-align:right"><span class="pill ${st.c}">${st.t}</span></div></div></button></li>`; }).join('')}</ul>`
       : `<div class="empty">${S.rechnungen.length ? 'In dieser Ansicht ist nichts.' : 'Noch keine Rechnung.'}<div class="btns" style="justify-content:center"><button class="primary" data-act="new-re">Rechnung erstellen</button><button data-act="new-ext">Vorhandene hinterlegen</button></div></div>`}
   </div>`;
 }
@@ -448,7 +451,9 @@ function vFirma() {
       <label class="check" style="align-self:end"><input type="checkbox" name="dauerfrist"${f.dauerfrist ? ' checked' : ''}> Dauerfristverlängerung (+1 Monat)</label>
       <label>Zahlungsziel in Tagen<input name="zahlungsziel" inputmode="numeric" value="${esc(f.zahlungsziel)}"></label>
       <label>Angebote gültig für Tage<input name="angebotTage" inputmode="numeric" value="${esc(f.angebotTage)}"></label>
+      <label>Basiszinssatz % (für Verzugszinsen in Mahnungen)<input name="basiszins" inputmode="decimal" value="${esc(String(f.basiszins).replace('.', ','))}"></label>
     </div>
+    <p class="small muted" style="margin-top:6px">Der Basiszinssatz ändert sich jeweils zum 1. Januar und 1. Juli. Den aktuellen Wert veröffentlicht die Deutsche Bundesbank.</p>
     <div class="btns"><button class="primary" type="submit">Speichern</button></div>
   </form>
   <div class="card">
@@ -494,7 +499,7 @@ function neuesDoc(typ) {
     id: uid(), typ, nr: '', datum: t, leistungsdatum: t,
     faellig: typ === 'rechnung' ? plusTage(t, num(S.firma.zahlungsziel) || 14) : '',
     gueltigBis: typ === 'angebot' ? plusTage(t, num(S.firma.angebotTage) || 30) : '',
-    kunde: { name: '', adresse: '', ustid: '', email: '' },
+    kunde: { name: '', adresse: '', ustid: '', email: '', leitweg: '' },
     positionen: [{ text: '', menge: 1, einheit: 'Stk.', preis: 0, ust: 19 }],
     hinweis: '', status: typ === 'rechnung' ? 'entwurf' : 'offen', ku: ku()
   };
@@ -503,7 +508,7 @@ function readEditor() {
   const f = $('#edForm'); if (!f) return;
   const g = (n) => (f.elements[n] ? f.elements[n].value : '');
   Object.assign(edit, { datum: g('datum'), leistungsdatum: g('leistungsdatum'), faellig: g('faellig'), gueltigBis: g('gueltigBis'), hinweis: g('hinweis') });
-  edit.kunde = { name: g('k_name').trim(), adresse: g('k_adresse').trim(), ustid: g('k_ustid').trim(), email: g('k_email').trim() };
+  edit.kunde = { name: g('k_name').trim(), adresse: g('k_adresse').trim(), ustid: g('k_ustid').trim(), email: g('k_email').trim(), leitweg: g('k_leitweg').trim() };
   edit.positionen = [...f.querySelectorAll('.pos')].map((p) => ({
     text: p.querySelector('[name=p_text]').value, menge: num(p.querySelector('[name=p_menge]').value), einheit: p.querySelector('[name=p_einheit]').value,
     preis: num(p.querySelector('[name=p_preis]').value), ust: edit.ku ? 0 : num(p.querySelector('[name=p_ust]').value)
@@ -553,6 +558,7 @@ function vEditor() {
       <label>E-Mail (optional)<input name="k_email" type="email" value="${esc(d.kunde.email)}"></label>
       <label class="full">Anschrift<textarea name="k_adresse" rows="2" placeholder="Straße Nr.&#10;PLZ Ort">${esc(d.kunde.adresse)}</textarea></label>
       <label>USt-IdNr. des Kunden (optional)<input name="k_ustid" value="${esc(d.kunde.ustid)}"></label>
+      ${isRe ? `<label>Leitweg-ID (nur bei Behörden)<input name="k_leitweg" value="${esc(d.kunde.leitweg)}" placeholder="z. B. 991-12345-67"></label>` : ''}
     </div>
     <h3>Wann?</h3>
     <div class="grid2">
@@ -658,6 +664,10 @@ function vDetailRe(id) {
     ${['offen', 'ueberfaellig'].includes(st.k) ? `<div class="card" style="margin-top:14px"><b>Ist das Geld da?</b>
       <div class="grid2" style="margin-top:8px"><label>Bezahlt am<input type="date" id="bezDat" value="${heute()}"></label></div>
       <div class="btns"><button class="primary" data-act="bezahlt" data-id="${r.id}">Als bezahlt markieren</button></div></div>` : ''}
+    ${(r.mahnungen || []).length || st.k === 'ueberfaellig' ? `<div class="card" style="margin-top:14px"><b>Mahnungen</b>
+      ${(r.mahnungen || []).length ? `<ul class="list" style="margin-top:6px">${r.mahnungen.map((m, i) => `<li style="display:flex;justify-content:space-between;align-items:center;gap:8px;padding:6px 0"><span>${MAHN[m.stufe].t} vom ${dat(m.datum)}<br><span class="small muted">Frist bis ${dat(m.frist)}${num(m.gebuehr) + num(m.zinsen) + num(m.pauschale) ? ', ' + eur(num(m.gebuehr) + num(m.zinsen) + num(m.pauschale)) + ' Gebühren und Zinsen' : ''}</span></span><button data-act="mahn-print" data-id="${r.id}" data-i="${i}">Drucken</button></li>`).join('')}</ul>` : '<p class="small muted" style="margin:6px 0 0">Noch nicht gemahnt.</p>'}
+      ${st.k === 'ueberfaellig' && mahnStufe(r) < 3 ? `<p class="small muted" style="margin:6px 0 0">${mahnenFaellig(r) ? 'Der nächste Schritt ist dran.' : `Die Frist der letzten Mahnung läuft noch bis ${dat(letzteMahnung(r).frist)}.`}</p><div class="btns"><button${mahnenFaellig(r) ? ' class="primary"' : ''} data-act="mahnen" data-id="${r.id}">${MAHN[mahnStufe(r) + 1].b}</button></div>` : ''}
+      ${st.k === 'ueberfaellig' && mahnStufe(r) >= 3 && tageBis(letzteMahnung(r).frist) < 0 ? '<p class="small" style="margin:6px 0 0">Alle Mahnstufen sind durch. Nächster Schritt wäre ein gerichtlicher Mahnbescheid (online über mahngerichte.de) oder ein Inkassobüro.</p>' : ''}</div>` : ''}
     ${st.k === 'bezahlt' ? `<div class="btns"><button data-act="unbezahlt" data-id="${r.id}">Doch nicht bezahlt</button></div>` : ''}
     <details><summary>Warum kann ich die Rechnung nicht ändern oder löschen?</summary><p class="small muted" style="margin-top:6px">Eine gestellte Rechnung darf nach GoBD nicht mehr verändert werden, und die Nummern müssen lückenlos sein. Wenn sie falsch ist, erstellst du eine Stornorechnung und danach eine neue Rechnung.</p></details>
   </div>
@@ -666,6 +676,115 @@ function vDetailRe(id) {
     ${r.typ !== 'gutschrift' && r.status !== 'storniert' ? `<button class="danger" data-act="storno" data-id="${r.id}">Stornieren</button>` : ''}
     ${r.extern ? `<button class="danger" data-act="del-ext" data-id="${r.id}">Entfernen</button>` : ''}
   </div>`);
+}
+
+function vERechnungFehlt(r, m) {
+  const k = kundenAdresse(r.kunde.adresse), firma = m.some((x) => x[1] === 'firma');
+  openDlg(`${head('E-Rechnung ' + esc(r.nr))}<form id="nachForm" class="dlg-body" autocomplete="off">
+    <p>Für eine gültige E-Rechnung (XRechnung) fehlt noch:</p>
+    <ul class="checks">${m.map((x) => `<li class="miss">${x[0]}</li>`).join('')}</ul>
+    ${firma ? '<p class="small">Deine eigenen Angaben trägst du im Reiter <b>Firma</b> ein, sie gelten dann für alle Rechnungen.</p>' : ''}
+    ${m.some((x) => x[1] === 'kunde') || !r.kunde.leitweg ? `<h3>Angaben zum Kunden ergänzen</h3><div class="grid2">
+      <label>E-Mail des Kunden<input name="k_email" type="email" value="${esc(r.kunde.email)}"></label>
+      <label>Leitweg-ID (nur bei Behörden)<input name="k_leitweg" value="${esc(r.kunde.leitweg)}"></label>
+      <label>PLZ<input name="k_plz" inputmode="numeric" value="${esc(k.plz)}"></label>
+      <label>Ort<input name="k_ort" value="${esc(k.ort)}"></label></div>
+      <p class="small muted">Das ändert nur die Empfängerdaten der E-Rechnung, nicht den Inhalt der Rechnung.</p>` : ''}
+  </form>
+  <div class="dlg-foot">
+    ${firma ? `<button data-act="tab" data-k="firma">Zu den Firmendaten</button>` : ''}
+    <button data-act="open-re" data-id="${r.id}">Zurück</button>
+    ${m.every((x) => x[1] === 'kunde') ? `<button class="primary" data-act="kunde-nach" data-id="${r.id}">Speichern und E-Rechnung erzeugen</button>` : ''}
+  </div>`);
+}
+
+/* ---------- Zahlungserinnerung und Mahnungen ---------- */
+const MAHN = [null,
+  { t: 'Zahlungserinnerung', b: 'Zahlungserinnerung schreiben', frist: 7, gebuehr: 0 },
+  { t: '1. Mahnung', b: '1. Mahnung schreiben', frist: 10, gebuehr: 5 },
+  { t: 'Letzte Mahnung', b: 'Letzte Mahnung schreiben', frist: 7, gebuehr: 5 }];
+const mahnStufe = (r) => (r.mahnungen || []).length;
+const letzteMahnung = (r) => (r.mahnungen || [])[mahnStufe(r) - 1] || null;
+/* Ist jetzt der nächste Mahnschritt dran? Erst nach Fälligkeit und nach Ablauf der letzten Frist. */
+function mahnenFaellig(r) {
+  if (reStatus(r).k !== 'ueberfaellig' || mahnStufe(r) >= 3) return false;
+  const l = letzteMahnung(r); return !l || tageBis(l.frist) < 0;
+}
+const verzugTage = (r) => Math.max(0, -tageBis(r.faellig));
+function mahnZinsen(r, firma) {
+  const satz = num(S.firma.basiszins) + (firma ? 9 : 5);
+  return { satz: r2(satz), tage: verzugTage(r), betrag: r2(summen(r).brutto * satz / 100 * verzugTage(r) / 365) };
+}
+function vMahnen(id) {
+  const r = S.rechnungen.find((x) => x.id === id); if (!r) return;
+  const stufe = Math.min(mahnStufe(r) + 1, 3), M = MAHN[stufe];
+  const firma = !!r.kunde.ustid, z = mahnZinsen(r, firma);
+  const hatPauschale = (r.mahnungen || []).some((x) => x.pauschale), hatZinsen = (r.mahnungen || []).some((x) => x.zinsen);
+  openDlg(`${head(M.t + ' zu ' + esc(r.nr))}<form id="mahnForm" class="dlg-body" autocomplete="off" data-id="${r.id}" data-stufe="${stufe}">
+    <p>${esc(r.kunde.name)} schuldet dir <b>${eur(summen(r).brutto)}</b>, fällig seit ${dat(r.faellig)} (${z.tage} Tage).${mahnStufe(r) ? ` Zuletzt: ${MAHN[mahnStufe(r)].t} vom ${dat(letzteMahnung(r).datum)}.` : ''}</p>
+    <div class="grid2">
+      <label>Neue Zahlungsfrist<input type="date" name="frist" value="${plusTage(heute(), M.frist)}"></label>
+      <label>Mahngebühr €<input name="gebuehr" inputmode="decimal" value="${String(M.gebuehr).replace('.', ',')}"></label>
+    </div>
+    <label class="check" style="margin-top:10px"><input type="checkbox" name="b2b"${firma ? ' checked' : ''}> Kunde ist ein Unternehmen (kein Privatkunde)</label>
+    <label class="check"><input type="checkbox" name="zinsen"${hatZinsen ? ' checked' : ''}> Verzugszinsen berechnen <span class="muted small" id="zinsInfo">(${String(z.satz).replace('.', ',')} % p. a., ${z.tage} Tage: ${eur(z.betrag)})</span></label>
+    <label class="check"><input type="checkbox" name="pauschale"${firma && !hatPauschale ? '' : ' disabled'}> Verzugspauschale 40 € (${hatPauschale ? 'schon in einer früheren Mahnung berechnet' : 'nur bei Unternehmen'})</label>
+    <details style="margin-top:10px"><summary>Was ist erlaubt?</summary><p class="small muted" style="margin-top:6px">Mit festem Zahlungsdatum auf der Rechnung ist der Kunde ab dem Folgetag in Verzug. Dann darfst du Verzugszinsen verlangen: 5 Prozentpunkte über dem Basiszinssatz bei Privatkunden, 9 bei Unternehmen. Unternehmen schulden zusätzlich einmalig 40 € Pauschale. Mahngebühren nur in Höhe der echten Kosten (Porto, Papier), üblich sind bis 5 €. Die erste Erinnerung ist meist kostenlos und freundlich. Mahngebühren und Zinsen sind kein Umsatz und ohne Umsatzsteuer.</p></details>
+  </form>
+  <div class="dlg-foot"><button data-act="open-re" data-id="${r.id}">Abbrechen</button><button class="primary" data-act="mahn-save" data-id="${r.id}">Speichern und drucken</button></div>`);
+  const f = $('#mahnForm');
+  f.addEventListener('change', () => {
+    const b = f.elements.b2b.checked, zz = mahnZinsen(r, b);
+    f.elements.pauschale.disabled = !b || hatPauschale; if (f.elements.pauschale.disabled) f.elements.pauschale.checked = false;
+    $('#zinsInfo').textContent = `(${String(zz.satz).replace('.', ',')} % p. a., ${zz.tage} Tage: ${eur(zz.betrag)})`;
+  });
+}
+async function saveMahnung(el) {
+  const r = S.rechnungen.find((x) => x.id === el.dataset.id), f = $('#mahnForm');
+  const b2b = f.elements.b2b.checked, z = mahnZinsen(r, b2b);
+  const m = {
+    stufe: Number(f.dataset.stufe), datum: heute(), frist: f.elements.frist.value || plusTage(heute(), 7),
+    gebuehr: r2(num(f.elements.gebuehr.value)),
+    zinsen: f.elements.zinsen.checked ? z.betrag : 0, zinsSatz: z.satz, zinsTage: z.tage,
+    pauschale: f.elements.pauschale.checked && b2b && !(r.mahnungen || []).some((x) => x.pauschale) ? 40 : 0
+  };
+  r.mahnungen = (r.mahnungen || []).concat(m);
+  await save(); vDetailRe(r.id); render(); toast(MAHN[m.stufe].t + ' gespeichert');
+  druckMahnung(r, m);
+}
+function fussHtml() {
+  const f = S.firma;
+  return `<div class="fuss">${[[f.name, f.inhaber, f.strasse, [f.plz, f.ort].join(' ')], [f.tel && 'Tel. ' + f.tel, f.email, f.steuernr && 'Steuernr. ' + f.steuernr, f.ustid && 'USt-IdNr. ' + f.ustid], [f.bank, f.iban && 'IBAN ' + f.iban, f.bic && 'BIC ' + f.bic]].map((col) => `<div>${col.filter((x) => x && String(x).trim()).map(esc).join('<br>')}</div>`).join('')}</div>`;
+}
+function druckMahnung(r, m) {
+  const f = S.firma, s = summen(r), M = MAHN[m.stufe];
+  const absender = [f.name, f.strasse, [f.plz, f.ort].join(' ')].filter((x) => x && x.trim()).join(' · ');
+  const frueher = (r.mahnungen || []).filter((x) => x !== m && x.stufe < m.stufe);
+  /* Gebühren früherer Mahnungen bleiben offen und werden mitgeführt */
+  const alt = frueher.reduce((a, x) => a + num(x.gebuehr) + num(x.pauschale), 0);
+  const gesamt = r2(s.brutto + alt + num(m.gebuehr) + num(m.zinsen) + num(m.pauschale));
+  const text = {
+    1: `sicher ist es im Alltag untergegangen: Unsere Rechnung ${esc(r.nr)} vom ${dat(r.datum)} über ${eur(s.brutto)} war am ${dat(r.faellig)} fällig. Bis heute haben wir keinen Zahlungseingang festgestellt.</p><p>Bitte überweisen Sie den offenen Betrag bis zum <b>${dat(m.frist)}</b>. Falls Sie bereits gezahlt haben, betrachten Sie dieses Schreiben bitte als gegenstandslos.`,
+    2: `leider konnten wir für unsere Rechnung ${esc(r.nr)} vom ${dat(r.datum)}, fällig am ${dat(r.faellig)}, trotz ${frueher.length ? 'unserer Zahlungserinnerung vom ' + dat(frueher[frueher.length - 1].datum) : 'Fälligkeit'} noch keinen Zahlungseingang feststellen. Sie befinden sich seit dem ${dat(plusTage(r.faellig, 1))} in Zahlungsverzug.</p><p>Bitte überweisen Sie den unten genannten Gesamtbetrag bis spätestens <b>${dat(m.frist)}</b>.`,
+    3: `trotz ${frueher.length > 1 ? 'Zahlungserinnerung und Mahnung' : 'unserer Mahnung'} ist unsere Rechnung ${esc(r.nr)} vom ${dat(r.datum)}, fällig am ${dat(r.faellig)}, weiterhin unbezahlt.</p><p>Wir fordern Sie letztmalig auf, den unten genannten Gesamtbetrag bis zum <b>${dat(m.frist)}</b> zu überweisen. Geht die Zahlung bis dahin nicht ein, werden wir die Forderung ohne weitere Ankündigung gerichtlich geltend machen (gerichtliches Mahnverfahren). Die dadurch entstehenden Kosten gehen zu Ihren Lasten.`
+  }[m.stufe];
+  $('#druck').innerHTML = `
+    <div class="kopf"><div><div class="absender">${esc(absender)}</div><div style="white-space:pre-line"><b>${esc(r.kunde.name)}</b>\n${esc(r.kunde.adresse)}</div></div>
+    <table class="meta"><tr><td>Datum</td><td>${dat(m.datum)}</td></tr><tr><td>Rechnungsnr.</td><td><b>${esc(r.nr)}</b></td></tr><tr><td>Rechnungsdatum</td><td>${dat(r.datum)}</td></tr><tr><td>Fällig seit</td><td>${dat(r.faellig)}</td></tr></table></div>
+    <h1>${M.t}</h1>
+    <p>Sehr geehrte Damen und Herren,</p><p>${text}</p>
+    <div class="sum"><div><span>Rechnungsbetrag</span><span>${eur(s.brutto)}</span></div>
+    ${alt ? `<div><span>Gebühren aus früheren Mahnungen</span><span>${eur(alt)}</span></div>` : ''}
+    ${num(m.gebuehr) ? `<div><span>Mahngebühr</span><span>${eur(m.gebuehr)}</span></div>` : ''}
+    ${num(m.zinsen) ? `<div><span>Verzugszinsen ${String(m.zinsSatz).replace('.', ',')} % p. a. für ${m.zinsTage} Tage</span><span>${eur(m.zinsen)}</span></div>` : ''}
+    ${num(m.pauschale) ? `<div><span>Verzugspauschale § 288 Abs. 5 BGB</span><span>${eur(m.pauschale)}</span></div>` : ''}
+    <div class="g"><span>Offener Gesamtbetrag</span><span>${eur(gesamt)}</span></div></div>
+    <p>${f.iban ? `Bitte überweisen Sie auf ${f.bank ? esc(f.bank) + ', ' : ''}IBAN ${esc(f.iban)}${f.bic ? ', BIC ' + esc(f.bic) : ''}, Verwendungszweck ${esc(r.nr)}.` : `Bitte geben Sie bei der Zahlung die Rechnungsnummer ${esc(r.nr)} an.`}</p>
+    <p>Mit freundlichen Grüßen<br>${esc(f.inhaber || f.name)}</p>
+    ${fussHtml()}`;
+  const altT = document.title; document.title = (r.nr + '_' + M.t).replace(/[^\w-]+/g, '_');
+  window.print();
+  setTimeout(() => { document.title = altT; }, 500);
 }
 
 /* Beleg und hinterlegte Rechnung */
@@ -774,18 +893,36 @@ function druck(d, titel) {
     ${d.ku ? `<p>${KU_HINWEIS}</p>` : ''}
     ${isRe && d.typ !== 'gutschrift' && d.faellig ? `<p>Bitte überweisen Sie den Betrag bis zum ${dat(d.faellig)} unter Angabe der Rechnungsnummer${f.iban ? ' auf das unten genannte Konto' : ''}.</p>` : ''}
     ${d.hinweis ? `<p style="white-space:pre-line">${esc(d.hinweis)}</p>` : ''}
-    <div class="fuss">${[[f.name, f.inhaber, f.strasse, [f.plz, f.ort].join(' ')], [f.tel && 'Tel. ' + f.tel, f.email, f.steuernr && 'Steuernr. ' + f.steuernr, f.ustid && 'USt-IdNr. ' + f.ustid], [f.bank, f.iban && 'IBAN ' + f.iban, f.bic && 'BIC ' + f.bic]].map((col) => `<div>${col.filter((x) => x && String(x).trim()).map(esc).join('<br>')}</div>`).join('')}</div>`;
+    ${fussHtml()}`;
   const alt = document.title; document.title = (d.nr || titel).replace(/[^\w-]+/g, '_');
   window.print();
   setTimeout(() => { document.title = alt; }, 500);
 }
 
 /* ---------- E-Rechnung (XRechnung 3.0, UBL) ---------- */
+function kundenAdresse(t) {
+  const z = String(t || '').split('\n').map((l) => l.trim()).filter(Boolean);
+  const last = z.length > 1 ? z[z.length - 1] : '';
+  const m = last.match(/^(?:D-?\s*)?(\d{5})\s+(.+)$/);
+  return { strasse: z.length > 1 ? z.slice(0, -1).join(', ') : z[0] || '', plz: m ? m[1] : '', ort: m ? m[2] : last };
+}
+/* Was die XRechnung zusätzlich zu § 14 UStG braucht, sonst lehnt das Prüfprogramm des Empfängers sie ab */
+function eRechnungFehlt(r) {
+  const f = S.firma, k = kundenAdresse(r.kunde.adresse), m = [];
+  if (!f.email) m.push(['Deine E-Mail-Adresse', 'firma']);
+  if (!f.tel || (f.tel.match(/\d/g) || []).length < 3) m.push(['Deine Telefonnummer', 'firma']);
+  if (!f.strasse || !f.plz || !f.ort) m.push(['Deine vollständige Anschrift', 'firma']);
+  if (!f.iban) m.push(['Deine IBAN (für die Zahlungsangaben)', 'firma']);
+  if (!r.kunde.email) m.push(['E-Mail-Adresse des Kunden', 'kunde']);
+  if (!k.plz || !k.ort) m.push(['Kundenanschrift mit PLZ und Ort in der letzten Zeile', 'kunde']);
+  return m;
+}
+
 function xrechnung(r) {
   const f = S.firma, s = summen(r), x = (v) => esc(v || '');
   const a = (n) => n.toFixed(2);
   const credit = r.typ === 'gutschrift';
-  const adr = (t) => { const z = String(t || '').split('\n').map((l) => l.trim()).filter(Boolean); const last = z.length > 1 ? z[z.length - 1] : ''; const m = last.match(/^(\d{4,5})\s+(.*)$/); return { strasse: z.length > 1 ? z.slice(0, -1).join(', ') : z[0] || '', plz: m ? m[1] : '', ort: m ? m[2] : last }; };
+  const adr = kundenAdresse;
   const k = adr(r.kunde.adresse);
   const kat = (satz) => r.ku ? 'E' : (satz > 0 ? 'S' : 'Z');
   const sub = r.ku ? [[0, s.netto]] : Object.entries(s.proSatz).map(([k2, v]) => [Number(k2), v]);
@@ -807,7 +944,7 @@ function xrechnung(r) {
   <cbc:InvoiceTypeCode>${credit ? 384 : 380}</cbc:InvoiceTypeCode>
   ${r.ku ? `<cbc:Note>${KU_HINWEIS}</cbc:Note>` : ''}${r.hinweis ? `<cbc:Note>${x(r.hinweis)}</cbc:Note>` : ''}
   <cbc:DocumentCurrencyCode>EUR</cbc:DocumentCurrencyCode>
-  <cbc:BuyerReference>${x(r.leitwegId || r.kunde.name || 'n/a')}</cbc:BuyerReference>
+  <cbc:BuyerReference>${x(r.kunde.leitweg || r.leitwegId || r.nr)}</cbc:BuyerReference>
   ${orig ? `<cac:BillingReference><cac:InvoiceDocumentReference><cbc:ID>${x(orig.nr)}</cbc:ID><cbc:IssueDate>${orig.datum}</cbc:IssueDate></cac:InvoiceDocumentReference></cac:BillingReference>` : ''}
   <cac:AccountingSupplierParty><cac:Party>
     ${f.email ? `<cbc:EndpointID schemeID="EM">${x(f.email)}</cbc:EndpointID>` : ''}
@@ -824,7 +961,7 @@ function xrechnung(r) {
     <cac:PartyLegalEntity><cbc:RegistrationName>${x(r.kunde.name)}</cbc:RegistrationName></cac:PartyLegalEntity>
   </cac:Party></cac:AccountingCustomerParty>
   <cac:Delivery><cbc:ActualDeliveryDate>${r.leistungsdatum || r.datum}</cbc:ActualDeliveryDate></cac:Delivery>
-  ${f.iban && !credit ? `<cac:PaymentMeans><cbc:PaymentMeansCode>58</cbc:PaymentMeansCode><cbc:PaymentID>${x(r.nr)}</cbc:PaymentID><cac:PayeeFinancialAccount><cbc:ID>${x(f.iban.replace(/\s/g, ''))}</cbc:ID>${f.bank ? `<cbc:Name>${x(f.name)}</cbc:Name>` : ''}${f.bic ? `<cac:FinancialInstitutionBranch><cbc:ID>${x(f.bic)}</cbc:ID></cac:FinancialInstitutionBranch>` : ''}</cac:PayeeFinancialAccount></cac:PaymentMeans>` : ''}
+  ${f.iban ? `<cac:PaymentMeans><cbc:PaymentMeansCode>58</cbc:PaymentMeansCode><cbc:PaymentID>${x(r.nr)}</cbc:PaymentID><cac:PayeeFinancialAccount><cbc:ID>${x(f.iban.replace(/\s/g, ''))}</cbc:ID>${f.bank ? `<cbc:Name>${x(f.name)}</cbc:Name>` : ''}${f.bic ? `<cac:FinancialInstitutionBranch><cbc:ID>${x(f.bic)}</cbc:ID></cac:FinancialInstitutionBranch>` : ''}</cac:PayeeFinancialAccount></cac:PaymentMeans>` : ''}
   ${r.faellig && !credit ? `<cac:PaymentTerms><cbc:Note>Zahlbar bis ${dat(r.faellig)}</cbc:Note></cac:PaymentTerms>` : ''}
   <cac:TaxTotal><cbc:TaxAmount currencyID="EUR">${a(s.ust)}</cbc:TaxAmount>${taxSub}
   </cac:TaxTotal>
@@ -909,7 +1046,24 @@ const ACT = {
     if (el.dataset.t === 'an') druck(S.angebote.find((x) => x.id === el.dataset.id), 'Angebot');
     else { const r = S.rechnungen.find((x) => x.id === el.dataset.id); druck(r, r.typ === 'gutschrift' ? 'Stornorechnung' : 'Rechnung'); }
   },
-  xml: (el) => { const r = S.rechnungen.find((x) => x.id === el.dataset.id); download(`${r.nr}.xml`, xrechnung(r), 'application/xml'); toast('E-Rechnung gespeichert'); },
+  xml: (el) => {
+    const r = S.rechnungen.find((x) => x.id === el.dataset.id), m = eRechnungFehlt(r);
+    if (m.length) return vERechnungFehlt(r, m);
+    download(`${r.nr}.xml`, xrechnung(r), 'application/xml'); toast('E-Rechnung gespeichert');
+  },
+  'kunde-nach': async (el) => {
+    const r = S.rechnungen.find((x) => x.id === el.dataset.id), f = $('#nachForm');
+    r.kunde.email = f.elements.k_email.value.trim() || r.kunde.email;
+    r.kunde.leitweg = f.elements.k_leitweg.value.trim();
+    const plz = f.elements.k_plz.value.trim(), ort = f.elements.k_ort.value.trim();
+    if (plz && ort) { const k = kundenAdresse(r.kunde.adresse); r.kunde.adresse = (k.strasse ? k.strasse.split(', ').join('\n') + '\n' : '') + plz + ' ' + ort; }
+    merkeKunde(r.kunde); await save();
+    const m = eRechnungFehlt(r); if (m.length) return vERechnungFehlt(r, m);
+    download(`${r.nr}.xml`, xrechnung(r), 'application/xml'); toast('E-Rechnung gespeichert'); vDetailRe(r.id);
+  },
+  mahnen: (el) => vMahnen(el.dataset.id),
+  'mahn-save': saveMahnung,
+  'mahn-print': (el) => { const r = S.rechnungen.find((x) => x.id === el.dataset.id); druckMahnung(r, r.mahnungen[Number(el.dataset.i)]); },
   file: async (el) => {
     const d = await idbGet('datei:' + el.dataset.id); if (!d) return toast('Datei nicht gefunden.');
     const url = URL.createObjectURL(d.blob); const w = window.open(url, '_blank'); if (!w) download(d.name, d.blob); setTimeout(() => URL.revokeObjectURL(url), 60000);
@@ -931,7 +1085,7 @@ document.addEventListener('input', (e) => {
   if (e.target.closest('#beForm')) calcVst();
   if (e.target.name === 'k_name' && e.target.closest('#edForm')) {
     const k = S.kunden.find((x) => x.name === e.target.value);
-    if (k) { const f = $('#edForm'); if (!f.elements.k_adresse.value) f.elements.k_adresse.value = k.adresse || ''; if (!f.elements.k_ustid.value) f.elements.k_ustid.value = k.ustid || ''; if (!f.elements.k_email.value) f.elements.k_email.value = k.email || ''; refreshEditor(); }
+    if (k) { const f = $('#edForm'); if (!f.elements.k_adresse.value) f.elements.k_adresse.value = k.adresse || ''; if (!f.elements.k_ustid.value) f.elements.k_ustid.value = k.ustid || ''; if (!f.elements.k_email.value) f.elements.k_email.value = k.email || ''; if (f.elements.k_leitweg && !f.elements.k_leitweg.value) f.elements.k_leitweg.value = k.leitweg || ''; refreshEditor(); }
   }
 });
 document.addEventListener('change', async (e) => {
@@ -948,7 +1102,7 @@ async function saveFirma(msg) {
   const f = $('#firmaForm');
   for (const k of Object.keys(S.firma)) {
     const el = f.elements[k]; if (!el) continue;
-    S.firma[k] = el.type === 'checkbox' ? el.checked : (['zahlungsziel', 'angebotTage'].includes(k) ? num(el.value) : el.value.trim());
+    S.firma[k] = el.type === 'checkbox' ? el.checked : (['zahlungsziel', 'angebotTage', 'basiszins'].includes(k) ? num(el.value) : el.value.trim());
   }
   await save(); render(); if (msg) { toast('Firmendaten gespeichert'); window.scrollTo(0, 0); }
 }
