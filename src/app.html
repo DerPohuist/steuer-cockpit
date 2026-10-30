@@ -2569,6 +2569,24 @@ async function saveFirma(msg) {
   await save(); render(); if (msg) { toast('Firmendaten gespeichert'); window.scrollTo(0, 0); }
 }
 
+/* Neue Version: beim Öffnen und alle 15 Minuten prüfen, dann neu laden (nicht mitten in einem offenen Dialog) */
+const BUILD = '__BUILD__';
+let updateWartet = false;
+async function pruefeUpdate() {
+  if (BUILD.startsWith('__')) return;
+  try {
+    const j = await (await fetch('version.json', { cache: 'no-store' })).json();
+    if (!j.v || j.v === BUILD) return;
+    // Schutz gegen Endlosschleife, falls noch eine alte Fassung zwischengespeichert ist
+    try { if (sessionStorage.getItem('sc-update') === j.v) return; sessionStorage.setItem('sc-update', j.v); } catch (e) {}
+    if (dlg.open) updateWartet = true; else location.reload();
+  } catch (e) {}
+}
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') pruefeUpdate(); });
+dlg.addEventListener('close', () => { if (updateWartet) location.reload(); });
+setInterval(pruefeUpdate, 15 * 60 * 1000);
+pruefeUpdate();
+
 load().then(render).catch((e) => { console.error(e); $('#app').innerHTML = '<div class="card"><b>Der Speicher dieses Browsers ist nicht verfügbar.</b><p class="muted">Im privaten Modus oder bei blockierten Website-Daten kann die App nichts speichern. Bitte normal öffnen.</p></div>'; });
 })();
 </script>

@@ -6,6 +6,8 @@ Web-App für Angebote, Rechnungen und Belege. Statische Seite über GitHub Pages
 - `src/gate.html`: Passwort-Seite.
 - `build.mjs`: verschlüsselt `src/app.html` und schreibt `index.html`. Aufruf: `STEUER_PW='…' node build.mjs`
 - `index.html`: das, was ausgeliefert wird (verschlüsselt). Nie von Hand bearbeiten.
+- `src/salt.txt`: bleibt immer gleich, damit ein gemerktes Passwort nach Updates weiter gilt. Nicht ändern.
+- `version.json`: Versionsnummer des letzten Builds. Die App prüft sie beim Öffnen und lädt sich bei einer neuen Version selbst neu.
 - `sw.js`, `manifest.json`, Icons: damit die App aufs Handy installiert werden kann und offline startet.
 
 Daten liegen nur im Browser des Geräts (IndexedDB). Sicherung als JSON über den Reiter „Firma“.
