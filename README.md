@@ -11,3 +11,5 @@ Web-App für Angebote, Rechnungen und Belege. Statische Seite über GitHub Pages
 - `sw.js`, `manifest.json`, Icons: damit die App aufs Handy installiert werden kann und offline startet.
 
 Daten liegen nur im Browser des Geräts (IndexedDB); die App bittet den Browser, sie dauerhaft zu behalten. Sicherung als JSON über den Reiter „Firma“. Jahrespaket als ZIP (CSV-Listen für Excel plus alle Belege) über „Firma“ oder „Steuern“. Diagramme zu Einnahmen und Ausgaben auf der Übersicht.
+
+Weitere Funktionen: Sicherung einspielen mit Vorschau und Rückgängig (Gerätewechsel), Steuer-Rücklage mit Ampel und Kleinunternehmer-Wächter (25.000 € / 100.000 €) auf der Übersicht, Fristen als Kalender-Datei (.ics) im Reiter „Steuern“, Beleg-Abgleich mit den Bankbuchungen im Reiter „Bank“, wiederkehrende Rechnungen und Ausgaben (Plus-Knopf, „Wiederkehrend“), DATEV-Buchungsstapel (SKR 03/04) für den Steuerberater über „Firma“ oder „Steuern“.
