@@ -100,7 +100,7 @@ textarea { min-height: 70px; resize: vertical; }
 .checks li.ok::before { content: "✓ "; color: var(--good); font-weight: 700; }
 .checks li.miss::before { content: "✗ "; color: var(--bad); font-weight: 700; }
 nav.tabs { position: fixed; left: 0; right: 0; bottom: 0; z-index: 6; background: var(--panel); border-top: 1px solid var(--line); padding-bottom: env(safe-area-inset-bottom, 0px); }
-nav.tabs .row { max-width: 860px; margin: 0 auto; display: grid; grid-template-columns: repeat(6, 1fr); }
+nav.tabs .row { max-width: 860px; margin: 0 auto; display: grid; grid-template-columns: repeat(7, 1fr); }
 nav.tabs button { border: 0; border-radius: 0; background: none; padding: 9px 2px 10px; font-size: 12px; font-weight: 600; color: var(--muted); display: grid; justify-items: center; gap: 2px; }
 nav.tabs button svg { width: 22px; height: 22px; }
 nav.tabs button[aria-current="page"] { color: var(--accent); }
@@ -197,7 +197,8 @@ function leer() {
   return {
     v: 1,
     firma: { name: '', inhaber: '', strasse: '', plz: '', ort: '', steuernr: '', ustid: '', email: '', tel: '', iban: '', bic: '', bank: '', rechtsform: '', kleinunternehmer: false, turnus: 'monat', dauerfrist: false, zahlungsziel: 14, angebotTage: 30, basiszins: 1.27 },
-    angebote: [], rechnungen: [], belege: [], kunden: [], bank: [], zaehler: {}, letzteSicherung: null
+    angebote: [], rechnungen: [], belege: [], kunden: [], bank: [], zaehler: {}, letzteSicherung: null,
+    steuer: { versteuerung: 'soll', hebesatz: 400, berater: false, svz: 0, vzEst: 0, vzGew: 0, erledigt: {} }
   };
 }
 let S = leer();
@@ -205,7 +206,7 @@ let tab = 'start', filter = {};
 
 async function load() {
   const s = await idbGet('state');
-  if (s) S = Object.assign(leer(), s, { firma: Object.assign(leer().firma, s.firma || {}) });
+  if (s) S = Object.assign(leer(), s, { firma: Object.assign(leer().firma, s.firma || {}), steuer: Object.assign(leer().steuer, s.steuer || {}) });
 }
 async function save() { await idbSet('state', S); }
 
@@ -234,7 +235,7 @@ function summen(doc) {
   for (const p of doc.positionen || []) {
     const n = r2(num(p.menge) * num(p.preis));
     netto += n;
-    const satz = doc.ku ? 0 : num(p.ust);
+    const satz = doc.ku || doc.rc ? 0 : num(p.ust);
     proSatz[satz] = (proSatz[satz] || 0) + n;
   }
   let ust = 0;
@@ -267,26 +268,380 @@ function anStatus(a) {
 }
 const zaehlt = (r) => r.status !== 'entwurf';
 
-/* Umsatzsteuer-Zeitraum: letzter abgeschlossener Monat/Quartal, dessen Frist noch kommt */
+/* Umsatzsteuer-Zeitraum: letzter abgeschlossener Monat/Quartal, dessen Frist noch kommt und der nicht abgegeben ist */
 function ustZeitraum() {
-  const quartal = S.firma.turnus === 'quartal';
+  let z = zrAus(zrRel(-1));
+  if (tageBis(z.frist) < 0 || S.steuer.erledigt['ustva-' + z.key]) z = zrAus(zrRel(0));
+  const u = ustva(z);
+  return Object.assign(z, { ust: u.ust, vst: u.vst, zahl: u.zahl });
+}
+
+/* ---------- Steuern: UStVA, ZM, Gewinn, Schätzung, Fristen ---------- */
+/* Steuerfall einer Rechnung ohne deutsche USt (Feld rc) und wohin sie in der Voranmeldung gehört */
+const RC = {
+  'eu-leistung': { t: 'Dienstleistung an Firma in der EU (Reverse Charge)', kz: '21', zm: 'S', idPflicht: true, xml: 'AE', hinweis: 'Steuerschuldnerschaft des Leistungsempfängers (Reverse Charge).' },
+  'eu-lieferung': { t: 'Warenlieferung an Firma in der EU', kz: '41', zm: 'L', idPflicht: true, xml: 'K', hinweis: 'Steuerfreie innergemeinschaftliche Lieferung.' },
+  inland13b: { t: 'Inland, Kunde schuldet die Steuer (§ 13b, z. B. Bauleistung)', kz: '60', xml: 'AE', hinweis: 'Steuerschuldnerschaft des Leistungsempfängers (§ 13b UStG).' },
+  drittland: { t: 'Dienstleistung an Kunden außerhalb der EU', kz: '45', xml: 'O', hinweis: 'Nicht im Inland steuerbare Leistung.' },
+  ausfuhr: { t: 'Warenlieferung in ein Land außerhalb der EU', kz: '43', xml: 'G', hinweis: 'Steuerfreie Ausfuhrlieferung.' }
+};
+const rcArt = (r) => (r.rc === true ? 'eu-leistung' : RC[r.rc] ? r.rc : '');
+const BILANZ = ['ek', 'ohg', 'ug', 'gmbh'];
+const KAPITAL = ['ug', 'gmbh'];
+let stZr = '', stJahr = 0;
+
+/* Fristen verschieben sich auf den nächsten Werktag (Wochenende, bundesweite Feiertage) */
+function feiertage(y) {
+  const a = y % 19, b = Math.floor(y / 100), c = y % 100, d = Math.floor(b / 4), e = b % 4, f = Math.floor((b + 8) / 25), g = Math.floor((b - f + 1) / 3);
+  const h = (19 * a + b - d - g + 15) % 30, i = Math.floor(c / 4), k = c % 4, l = (32 + 2 * e + 2 * i - h - k) % 7, m = Math.floor((a + 11 * h + 22 * l) / 451);
+  const ostern = iso(new Date(y, Math.floor((h + l - 7 * m + 114) / 31) - 1, ((h + l - 7 * m + 114) % 31) + 1));
+  return [`${y}-01-01`, `${y}-05-01`, `${y}-10-03`, `${y}-12-25`, `${y}-12-26`].concat([-2, 1, 39, 50].map((t) => plusTage(ostern, t)));
+}
+function werktag(isoD) {
+  let d = isoD;
+  for (;;) { const wd = new Date(d + 'T12:00:00').getDay(); if (wd !== 0 && wd !== 6 && !feiertage(+d.slice(0, 4)).includes(d)) return d; d = plusTage(d, 1); }
+}
+
+/* Voranmeldungszeiträume: Schlüssel 2026-09 (Monat) oder 2026-Q3 (Quartal) */
+function zrRel(n) {
   const d = new Date(heute() + 'T12:00:00');
-  let y = d.getFullYear(), m = d.getMonth();
-  function zr(y, m0) {
-    let von, bis, name;
-    if (quartal) { const q = Math.floor(m0 / 3); von = new Date(y, q * 3, 1); bis = new Date(y, q * 3 + 3, 0); name = (q + 1) + '. Quartal ' + y; }
-    else { von = new Date(y, m0, 1); bis = new Date(y, m0 + 1, 0); name = MONATE[m0] + ' ' + y; }
-    const f = new Date(bis.getFullYear(), bis.getMonth() + 1 + (S.firma.dauerfrist ? 1 : 0), 10);
-    return { von: iso(von), bis: iso(bis), name, frist: iso(f) };
+  if (S.firma.turnus === 'quartal') { let q = d.getFullYear() * 4 + Math.floor(d.getMonth() / 3) + n; return `${Math.floor(q / 4)}-Q${(q % 4) + 1}`; }
+  const m = d.getFullYear() * 12 + d.getMonth() + n;
+  return `${Math.floor(m / 12)}-${String((m % 12) + 1).padStart(2, '0')}`;
+}
+function zrAus(key) {
+  const [ys, p] = key.split('-'), y = Number(ys);
+  let von, bis, name;
+  if (p[0] === 'Q') { const q = Number(p[1]) - 1; von = new Date(y, q * 3, 1); bis = new Date(y, q * 3 + 3, 0); name = `${q + 1}. Quartal ${y}`; }
+  else { const m = Number(p) - 1; von = new Date(y, m, 1); bis = new Date(y, m + 1, 0); name = MONATE[m] + ' ' + y; }
+  const frist = werktag(iso(new Date(bis.getFullYear(), bis.getMonth() + 1 + (S.firma.dauerfrist ? 1 : 0), 10)));
+  return { key, von: iso(von), bis: iso(bis), name, frist, dez: p === '12' };
+}
+
+/* Umsatzsteuer für einen Zeitraum, aufgeteilt auf die ELSTER-Kennzahlen */
+function ustva(z) {
+  const ist = S.steuer.versteuerung === 'ist';
+  const b = { 81: 0, 86: 0, 41: 0, 43: 0, 21: 0, 45: 0, 60: 0, 46: 0, 52: 0 };
+  const warn = []; let vst = 0, frei = 0, n = 0;
+  const drin = (d) => d && d >= z.von && d <= z.bis;
+  for (const r of S.rechnungen) {
+    if (!zaehlt(r) || r.ku) continue;
+    let tag = r.datum;
+    if (ist) {
+      if (r.typ === 'gutschrift') { const o = S.rechnungen.find((x) => x.id === r.stornoVon); if (!o || !o.bezahltAm) continue; }
+      else { if (!r.bezahltAm) continue; tag = r.bezahltAm; }
+    }
+    if (!drin(tag)) continue;
+    n++;
+    const s = summen(r), art = rcArt(r);
+    if (art) { b[RC[art].kz] += s.netto; continue; }
+    const teile = r.extern ? { [s.netto ? Math.round(s.ust / s.netto * 100) : 0]: s.netto } : s.proSatz;
+    for (const k in teile) {
+      if (Number(k) === 19) b[81] += teile[k];
+      else if (Number(k) === 7) b[86] += teile[k];
+      else if (teile[k]) { frei += teile[k]; warn.push(`${esc(r.nr || 'Rechnung')}: ${eur(teile[k])} mit ${k} % USt ohne Steuerfall, nicht eingerechnet. Steuerfall in der Rechnung angeben oder mit dem Steuerberater klären.`); }
+    }
   }
-  // Zeitraum vor dem laufenden
-  let pm = quartal ? Math.floor(m / 3) * 3 - 3 : m - 1, py = y;
-  if (pm < 0) { pm += 12; py -= 1; }
-  let z = zr(py, pm);
-  if (tageBis(z.frist) < 0) z = zr(y, m);
-  const ust = S.rechnungen.filter((r) => zaehlt(r) && r.datum >= z.von && r.datum <= z.bis).reduce((a, r) => a + summen(r).ust, 0);
-  const vst = S.belege.filter((b) => b.datum >= z.von && b.datum <= z.bis).reduce((a, b) => a + num(b.vorsteuer), 0);
-  return Object.assign(z, { ust: r2(ust), vst: r2(vst), zahl: r2(ust - vst) });
+  for (const be of S.belege) {
+    if (!drin(be.datum)) continue;
+    n++;
+    if (be.rc === 'eu') b[46] += num(be.brutto);
+    else if (be.rc === 'welt') b[52] += num(be.brutto);
+    else if (!ku()) vst += num(be.vorsteuer);
+    if (!num(be.brutto)) warn.push(`Beleg ${esc(be.lieferant || 'ohne Lieferant')} vom ${dat(be.datum)} hat keinen Betrag.`);
+  }
+  const ganz = (x) => Math.trunc(r2(x));
+  const bas = {}; for (const k in b) bas[k] = ganz(b[k]);
+  const st = { 81: r2(bas[81] * 0.19), 86: r2(bas[86] * 0.07), 47: r2(bas[46] * 0.19), 53: r2(bas[52] * 0.19) };
+  const v67 = ku() ? 0 : r2(st[47] + st[53]);
+  const svz = z.dez && S.firma.turnus !== 'quartal' && S.firma.dauerfrist ? r2(num(S.steuer.svz)) : 0;
+  const ust = r2(st[81] + st[86] + st[47] + st[53]);
+  vst = r2(vst);
+  const zahl = r2(ust - vst - v67 - svz);
+  const rows = [
+    ['81', 'Umsätze zu 19 %', bas[81], `Steuer ${eur(st[81])} rechnet ELSTER selbst`, true],
+    ['86', 'Umsätze zu 7 %', bas[86], `Steuer ${eur(st[86])} rechnet ELSTER selbst`],
+    ['41', 'Warenlieferungen an Firmen in der EU (mit USt-IdNr.)', bas[41]],
+    ['43', 'Steuerfreie Ausfuhrlieferungen (außerhalb der EU)', bas[43]],
+    ['21', 'Dienstleistungen an Firmen in der EU (Reverse Charge)', bas[21]],
+    ['45', 'Übrige nicht steuerbare Umsätze (Leistung im Ausland)', bas[45]],
+    ['60', 'Umsätze, bei denen der Kunde die Steuer schuldet (§ 13b)', bas[60]],
+    ['46', 'Einkauf von Leistungen bei Firmen aus der EU ohne USt (z. B. Google, Meta)', bas[46]],
+    ['47', 'Steuer darauf, die du selbst schuldest', st[47], '', false, true],
+    ['52', 'Einkauf anderer Leistungen nach § 13b (z. B. Firmen außerhalb der EU)', bas[52]],
+    ['53', 'Steuer darauf, die du selbst schuldest', st[53], '', false, true],
+    ['66', 'Vorsteuer aus Rechnungen anderer Firmen', vst, '', true, true],
+    ['67', 'Vorsteuer aus den Einkäufen nach § 13b', v67, '', false, true],
+    ['39', 'Abzug der Sondervorauszahlung', svz, 'nur in der Dezember-Anmeldung', false, true],
+    ['83', zahl < 0 ? 'Ergebnis: Erstattung vom Finanzamt' : 'Ergebnis: an das Finanzamt zu zahlen', zahl, '', true, true]
+  ].filter((x) => x[2] || x[4]).map(([kz, t, wert, info, , cent]) => ({ kz, t, wert, info: info || '', cent: !!cent }));
+  return { z, rows, ust, vst: r2(vst + v67 + svz), zahl, n, warn, frei, nurRc: ku() && (bas[46] || bas[52]) };
+}
+const kzWert = (row) => row.cent ? row.wert.toFixed(2).replace('.', ',') : String(row.wert);
+function kzTabelle(rows) {
+  return `<table class="tab">${rows.map((x) => `<tr${x.kz === '83' ? ' style="font-weight:700"' : ''}><td style="white-space:nowrap">Kz ${x.kz}</td><td>${x.t}${x.info ? `<div class="small muted">${x.info}</div>` : ''}</td><td style="text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums">${x.cent ? eur(x.wert) : x.wert.toLocaleString('de-DE') + ' €'}</td><td style="text-align:right"><button class="chip" data-act="st-copy" data-k="${kzWert(x)}" aria-label="Wert für Kz ${x.kz} kopieren">Kopieren</button></td></tr>`).join('')}</table>`;
+}
+
+/* Zusammenfassende Meldung: EU-Geschäfte je Kunde und Quartal */
+function zm(von, bis) {
+  const m = {};
+  for (const r of S.rechnungen) {
+    const art = rcArt(r);
+    if (!zaehlt(r) || !art || !RC[art].zm || !(r.datum >= von && r.datum <= bis)) continue;
+    const id = String((r.kunde && r.kunde.ustid) || '').replace(/\s/g, '').toUpperCase();
+    const k = id + '|' + RC[art].zm;
+    m[k] = m[k] || { land: id.slice(0, 2), nr: id.slice(2), name: r.kunde.name, art: RC[art].zm, betrag: 0 };
+    m[k].betrag += summen(r).netto;
+  }
+  return Object.values(m).map((x) => Object.assign(x, { betrag: Math.trunc(r2(x.betrag)) }));
+}
+
+/* Gewinn: EÜR nach Zahlungseingang, bei Bilanz-Rechtsformen GuV-Vorschau nach Rechnungsdatum */
+function gewinn(jahr) {
+  const bilanz = BILANZ.includes(S.firma.rechtsform), j = String(jahr);
+  let ein = 0, offen = 0, nOffen = 0;
+  for (const r of S.rechnungen) {
+    if (!zaehlt(r)) continue;
+    const s = summen(r);
+    let tag = r.datum;
+    if (!bilanz) {
+      if (r.typ === 'gutschrift') { const o = S.rechnungen.find((x) => x.id === r.stornoVon); tag = o && o.bezahltAm ? r.datum : ''; }
+      else tag = r.bezahltAm || '';
+    }
+    if (tag.startsWith(j)) ein += s.netto;
+    if ((r.datum || '').startsWith(j) && r.typ !== 'gutschrift' && ['offen', 'ueberfaellig'].includes(reStatus(r).k)) { offen += s.brutto; nOffen++; }
+  }
+  const kat = {}, gross = [], ohne = [];
+  let aus = 0, bewirt = 0;
+  for (const b of S.belege) {
+    if (!(b.datum || '').startsWith(j)) continue;
+    const netto = r2(num(b.brutto) - num(b.vorsteuer));
+    if (!num(b.brutto)) ohne.push(b);
+    const k = b.kategorie || 'Ohne Kategorie';
+    kat[k] = r2((kat[k] || 0) + netto);
+    aus += netto;
+    if (k === 'Bewirtung') bewirt += netto;
+    if (netto > 800 && !['Miete', 'Versicherung', 'Fremdleistung', 'Werbung', 'Telefon und Internet', 'Wareneinkauf'].includes(k)) gross.push(b);
+  }
+  const nichtAbz = r2(bewirt * 0.3);
+  ein = r2(ein); aus = r2(aus);
+  return { bilanz, ein, aus, nichtAbz, gewinn: r2(ein - aus + nichtAbz), kat, gross, ohne, offen: r2(offen), nOffen };
+}
+
+/* Grobe Steuerschätzung. Tarif nach § 32a EStG, Grundtabelle (ledig), ohne andere Einkünfte und Abzüge */
+const EST_TARIF = {
+  2025: { g: [12096, 17443, 68480, 277825], a: 932.30, b: 176.64, c: 1015.13, d: 10911.92, e: 19246.67, soli: 19950 },
+  2026: { g: [12348, 17799, 69878, 277825], a: 914.51, b: 173.10, c: 1034.87, d: 11135.63, e: 19470.38, soli: 20350 }
+};
+function estTarif(zve, jahr) {
+  const t = EST_TARIF[Math.min(Math.max(jahr, 2025), 2026)], x = Math.floor(Math.max(0, zve));
+  let est;
+  if (x <= t.g[0]) est = 0;
+  else if (x <= t.g[1]) { const y = (x - t.g[0]) / 10000; est = (t.a * y + 1400) * y; }
+  else if (x <= t.g[2]) { const z = (x - t.g[1]) / 10000; est = (t.b * z + 2397) * z + t.c; }
+  else if (x <= t.g[3]) est = 0.42 * x - t.d;
+  else est = 0.45 * x - t.e;
+  return { est: Math.floor(est), soliGrenze: t.soli };
+}
+function schaetzung(jahr, gw) {
+  const rf = S.firma.rechtsform, g = Math.max(0, gw), z = [];
+  const hebe = num(S.steuer.hebesatz) || 400;
+  const gewerbe = rf && rf !== 'freiberufler';
+  const freibetrag = KAPITAL.includes(rf) ? 0 : 24500;
+  const mess = gewerbe ? Math.floor(Math.max(0, Math.floor(g / 100) * 100 - freibetrag) * 0.035) : 0;
+  const gewst = r2(mess * hebe / 100);
+  if (gewerbe) z.push(['Gewerbesteuer', gewst, `Hebesatz ${hebe} %${freibetrag ? ', nach Freibetrag 24.500 €' : ''}`]);
+  if (KAPITAL.includes(rf)) {
+    const kst = r2(g * 0.15);
+    z.push(['Körperschaftsteuer (15 %)', kst, '']);
+    z.push(['Solidaritätszuschlag', r2(kst * 0.055), '5,5 % der Körperschaftsteuer']);
+  } else if (['einzel', 'freiberufler', 'ek', ''].includes(rf || '')) {
+    const t = estTarif(g, jahr);
+    const anr = gewerbe ? Math.min(r2(mess * 4), gewst, t.est) : 0;
+    const est = Math.max(0, r2(t.est - anr));
+    const soli = est > t.soliGrenze ? r2(Math.min(est * 0.055, (est - t.soliGrenze) * 0.119)) : 0;
+    z.push(['Einkommensteuer', est, `ledig, ohne andere Einkünfte${anr ? `, nach Anrechnung der Gewerbesteuer (${eur(anr)})` : ''}`]);
+    if (soli) z.push(['Solidaritätszuschlag', soli, '']);
+  }
+  const summe = r2(z.reduce((a, x) => a + x[1], 0));
+  return { zeilen: z, summe, quote: g ? Math.round(summe / g * 100) : 0, personen: ['gbr', 'ohg'].includes(rf) };
+}
+
+/* Abgabefrist der Jahreserklärungen */
+function jahresFrist(j) {
+  if (S.steuer.berater) return werktag(j === 2024 ? '2026-04-30' : j === 2025 ? '2027-03-31' : iso(new Date(j + 2, 2, 0)));
+  return werktag(j === 2023 ? '2024-09-02' : `${j + 1}-07-31`);
+}
+
+/* Fristen der nächsten gut 12 Monate, dazu überfällige Voranmeldungen mit Daten */
+function fristen() {
+  const out = [], h = heute(), y0 = Number(h.slice(0, 4)), rf = S.firma.rechtsform, E = S.steuer.erledigt || {};
+  const bis = plusTage(h, 400);
+  const add = (datum, key, t, s, mitDaten) => {
+    datum = werktag(datum);
+    if (datum > bis || (datum < h && (E[key] || !mitDaten))) return;
+    out.push({ datum, key, t, s, erledigt: !!E[key] });
+  };
+  const d = (y, m, t) => `${y}-${String(m).padStart(2, '0')}-${String(t).padStart(2, '0')}`;
+  for (let n = -4; n <= 13; n++) {
+    const z = zrAus(zrRel(n));
+    if (z.bis >= h) { if (!ku()) add(z.frist, 'ustva-' + z.key, `Umsatzsteuer-Voranmeldung ${z.name}`, 'Abgeben und zahlen. Die Werte stehen im Reiter Steuern.', false); continue; }
+    const u = ustva(z);
+    if (!ku() || u.nurRc) add(z.frist, 'ustva-' + z.key, `Umsatzsteuer-Voranmeldung ${z.name}`, `${u.zahl < 0 ? 'Erstattung' : 'Zahllast'} ${eur(Math.abs(u.zahl))}. Abgeben und zahlen.`, u.n > 0);
+  }
+  if (S.rechnungen.some((r) => RC[rcArt(r)] && RC[rcArt(r)].zm)) {
+    const q0 = y0 * 4 + Math.floor((Number(h.slice(5, 7)) - 1) / 3);
+    for (let q = q0 - 2; q <= q0 + 3; q++) {
+      const y = Math.floor(q / 4), qi = q % 4;
+      const von = d(y, qi * 3 + 1, 1), ende = iso(new Date(y, qi * 3 + 3, 0));
+      const nd = new Date(y, qi * 3 + 3, 25);
+      add(iso(nd), `zm-${y}-Q${qi + 1}`, `Zusammenfassende Meldung ${qi + 1}. Quartal ${y}`, 'EU-Geschäfte an das Bundeszentralamt für Steuern melden (BZSt-Online-Portal).', zm(von, ende).length > 0);
+    }
+  }
+  for (const y of [y0, y0 + 1]) {
+    if (!ku() && S.firma.dauerfrist && S.firma.turnus !== 'quartal') add(d(y, 2, 10), 'svz-' + y, `Sondervorauszahlung Umsatzsteuer ${y}`, 'Ein Elftel der Vorjahres-Zahllast, wegen der Dauerfristverlängerung.');
+    if (num(S.steuer.vzEst)) for (const m of [3, 6, 9, 12]) add(d(y, m, 10), `vz-${y}-${m}`, `${KAPITAL.includes(rf) ? 'Körperschaftsteuer' : 'Einkommensteuer'}-Vorauszahlung ${eur(num(S.steuer.vzEst))}`, 'Laut Vorauszahlungsbescheid des Finanzamts.');
+    if (num(S.steuer.vzGew)) for (const m of [2, 5, 8, 11]) add(d(y, m, 15), `gv-${y}-${m}`, `Gewerbesteuer-Vorauszahlung ${eur(num(S.steuer.vzGew))}`, 'Laut Bescheid der Gemeinde.');
+  }
+  for (const j of [y0 - 2, y0 - 1]) {
+    const f = jahresFrist(j);
+    if (f >= h) add(f, 'jahr-' + j, `Steuererklärungen ${j} abgeben`, (rf ? RECHTSFORMEN[rf].jahr : 'Einkommensteuer, Umsatzsteuer, je nach Rechtsform Gewerbesteuer') + (S.steuer.berater ? '. Frist mit Steuerberater.' : '. Frist ohne Steuerberater.'));
+  }
+  if (KAPITAL.includes(rf) || rf === 'ohg') add(d(y0, 12, 31), 'offen-' + (y0 - 1), `Jahresabschluss ${y0 - 1} offenlegen`, 'Beim Unternehmensregister einreichen.');
+  return out.sort((a, b) => a.datum.localeCompare(b.datum));
+}
+
+function vSteuern() {
+  const rf = S.firma.rechtsform, y0 = new Date().getFullYear(), jahr = stJahr || y0;
+  const fr = fristen().filter((f) => !f.erledigt);
+  const next = fr[0];
+  const keys = []; for (let n = S.firma.turnus === 'quartal' ? -5 : -14; n <= 0; n++) keys.push(zrRel(n));
+  const zk = keys.includes(stZr) ? stZr : ustZeitraum().key;
+  const z = zrAus(zk), u = ustva(z), erl = S.steuer.erledigt['ustva-' + zk];
+  const qi = Math.floor((Number(z.bis.slice(5, 7)) - 1) / 3), qy = z.bis.slice(0, 4);
+  const zmL = zm(`${qy}-${String(qi * 3 + 1).padStart(2, '0')}-01`, iso(new Date(Number(qy), qi * 3 + 3, 0)));
+  const gw = gewinn(jahr), sch = schaetzung(jahr, gw.gewinn);
+  const uj = ustva({ von: jahr + '-01-01', bis: jahr + '-12-31', dez: false });
+  const tage = next ? tageBis(next.datum) : 0;
+  const fz = (f) => { const t = tageBis(f.datum); return t < 0 ? 'bad' : t <= 14 ? 'warn' : 'grey'; };
+  const fLi = (f) => `<li><span class="dot ${f.erledigt ? 'good' : fz(f)}"></span><div class="grow"><div><b>${dat(f.datum)}</b> ${f.t}${f.erledigt ? ' <span class="pill good">erledigt</span>' : ''}</div><div class="small muted">${f.s}</div></div><button data-act="st-done" data-k="${f.key}">${f.erledigt ? 'Wieder offen' : 'Erledigt'}</button></li>`;
+  const ustCard = !ku() || u.nurRc;
+  return `
+  <h1>Steuern</h1>
+  <div class="status"><div class="big">${next ? `<span class="pill ${fz(next)}">${tage < 0 ? 'Überfällig' : tage <= 14 ? 'Bald fällig' : 'Nächste Frist'}</span> ${next.t}` : '<span class="pill good">Gut</span> Keine offenen Fristen'}</div>
+  <p class="small muted" style="margin-top:6px">${next ? `Bis ${dat(next.datum)}${tage < 0 ? `, seit ${-tage} Tagen vorbei` : `, in ${tage} Tagen`}. ${next.s}` : 'Alle bekannten Fristen sind erledigt.'}</p></div>
+
+  ${ustCard ? `<div class="card">
+    <h2>Umsatzsteuer-Voranmeldung</h2>
+    <label>Zeitraum<select id="stZr">${keys.slice().reverse().map((k) => `<option value="${k}"${k === zk ? ' selected' : ''}>${zrAus(k).name}${S.steuer.erledigt['ustva-' + k] ? ' ✓' : ''}</option>`).join('')}</select></label>
+    <p style="margin-top:10px">${u.zahl >= 0 ? `<b>${eur(u.zahl)}</b> an das Finanzamt` : `<b>${eur(-u.zahl)}</b> Erstattung vom Finanzamt`}, Abgabe und Zahlung bis <b>${dat(z.frist)}</b>. ${erl ? `<span class="pill good">abgegeben am ${dat(erl)}</span>` : ''}</p>
+    ${u.warn.length ? `<ul class="checks">${u.warn.map((w) => `<li class="miss">${w}</li>`).join('')}</ul>` : ''}
+    <h3>Diese Werte trägst du in ELSTER ein</h3>
+    ${kzTabelle(u.rows)}
+    <div class="btns"><button class="primary" data-act="st-done" data-k="ustva-${zk}">${erl ? 'Doch nicht abgegeben' : 'Als abgegeben markieren'}</button><button data-act="st-csv" data-k="${zk}">Als Datei für den Steuerberater</button><button data-act="st-print" data-k="${zk}">Drucken / PDF</button></div>
+    <details><summary>So gibst du sie in ELSTER ab</summary><ol class="small" style="margin:8px 0 0;padding-left:20px">
+      <li>Bei <b>Mein ELSTER</b> anmelden (elster.de).</li>
+      <li>„Formulare &amp; Leistungen“, dann „Alle Formulare“, „Unternehmen“, „Umsatzsteuer-Voranmeldung ${z.von.slice(0, 4)}“.</li>
+      <li>Zeitraum „${esc(z.name)}“ wählen, dann die Kennzahlen oben eintragen. Mit „Kopieren“ landet der Wert in der Zwischenablage.</li>
+      <li>Prüfen lassen, die Zahl bei Kz 83 vergleichen und absenden. Danach hier „Als abgegeben markieren“.</li></ol>
+      <p class="small muted" style="margin-top:6px">ELSTER nimmt im Browser keine Dateien entgegen. Die direkte Übertragung aus der App braucht einen Server und eine Zulassung als Software-Hersteller und kommt später.</p></details>
+    <details><summary>So rechnet die App</summary><p class="small muted" style="margin-top:8px">${u.n} Rechnungen und Belege im Zeitraum ${dat(z.von)} bis ${dat(z.bis)}. ${S.steuer.versteuerung === 'ist' ? 'Ist-Versteuerung: Rechnungen zählen im Monat der Zahlung.' : 'Soll-Versteuerung: Rechnungen zählen nach Rechnungsdatum.'} Beträge ohne Cent wie in ELSTER, die Steuer darauf mit Cent. Vorsteuer zählt nach Belegdatum. Kleine Abweichungen zur Summe deiner Rechnungen kommen vom Abschneiden der Cent.</p></details>
+  </div>` : `<div class="card"><h2>Umsatzsteuer-Voranmeldung</h2><p>Als Kleinunternehmer gibst du keine Voranmeldung ab, nur eine Umsatzsteuer-Jahreserklärung.</p><p class="small muted">Ausnahme: Kaufst du Leistungen bei Firmen im Ausland ohne Umsatzsteuer ein (z. B. Werbung bei Google oder Meta), schuldest du die Steuer selbst. Markiere solche Belege, dann erscheint hier die Anmeldung.</p></div>`}
+
+  ${zmL.length ? `<div class="card"><h2>Zusammenfassende Meldung ${qi + 1}. Quartal ${qy}</h2>
+    <p class="small muted">Meldest du bis zum 25. nach Quartalsende im BZSt-Online-Portal. Bei Warenlieferungen über 50.000 € im Quartal monatlich.</p>
+    <table class="tab"><tr><th>Kunde</th><th>USt-IdNr.</th><th>Art</th><th style="text-align:right">Betrag</th></tr>${zmL.map((x) => `<tr><td>${esc(x.name)}</td><td>${x.land && x.nr ? esc(x.land + x.nr) : '<span class="pill bad">fehlt</span>'}</td><td>${x.art === 'S' ? 'Dienstleistung' : 'Lieferung'}</td><td style="text-align:right">${x.betrag.toLocaleString('de-DE')} €</td></tr>`).join('')}</table>
+    <div class="btns"><button data-act="st-zm" data-k="${qy}-${qi}">Liste als Datei</button></div></div>` : ''}
+
+  <div class="card">
+    <h2>${gw.bilanz ? 'Gewinn-Vorschau (GuV)' : 'Einnahmen-Überschuss-Rechnung'} ${jahr}</h2>
+    <div class="filters" role="group">${[y0, y0 - 1, y0 - 2].map((y) => `<button class="chip" data-act="st-jahr" data-k="${y}" aria-pressed="${y === jahr}">${y}</button>`).join('')}</div>
+    <table class="tab"><tr><td>Einnahmen (netto)</td><td style="text-align:right">${eur(gw.ein)}</td></tr>
+      <tr><td>minus Ausgaben (netto)</td><td style="text-align:right">− ${eur(gw.aus)}</td></tr>
+      ${gw.nichtAbz ? `<tr><td>plus nicht abziehbarer Teil der Bewirtung (30 %)</td><td style="text-align:right">${eur(gw.nichtAbz)}</td></tr>` : ''}
+      <tr><td><b>Gewinn</b></td><td style="text-align:right"><b>${eur(gw.gewinn)}</b></td></tr></table>
+    <p class="small muted" style="margin-top:6px">${gw.bilanz ? 'Nach Rechnungsdatum gerechnet. Die echte Bilanz mit Abschreibungen, Rückstellungen und Kapitalkonten macht der Steuerberater.' : 'Einnahmen zählen, wenn das Geld da ist (Zuflussprinzip). Ausgaben nach Belegdatum.'} Umsatzsteuer und Vorsteuer sind herausgerechnet; in der Anlage EÜR stehen sie als eigene Zeilen und heben sich mit den Zahlungen ans Finanzamt auf.</p>
+    ${gw.nOffen || gw.gross.length || gw.ohne.length ? `<ul class="checks">
+      ${gw.nOffen ? `<li class="miss">${gw.nOffen} Rechnung${gw.nOffen > 1 ? 'en' : ''} über ${eur(gw.offen)} noch offen${gw.bilanz ? ', stehen als Forderung in der Bilanz' : ', zählen erst im Jahr der Zahlung'}.</li>` : ''}
+      ${gw.gross.length ? `<li class="miss">${gw.gross.length} Beleg${gw.gross.length > 1 ? 'e' : ''} über 800 € netto (${gw.gross.slice(0, 3).map((b) => esc(b.lieferant || 'ohne Name')).join(', ')}). Geräte und andere Anschaffungen werden über mehrere Jahre abgeschrieben, das prüft der Steuerberater.</li>` : ''}
+      ${gw.ohne.length ? `<li class="miss">${gw.ohne.length} Beleg${gw.ohne.length > 1 ? 'e' : ''} ohne Betrag fehlen in der Rechnung.</li>` : ''}</ul>` : ''}
+    ${Object.keys(gw.kat).length ? `<details><summary>Ausgaben nach Kategorie</summary><table class="tab">${Object.entries(gw.kat).sort((a, b) => b[1] - a[1]).map(([k, v]) => `<tr><td>${esc(k)}</td><td style="text-align:right">${eur(v)}</td></tr>`).join('')}</table></details>` : ''}
+  </div>
+
+  <div class="card">
+    <h2>Wie viel solltest du für ${jahr} zurücklegen?</h2>
+    ${!rf ? '<p>Trag im Reiter <b>Firma</b> deine Rechtsform ein, dann rechnet die App hier.</p>' : sch.personen ? `<p>Bei ${esc(RECHTSFORMEN[rf].label)} zahlt jeder Gesellschafter seine Einkommensteuer selbst auf seinen Gewinnanteil.${sch.zeilen.length ? ` Die Gesellschaft zahlt etwa <b>${eur(sch.summe)}</b> Gewerbesteuer, falls sie gewerblich ist.` : ''}</p>` : `
+    <p><b>Etwa ${eur(sch.summe)}</b>${sch.quote ? `, rund ${sch.quote} % vom Gewinn` : ''}. ${jahr === y0 ? 'Gerechnet mit dem Gewinn bis heute, das Jahr läuft noch.' : ''}</p>
+    <table class="tab">${sch.zeilen.map(([t, v, s]) => `<tr><td>${t}${s ? `<div class="small muted">${s}</div>` : ''}</td><td style="text-align:right">${eur(v)}</td></tr>`).join('')}</table>`}
+    <p class="small muted" style="margin-top:6px">Grobe Schätzung ohne Kirchensteuer, Krankenversicherung, Freibeträge und andere Einkünfte. Bereits gezahlte Vorauszahlungen sind nicht abgezogen.</p>
+    <details><summary>Werte für die Umsatzsteuer-Jahreserklärung ${jahr}</summary>${kzTabelle(uj.rows.filter((x) => !['39', '83'].includes(x.kz)))}<p class="small muted" style="margin-top:6px">Summe aller Rechnungen und Belege des Jahres, gleiche Regeln wie bei der Voranmeldung. In der Jahreserklärung heißen einige Felder anders.</p></details>
+    ${rf ? `<p class="small" style="margin-top:8px"><b>Abzugeben für ${jahr}:</b> ${RECHTSFORMEN[rf].jahr}. Frist ${dat(jahresFrist(jahr))}${S.steuer.berater ? ' (mit Steuerberater)' : ''}.</p>` : ''}
+  </div>
+
+  <div class="card">
+    <h2>Fristen</h2>
+    ${fr.length ? `<ul class="todo">${fr.slice(0, 6).map(fLi).join('')}</ul>${fr.length > 6 ? `<details><summary>${fr.length - 6} weitere</summary><ul class="todo" style="margin-top:8px">${fr.slice(6).map(fLi).join('')}</ul></details>` : ''}` : '<p class="muted">Keine offenen Fristen.</p>'}
+    <div class="btns"><button data-act="st-ics">In meinen Kalender übernehmen</button></div>
+    <p class="small muted" style="margin-top:6px">Die Kalender-Datei erinnert dich drei Tage vor jeder Frist. Fällt eine Frist auf ein Wochenende oder einen bundesweiten Feiertag, gilt der nächste Werktag.</p>
+  </div>
+
+  <details class="card"><summary>Einstellungen für Steuern</summary>
+    <form id="stForm" class="grid2" style="margin-top:10px">
+      <label>Versteuerung<select name="versteuerung"><option value="soll"${S.steuer.versteuerung !== 'ist' ? ' selected' : ''}>Soll (nach Rechnungsdatum)</option><option value="ist"${S.steuer.versteuerung === 'ist' ? ' selected' : ''}>Ist (nach Zahlungseingang)</option></select></label>
+      <label>Gewerbesteuer-Hebesatz deiner Gemeinde %<input name="hebesatz" inputmode="numeric" value="${esc(S.steuer.hebesatz)}"></label>
+      <label>Sondervorauszahlung € (bei Dauerfristverlängerung)<input name="svz" inputmode="decimal" value="${esc(S.steuer.svz ? String(S.steuer.svz).replace('.', ',') : '')}" placeholder="0,00"></label>
+      <label>${KAPITAL.includes(rf) ? 'Körperschaftsteuer' : 'Einkommensteuer'}-Vorauszahlung je Quartal €<input name="vzEst" inputmode="decimal" value="${esc(S.steuer.vzEst ? String(S.steuer.vzEst).replace('.', ',') : '')}" placeholder="laut Bescheid"></label>
+      <label>Gewerbesteuer-Vorauszahlung je Quartal €<input name="vzGew" inputmode="decimal" value="${esc(S.steuer.vzGew ? String(S.steuer.vzGew).replace('.', ',') : '')}" placeholder="laut Bescheid"></label>
+      <p class="small muted full" style="margin:0">Vorauszahlungen nur eintragen, wenn ein Bescheid sie festsetzt. Dann erscheinen sie bei den Fristen.</p>
+      <label class="check" style="align-self:end"><input type="checkbox" name="berater"${S.steuer.berater ? ' checked' : ''}> Ein Steuerberater macht meine Jahreserklärungen</label>
+    </form>
+    <p class="small muted" style="margin-top:6px">Turnus der Voranmeldung, Dauerfristverlängerung und Rechtsform stellst du im Reiter Firma ein. Alles hier ist eine Hilfe zum Ausfüllen und ersetzt keine Steuerberatung.</p>
+  </details>`;
+}
+async function saveSteuer() {
+  const f = $('#stForm'); if (!f) return;
+  S.steuer.versteuerung = f.elements.versteuerung.value;
+  S.steuer.hebesatz = num(f.elements.hebesatz.value) || 400;
+  for (const k of ['svz', 'vzEst', 'vzGew']) S.steuer[k] = num(f.elements[k].value);
+  S.steuer.berater = f.elements.berater.checked;
+  await save(); render();
+  const d = $('#stForm'); if (d) d.closest('details').open = true;
+  toast('Gespeichert');
+}
+const icsEsc = (s) => String(s).replace(/<[^>]+>/g, '').replace(/[\\;,]/g, (c) => '\\' + c).replace(/\n/g, '\\n');
+function stIcs() {
+  const stamp = new Date().toISOString().replace(/[-:]/g, '').slice(0, 15) + 'Z';
+  const L = ['BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//Steuer-Cockpit//DE', 'CALSCALE:GREGORIAN', 'X-WR-CALNAME:Steuerfristen'];
+  for (const f of fristen().filter((x) => !x.erledigt && x.datum >= heute())) {
+    L.push('BEGIN:VEVENT', `UID:${f.key}@steuer-cockpit`, 'DTSTAMP:' + stamp, 'DTSTART;VALUE=DATE:' + f.datum.replace(/-/g, ''), 'DTEND;VALUE=DATE:' + plusTage(f.datum, 1).replace(/-/g, ''),
+      'SUMMARY:' + icsEsc(f.t), 'DESCRIPTION:' + icsEsc(f.s), 'BEGIN:VALARM', 'ACTION:DISPLAY', 'DESCRIPTION:' + icsEsc(f.t), 'TRIGGER:-P3D', 'END:VALARM', 'END:VEVENT');
+  }
+  L.push('END:VCALENDAR');
+  download('steuerfristen.ics', L.join('\r\n') + '\r\n', 'text/calendar');
+  toast('Kalender-Datei gespeichert. Öffnen, um die Termine zu übernehmen.');
+}
+function stCsv(key) {
+  const u = ustva(zrAus(key)), f = S.firma;
+  const q = (s) => '"' + String(s).replace(/<[^>]+>/g, '').replace(/"/g, '""') + '"';
+  const L = [['Umsatzsteuer-Voranmeldung', u.z.name], ['Firma', f.name], ['Steuernummer', f.steuernr], ['Versteuerung', S.steuer.versteuerung === 'ist' ? 'Ist' : 'Soll'], [], ['Kennzahl', 'Bezeichnung', 'Wert']]
+    .concat(u.rows.map((x) => ['Kz ' + x.kz, x.t, kzWert(x)]));
+  download(`UStVA-${key}.csv`, '﻿' + L.map((r) => r.map(q).join(';')).join('\r\n'), 'text/csv');
+}
+function stZm(k) {
+  const [y, qi] = k.split('-').map(Number);
+  const L = zm(`${y}-${String(qi * 3 + 1).padStart(2, '0')}-01`, iso(new Date(y, qi * 3 + 3, 0)));
+  const rows = [['Länderkennzeichen', 'USt-IdNr.', 'Betrag (EUR)', 'Art der Leistung', 'Kunde']].concat(L.map((x) => [x.land, x.nr, x.betrag, x.art, x.name]));
+  download(`ZM-${y}-Q${qi + 1}.csv`, '﻿' + rows.map((r) => r.map((v) => '"' + String(v).replace(/"/g, '""') + '"').join(';')).join('\r\n'), 'text/csv');
+}
+function stPrint(key) {
+  const u = ustva(zrAus(key)), f = S.firma;
+  $('#druck').innerHTML = `<h1>Umsatzsteuer-Voranmeldung ${esc(u.z.name)}</h1>
+    <p>${esc(f.name)}${f.steuernr ? ' · Steuernummer ' + esc(f.steuernr) : ''}<br>Zeitraum ${dat(u.z.von)} bis ${dat(u.z.bis)}, Frist ${dat(u.z.frist)}, ${S.steuer.versteuerung === 'ist' ? 'Ist' : 'Soll'}-Versteuerung</p>
+    <table class="p"><tr><th>Kennzahl</th><th>Bezeichnung</th><th class="r">Wert</th></tr>${u.rows.map((x) => `<tr><td>Kz ${x.kz}</td><td>${x.t}</td><td class="r">${x.cent ? eur(x.wert) : x.wert.toLocaleString('de-DE') + ' €'}</td></tr>`).join('')}</table>
+    <p style="font-size:8.5pt">Erstellt mit dem Steuer-Cockpit am ${dat(heute())}. Ausfüllhilfe, keine Steuerberatung.</p>`;
+  const alt = document.title; document.title = 'UStVA-' + key;
+  window.print();
+  setTimeout(() => { document.title = alt; }, 500);
 }
 
 /* ---------- Navigation ---------- */
@@ -296,14 +651,15 @@ const ICONS = {
   rechnungen: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3h12v18l-3-2-3 2-3-2-3 2z"/><path d="M9 8h6M9 12h6M9 16h3"/></svg>',
   belege: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="6" width="18" height="14" rx="2"/><circle cx="12" cy="13" r="3.5"/><path d="M8 6l1.5-2h5L16 6"/></svg>',
   bank: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 10l9-6 9 6M5 10v8M9.5 10v8M14.5 10v8M19 10v8M3 21h18"/></svg>',
+  steuern: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="3" width="16" height="18" rx="2"/><path d="M8 7h8M9 17l6-6"/><circle cx="9.5" cy="11.5" r=".8"/><circle cx="14.5" cy="16.5" r=".8"/></svg>',
   firma: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 21V5a1 1 0 0 1 1-1h9a1 1 0 0 1 1 1v16M15 9h4a1 1 0 0 1 1 1v11M3 21h18M8 8h3M8 12h3M8 16h3"/></svg>'
 };
-const TABS = [['start', 'Übersicht'], ['angebote', 'Angebote'], ['rechnungen', 'Rechnungen'], ['belege', 'Belege'], ['bank', 'Bank'], ['firma', 'Firma']];
+const TABS = [['start', 'Übersicht'], ['angebote', 'Angebote'], ['rechnungen', 'Rechnungen'], ['belege', 'Belege'], ['bank', 'Bank'], ['steuern', 'Steuern'], ['firma', 'Firma']];
 
 function render() {
   $('#tabs').innerHTML = TABS.map(([k, t]) => `<button data-act="tab" data-k="${k}"${k === tab ? ' aria-current="page"' : ''}>${ICONS[k]}<span>${t}</span></button>`).join('');
   $('#firmname').textContent = S.firma.name || '';
-  const v = { start: vStart, angebote: vAngebote, rechnungen: vRechnungen, belege: vBelege, bank: vBank, firma: vFirma }[tab];
+  const v = { start: vStart, angebote: vAngebote, rechnungen: vRechnungen, belege: vBelege, bank: vBank, steuern: vSteuern, firma: vFirma }[tab];
   $('#app').innerHTML = v();
 }
 
@@ -324,7 +680,7 @@ function vStart() {
   for (const r of ueber.filter(mahnenFaellig).slice(0, 5)) todos.push({ c: 'bad', t: `${esc(r.kunde.name || 'Kunde')} zahlt ${eur(summen(r).brutto)} nicht`, s: `Rechnung ${esc(r.nr)}, fällig seit ${dat(r.faellig)}.${mahnStufe(r) ? ` ${MAHN[mahnStufe(r)].t} vom ${dat(letzteMahnung(r).datum)} ist abgelaufen.` : ''} Zahlung prüfen, dann ${MAHN[mahnStufe(r) + 1].t} schicken.`, act: 'mahnen', id: r.id, b: mahnStufe(r) ? 'Mahnen' : 'Erinnern' });
   for (const r of ueber.filter((x) => !mahnenFaellig(x) && mahnStufe(x) && tageBis(letzteMahnung(x).frist) >= 0).slice(0, 3)) todos.push({ c: 'warn', t: `Warten auf Zahlung von ${esc(r.kunde.name || 'Kunde')}`, s: `${MAHN[mahnStufe(r)].t} zu ${esc(r.nr)} läuft bis ${dat(letzteMahnung(r).frist)}. Danach erinnert dich die App an den nächsten Schritt.`, act: 'open-re', id: r.id, b: 'Öffnen' });
   for (const r of ueber.filter((x) => mahnStufe(x) >= 3 && tageBis(letzteMahnung(x).frist) < 0).slice(0, 3)) todos.push({ c: 'bad', t: `${esc(r.kunde.name || 'Kunde')} zahlt trotz letzter Mahnung nicht`, s: `Rechnung ${esc(r.nr)}, ${eur(summen(r).brutto)}. Mahnbescheid oder Inkasso prüfen.`, act: 'open-re', id: r.id, b: 'Öffnen' });
-  if (!ku() && S.firma.name && tageBis(z.frist) <= 10) todos.push({ c: 'warn', t: `Umsatzsteuer-Voranmeldung ${z.name} bis ${dat(z.frist)} abgeben`, s: `Geschätzte Zahllast ${eur(z.zahl)}. Abgabe vorerst über ELSTER oder den Steuerberater.`, });
+  if (S.firma.name) for (const f of fristen().filter((x) => !x.erledigt && tageBis(x.datum) <= 10)) todos.push({ c: tageBis(f.datum) < 0 ? 'bad' : 'warn', t: `${f.t} bis ${dat(f.datum)}`, s: f.s, act: 'tab', k: 'steuern', b: 'Ansehen' });
   for (const a of angOffen.filter((a) => a.gueltigBis && tageBis(a.gueltigBis) <= 5).slice(0, 3)) todos.push({ c: 'warn', t: `Angebot an ${esc(a.kunde.name || 'Kunde')} läuft in ${tageBis(a.gueltigBis)} Tagen ab`, s: `${esc(a.nr)}, ${eur(summen(a).netto)} netto. Nachfassen?`, act: 'open-an', id: a.id, b: 'Öffnen' });
   const entw = S.rechnungen.filter((r) => r.status === 'entwurf');
   if (entw.length) todos.push({ c: 'warn', t: `${entw.length} Rechnungsentwurf${entw.length > 1 ? 'e' : ''} noch nicht gestellt`, s: 'Erst nach „Rechnung stellen“ bekommt sie eine Nummer und zählt zum Umsatz.', act: 'tab', k: 'rechnungen', b: 'Ansehen' });
@@ -354,15 +710,15 @@ function vStart() {
     <h2>Wie viel Umsatzsteuer fällt für ${esc(z.name)} an?</h2>
     <p>${z.zahl >= 0 ? `Voraussichtlich <b>${eur(z.zahl)}</b> ans Finanzamt` : `Voraussichtlich <b>${eur(-z.zahl)}</b> Erstattung vom Finanzamt`}, Abgabe und Zahlung bis <b>${dat(z.frist)}</b> (in ${tageBis(z.frist)} Tagen).</p>
     <details><summary>So ist die Zahl entstanden</summary>
-      <table class="tab"><tr><td>Umsatzsteuer aus deinen Rechnungen</td><td style="text-align:right">${eur(z.ust)}</td></tr>
-      <tr><td>minus Vorsteuer aus deinen Belegen</td><td style="text-align:right">− ${eur(z.vst)}</td></tr>
+      <table class="tab"><tr><td>Umsatzsteuer</td><td style="text-align:right">${eur(z.ust)}</td></tr>
+      <tr><td>minus Vorsteuer${S.firma.dauerfrist && S.firma.turnus !== 'quartal' && z.dez ? ' und Sondervorauszahlung' : ''}</td><td style="text-align:right">− ${eur(z.vst)}</td></tr>
       <tr><td><b>Ergebnis</b></td><td style="text-align:right"><b>${eur(z.zahl)}</b></td></tr></table>
-      <p class="small muted" style="margin-top:6px">Zeitraum ${dat(z.von)} bis ${dat(z.bis)}. Gerechnet nach Rechnungsdatum (Soll-Versteuerung). Bei Ist-Versteuerung zählt das Zahlungsdatum, dann weicht die Zahl ab. Fällt der 10. auf ein Wochenende, verschiebt sich die Frist auf den nächsten Werktag.${S.firma.dauerfrist ? ' Mit Dauerfristverlängerung (+1 Monat).' : ''} Die Abgabe über ELSTER kommt in einer späteren Ausbaustufe.</p>
+      <p class="small muted" style="margin-top:6px">Zeitraum ${dat(z.von)} bis ${dat(z.bis)}. ${S.steuer.versteuerung === 'ist' ? 'Gerechnet nach Zahlungseingang (Ist-Versteuerung).' : 'Gerechnet nach Rechnungsdatum (Soll-Versteuerung).'}${S.firma.dauerfrist ? ' Mit Dauerfristverlängerung (+1 Monat).' : ''} Die Werte zum Eintragen in ELSTER stehen im Reiter <a href="#" data-act="tab" data-k="steuern">Steuern</a>.</p>
     </details>
   </div>`}
   <details class="card"><summary>Was kann die App schon, was kommt noch?</summary>
-    <p class="small" style="margin-top:8px"><b>Schon da:</b> Angebote und Rechnungen schreiben, als PDF drucken, als E-Rechnung (XRechnung) speichern, Angebot mit einem Tipp in eine Rechnung umwandeln, Storno per Stornorechnung, Belege und alte Rechnungen hochladen, Kontoauszüge (CSV) einlesen und Zahlungen Rechnungen zuordnen, Umsatzsteuer schätzen, Sicherung.</p>
-    <p class="small"><b>Kommt noch:</b> Login und Speicherung auf einem Server, Texterkennung für Belege, direkte Qonto-Verbindung, Buchungen nach SKR03/SKR04, Abgabe über ELSTER, Jahreserklärungen.</p>
+    <p class="small" style="margin-top:8px"><b>Schon da:</b> Angebote und Rechnungen schreiben, als PDF drucken, als E-Rechnung (XRechnung) speichern, Angebot mit einem Tipp in eine Rechnung umwandeln, Storno per Stornorechnung, Belege und alte Rechnungen hochladen, Kontoauszüge (CSV) einlesen und Zahlungen Rechnungen zuordnen, Umsatzsteuer-Voranmeldung mit ELSTER-Kennzahlen, Zusammenfassende Meldung, EÜR bzw. Gewinn-Vorschau, Steuerschätzung, Fristen mit Kalender-Erinnerung, Sicherung.</p>
+    <p class="small"><b>Kommt noch:</b> Login und Speicherung auf einem Server, Texterkennung für Belege, direkte Qonto-Verbindung, Buchungen nach SKR03/SKR04, direkte Abgabe über ELSTER, vollständige Jahreserklärungen.</p>
     <p class="small muted">Deine Daten liegen nur in diesem Browser auf diesem Gerät. Andere Geräte sehen sie nicht. Lade regelmäßig eine Sicherung herunter. Die Ablage hier ist noch keine GoBD-konforme Archivierung.</p>
   </details>`;
 }
@@ -637,11 +993,11 @@ function neuesDoc(typ) {
 function readEditor() {
   const f = $('#edForm'); if (!f) return;
   const g = (n) => (f.elements[n] ? f.elements[n].value : '');
-  Object.assign(edit, { datum: g('datum'), leistungsdatum: g('leistungsdatum'), faellig: g('faellig'), gueltigBis: g('gueltigBis'), hinweis: g('hinweis') });
+  Object.assign(edit, { datum: g('datum'), leistungsdatum: g('leistungsdatum'), faellig: g('faellig'), gueltigBis: g('gueltigBis'), hinweis: g('hinweis'), rc: edit.ku ? '' : g('rc') });
   edit.kunde = { name: g('k_name').trim(), adresse: g('k_adresse').trim(), ustid: g('k_ustid').trim(), email: g('k_email').trim(), leitweg: g('k_leitweg').trim() };
   edit.positionen = [...f.querySelectorAll('.pos')].map((p) => ({
     text: p.querySelector('[name=p_text]').value, menge: num(p.querySelector('[name=p_menge]').value), einheit: p.querySelector('[name=p_einheit]').value,
-    preis: num(p.querySelector('[name=p_preis]').value), ust: edit.ku ? 0 : num(p.querySelector('[name=p_ust]').value)
+    preis: num(p.querySelector('[name=p_preis]').value), ust: edit.ku || edit.rc ? 0 : num(p.querySelector('[name=p_ust]').value)
   }));
 }
 function pflichtDoc(d) {
@@ -652,7 +1008,8 @@ function pflichtDoc(d) {
   c.push(['Rechnungsdatum', !!d.datum]);
   c.push(['Leistungsdatum oder -zeitraum', !!d.leistungsdatum]);
   c.push(['Jede Position mit Beschreibung und Preis', d.positionen.length > 0 && d.positionen.every((p) => p.text.trim() && num(p.menge) !== 0)]);
-  c.push([d.ku ? 'Hinweis auf Kleinunternehmerregelung' : 'Steuersatz und Steuerbetrag', true]);
+  if (RC[d.rc] && RC[d.rc].idPflicht) c.push(['USt-IdNr. des Kunden (EU-Geschäft)', /^[A-Z]{2}[0-9A-Z+*]{2,12}$/.test(String(d.kunde.ustid || '').replace(/\s/g, '').toUpperCase())]);
+  c.push([d.ku ? 'Hinweis auf Kleinunternehmerregelung' : RC[d.rc] ? 'Hinweis auf den Steuerfall' : 'Steuersatz und Steuerbetrag', true]);
   c.push(['Fortlaufende Rechnungsnummer', true]);
   return c;
 }
@@ -663,14 +1020,14 @@ function posHtml(p, i) {
     <label>Menge<input name="p_menge" inputmode="decimal" value="${esc(String(p.menge).replace('.', ','))}"></label>
     <label>Einheit<input name="p_einheit" value="${esc(p.einheit)}" list="einheiten"></label>
     <label>Einzelpreis netto €<input name="p_preis" inputmode="decimal" value="${esc(p.preis ? String(p.preis).replace('.', ',') : '')}" placeholder="0,00"></label>
-    ${edit.ku ? '<input type="hidden" name="p_ust" value="0">' : `<label>USt<select name="p_ust">${[19, 7, 0].map((v) => `<option value="${v}"${num(p.ust) === v ? ' selected' : ''}>${v} %</option>`).join('')}</select></label>`}
+    ${edit.ku || edit.rc ? '<input type="hidden" name="p_ust" value="0">' : `<label>USt<select name="p_ust">${[19, 7, 0].map((v) => `<option value="${v}"${num(p.ust) === v ? ' selected' : ''}>${v} %</option>`).join('')}</select></label>`}
     <div style="display:flex;gap:6px;align-items:end;justify-content:space-between"><span class="sum">${eur(s)}</span><button type="button" class="del" data-act="pos-del" data-i="${i}" aria-label="Position entfernen">✕</button></div>
   </div>`;
 }
 function totalsHtml(d) {
   const s = summen(d);
   return `<div class="totals"><div><span>Netto</span><span>${eur(s.netto)}</span></div>
-    ${d.ku ? `<div><span>Umsatzsteuer</span><span>0,00 €</span></div>` : Object.keys(s.proSatz).sort((a, b) => b - a).map((k) => `<div><span>USt ${k} % auf ${eur(s.proSatz[k])}</span><span>${eur(r2(s.proSatz[k] * k / 100))}</span></div>`).join('')}
+    ${d.ku || d.rc ? `<div><span>Umsatzsteuer</span><span>0,00 €</span></div>` : Object.keys(s.proSatz).sort((a, b) => b - a).map((k) => `<div><span>USt ${k} % auf ${eur(s.proSatz[k])}</span><span>${eur(r2(s.proSatz[k] * k / 100))}</span></div>`).join('')}
     <div class="gross"><span>Gesamt</span><span>${eur(s.brutto)}</span></div></div>`;
 }
 function vEditor() {
@@ -687,7 +1044,9 @@ function vEditor() {
       <label>Kunde<input name="k_name" list="kunden" value="${esc(d.kunde.name)}" placeholder="Firmen- oder Personenname"></label>
       <label>E-Mail (optional)<input name="k_email" type="email" value="${esc(d.kunde.email)}"></label>
       <label class="full">Anschrift<textarea name="k_adresse" rows="2" placeholder="Straße Nr.&#10;PLZ Ort">${esc(d.kunde.adresse)}</textarea></label>
-      <label>USt-IdNr. des Kunden (optional)<input name="k_ustid" value="${esc(d.kunde.ustid)}"></label>
+      <label>USt-IdNr. des Kunden${RC[d.rc] && RC[d.rc].idPflicht ? '' : ' (optional)'}<input name="k_ustid" value="${esc(d.kunde.ustid)}"></label>
+      ${d.ku ? '' : `<label>Steuerfall<select name="rc"><option value="">Normal, mit deutscher Umsatzsteuer</option>${Object.entries(RC).map(([k, v]) => `<option value="${k}"${k === rcArt(d) ? ' selected' : ''}>${v.t}</option>`).join('')}</select></label>`}
+      ${RC[d.rc] ? `<p class="small muted full" style="margin:0">Ohne Umsatzsteuer. Auf der Rechnung steht: „${RC[d.rc].hinweis}“</p>` : ''}
       ${isRe ? `<label>Leitweg-ID (nur bei Behörden)<input name="k_leitweg" value="${esc(d.kunde.leitweg)}" placeholder="z. B. 991-12345-67"></label>` : ''}
     </div>
     <h3>Wann?</h3>
@@ -936,6 +1295,7 @@ function vBeleg(b) {
       <label>Betrag brutto €<input name="brutto" inputmode="decimal" value="${esc(b.brutto ? String(b.brutto).replace('.', ',') : '')}" placeholder="0,00"></label>
       <label>Steuersatz<select name="ustSatz">${[19, 7, 0].map((v) => `<option value="${v}"${num(b.ustSatz) === v ? ' selected' : ''}>${v} %</option>`).join('')}</select></label>
       <label>Vorsteuer €<input name="vorsteuer" inputmode="decimal" value="${esc(b.vorsteuer !== '' ? String(b.vorsteuer).replace('.', ',') : '')}" placeholder="wird berechnet"></label>
+      <label>Umsatzsteuer auf dem Beleg<select name="rc"><option value="">Normal, mit deutscher USt</option><option value="eu"${b.rc === 'eu' ? ' selected' : ''}>Keine, Firma aus der EU (z. B. Google, Meta)</option><option value="welt"${b.rc === 'welt' ? ' selected' : ''}>Keine, Firma außerhalb der EU</option></select></label>
       <label>Kategorie<select name="kategorie"><option value="">Bitte wählen</option>${KATEGORIEN.map((k) => `<option${k === b.kategorie ? ' selected' : ''}>${k}</option>`).join('')}</select></label>
       <label class="full">Notiz (optional)<input name="notiz" value="${esc(b.notiz)}"></label>
     </div>
@@ -947,7 +1307,7 @@ function vBeleg(b) {
 function calcVst() {
   const f = $('#beForm'); if (!f) return;
   const br = num(f.elements.brutto.value), s = num(f.elements.ustSatz.value);
-  f.elements.vorsteuer.placeholder = ku() ? '0,00' : String(r2(br - br / (1 + s / 100)).toFixed(2)).replace('.', ',');
+  f.elements.vorsteuer.placeholder = ku() || f.elements.rc.value ? '0,00' : String(r2(br - br / (1 + s / 100)).toFixed(2)).replace('.', ',');
 }
 async function storeFile(prefix) {
   if (!pendingFile) return null;
@@ -961,7 +1321,8 @@ async function saveBeleg() {
   const br = num(f.elements.brutto.value), s = num(f.elements.ustSatz.value);
   const vstIn = f.elements.vorsteuer.value.trim();
   Object.assign(b, { lieferant: f.elements.lieferant.value.trim(), datum: f.elements.datum.value, brutto: br, ustSatz: s, kategorie: f.elements.kategorie.value, notiz: f.elements.notiz.value.trim() });
-  b.vorsteuer = ku() ? 0 : (vstIn ? num(vstIn) : r2(br - br / (1 + s / 100)));
+  b.rc = f.elements.rc.value;
+  b.vorsteuer = ku() || b.rc ? 0 : (vstIn ? num(vstIn) : r2(br - br / (1 + s / 100)));
   const fi = await storeFile('b');
   if (fi) { if (b.dateiId) await idbDel('datei:' + b.dateiId); Object.assign(b, fi); }
   if (!b.dateiId && !br) return toast('Bitte eine Datei wählen oder einen Betrag eintragen.');
@@ -1021,6 +1382,7 @@ function druck(d, titel) {
     ${d.ku ? '' : Object.keys(s.proSatz).sort((a, b) => b - a).map((k) => `<div><span>USt ${k} %</span><span>${eur(r2(s.proSatz[k] * k / 100))}</span></div>`).join('')}
     <div class="g"><span>Gesamtbetrag</span><span>${eur(s.brutto)}</span></div></div>
     ${d.ku ? `<p>${KU_HINWEIS}</p>` : ''}
+    ${RC[d.rc] ? `<p>${RC[d.rc].hinweis}</p>` : ''}
     ${isRe && d.typ !== 'gutschrift' && d.faellig ? `<p>Bitte überweisen Sie den Betrag bis zum ${dat(d.faellig)} unter Angabe der Rechnungsnummer${f.iban ? ' auf das unten genannte Konto' : ''}.</p>` : ''}
     ${d.hinweis ? `<p style="white-space:pre-line">${esc(d.hinweis)}</p>` : ''}
     ${fussHtml()}`;
@@ -1054,11 +1416,11 @@ function xrechnung(r) {
   const credit = r.typ === 'gutschrift';
   const adr = kundenAdresse;
   const k = adr(r.kunde.adresse);
-  const kat = (satz) => r.ku ? 'E' : (satz > 0 ? 'S' : 'Z');
+  const kat = (satz) => r.ku ? 'E' : RC[r.rc] ? RC[r.rc].xml : (satz > 0 ? 'S' : 'Z');
   const sub = r.ku ? [[0, s.netto]] : Object.entries(s.proSatz).map(([k2, v]) => [Number(k2), v]);
   const taxSub = sub.map(([satz, basis]) => `
       <cac:TaxSubtotal><cbc:TaxableAmount currencyID="EUR">${a(r2(basis))}</cbc:TaxableAmount><cbc:TaxAmount currencyID="EUR">${a(r2(basis * satz / 100))}</cbc:TaxAmount>
-        <cac:TaxCategory><cbc:ID>${kat(satz)}</cbc:ID><cbc:Percent>${satz}</cbc:Percent>${r.ku ? '<cbc:TaxExemptionReason>Kleinunternehmer gemäß § 19 UStG</cbc:TaxExemptionReason>' : ''}<cac:TaxScheme><cbc:ID>VAT</cbc:ID></cac:TaxScheme></cac:TaxCategory></cac:TaxSubtotal>`).join('');
+        <cac:TaxCategory><cbc:ID>${kat(satz)}</cbc:ID><cbc:Percent>${satz}</cbc:Percent>${r.ku ? '<cbc:TaxExemptionReason>Kleinunternehmer gemäß § 19 UStG</cbc:TaxExemptionReason>' : RC[r.rc] ? `<cbc:TaxExemptionReason>${RC[r.rc].hinweis}</cbc:TaxExemptionReason>` : ''}<cac:TaxScheme><cbc:ID>VAT</cbc:ID></cac:TaxScheme></cac:TaxCategory></cac:TaxSubtotal>`).join('');
   const lines = r.positionen.map((p, i) => `
   <cac:InvoiceLine><cbc:ID>${i + 1}</cbc:ID><cbc:InvoicedQuantity unitCode="${/std/i.test(p.einheit) ? 'HUR' : /tag/i.test(p.einheit) ? 'DAY' : 'C62'}">${num(p.menge)}</cbc:InvoicedQuantity><cbc:LineExtensionAmount currencyID="EUR">${a(r2(num(p.menge) * num(p.preis)))}</cbc:LineExtensionAmount>
     <cac:Item><cbc:Name>${x(p.text)}</cbc:Name><cac:ClassifiedTaxCategory><cbc:ID>${kat(num(p.ust))}</cbc:ID><cbc:Percent>${r.ku ? 0 : num(p.ust)}</cbc:Percent><cac:TaxScheme><cbc:ID>VAT</cbc:ID></cac:TaxScheme></cac:ClassifiedTaxCategory></cac:Item>
@@ -1124,7 +1486,7 @@ function restore() {
       if (j.app !== 'steuer-cockpit' || !j.state) throw new Error('kein Format');
       if (!confirm('Die Sicherung ersetzt alle Daten auf diesem Gerät. Fortfahren?')) return;
       for (const [k, d] of Object.entries(j.dateien || {})) { const blob = await (await fetch(d.data)).blob(); await idbSet(k, { name: d.name, type: d.type, blob }); }
-      S = Object.assign(leer(), j.state); await save(); render(); toast('Sicherung eingespielt');
+      S = Object.assign(leer(), j.state, { steuer: Object.assign(leer().steuer, j.state.steuer || {}) }); await save(); render(); toast('Sicherung eingespielt');
     } catch (e) { toast('Diese Datei ist keine Sicherung des Steuer-Cockpits.'); }
   };
   inp.click();
@@ -1214,6 +1576,13 @@ const ACT = {
     b.rechnungId = null; await save(); vBuchung(b.id); render();
   },
   backup, restore,
+  'st-jahr': (el) => { stJahr = Number(el.dataset.k); render(); },
+  'st-done': async (el) => { const k = el.dataset.k; if (S.steuer.erledigt[k]) delete S.steuer.erledigt[k]; else S.steuer.erledigt[k] = heute(); await save(); render(); toast(S.steuer.erledigt[k] ? 'Als erledigt markiert' : 'Wieder offen'); },
+  'st-copy': async (el) => { try { await navigator.clipboard.writeText(el.dataset.k); toast(`${el.dataset.k} kopiert`); } catch (err) { toast('Kopieren geht hier nicht, bitte abtippen.'); } },
+  'st-csv': (el) => stCsv(el.dataset.k),
+  'st-zm': (el) => stZm(el.dataset.k),
+  'st-print': (el) => stPrint(el.dataset.k),
+  'st-ics': stIcs,
   wipe: async () => { if (!confirm('Wirklich alle Daten auf diesem Gerät löschen? Das kann nicht rückgängig gemacht werden.')) return; for (const k of await idbKeys()) await idbDel(k); S = leer(); render(); toast('Alle Daten gelöscht'); }
 };
 document.addEventListener('click', (e) => {
@@ -1231,6 +1600,10 @@ document.addEventListener('input', (e) => {
   }
 });
 document.addEventListener('change', async (e) => {
+  if (e.target.name === 'rc' && e.target.closest('#edForm')) { readEditor(); vEditor(); return; }
+  if (e.target.name === 'rc' && e.target.closest('#beForm')) calcVst();
+  if (e.target.id === 'stZr') { stZr = e.target.value; render(); return; }
+  if (e.target.closest('#stForm')) { saveSteuer(); return; }
   if (e.target.id === 'fileIn') {
     const file = e.target.files[0]; pendingFile = file || null;
     const pv = $('#filePrev'); if (!file) { pv.innerHTML = ''; return; }
