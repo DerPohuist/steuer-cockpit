@@ -2482,7 +2482,7 @@ function vDetailRe(id) {
     <details><summary>Warum kann ich die Rechnung nicht ändern oder löschen?</summary><p class="small muted" style="margin-top:6px">Eine gestellte Rechnung darf nach GoBD nicht mehr verändert werden, und die Nummern müssen lückenlos sein. Ist sie ganz falsch, stornierst du sie und schreibst eine neue. Stimmt nur ein Teil nicht (z. B. eine Position zu viel oder ein Preisnachlass), nimm „Teil gutschreiben“.</p></details>
   </div>
   <div class="dlg-foot">
-    ${!r.extern ? `<button data-act="print" data-id="${r.id}" data-t="re">Drucken / PDF</button><button data-act="xml" data-id="${r.id}">E-Rechnung (XML)</button><button data-act="mail" data-k="re" data-id="${r.id}">Per E-Mail</button>` : ''}
+    ${!r.extern ? `<button data-act="print" data-id="${r.id}" data-t="re">Drucken / PDF</button><button data-act="zugferd" data-id="${r.id}">PDF mit E-Rechnung</button><button data-act="xml" data-id="${r.id}">XRechnung (XML)</button><button data-act="mail" data-k="re" data-id="${r.id}">Per E-Mail</button>` : ''}
     ${!r.extern && r.typ !== 'gutschrift' && r.status !== 'storniert' ? `<button data-act="abls" data-k="ls" data-t="re" data-id="${r.id}">Lieferschein</button>` : ''}
     ${!r.extern && r.typ !== 'gutschrift' && r.status !== 'storniert' ? `<button data-act="vl-neu" data-k="rechnung" data-id="${r.id}">Regelmäßig wiederholen</button>` : ''}
     ${!r.extern && r.typ !== 'gutschrift' && r.status !== 'storniert' ? `<button data-act="korrektur" data-id="${r.id}">Teil gutschreiben</button>` : ''}
@@ -2491,10 +2491,10 @@ function vDetailRe(id) {
   </div>`);
 }
 
-function vERechnungFehlt(r, m) {
+function vERechnungFehlt(r, m, pdf) {
   const k = kundenAdresse(r.kunde.adresse), firma = m.some((x) => x[1] === 'firma');
   openDlg(`${head('E-Rechnung ' + esc(r.nr))}<form id="nachForm" class="dlg-body" autocomplete="off">
-    <p>Für eine gültige E-Rechnung (XRechnung) fehlt noch:</p>
+    <p>Für eine gültige E-Rechnung ${pdf ? '(PDF mit E-Rechnung)' : '(XRechnung)'} fehlt noch:</p>
     <ul class="checks">${m.map((x) => `<li class="miss">${x[0]}</li>`).join('')}</ul>
     ${firma ? '<p class="small">Deine eigenen Angaben trägst du im Reiter <b>Firma</b> ein, sie gelten dann für alle Rechnungen.</p>' : ''}
     ${m.some((x) => x[1] === 'kunde') || !r.kunde.leitweg ? `<h3>Angaben zum Kunden ergänzen</h3><div class="grid2">
@@ -2509,7 +2509,7 @@ function vERechnungFehlt(r, m) {
   <div class="dlg-foot">
     ${firma ? `<button data-act="tab" data-k="firma">Zu den Firmendaten</button>` : ''}
     <button data-act="open-re" data-id="${r.id}">Zurück</button>
-    ${m.every((x) => x[1] === 'kunde') ? `<button class="primary" data-act="kunde-nach" data-id="${r.id}">Speichern und E-Rechnung erzeugen</button>` : ''}
+    ${m.every((x) => x[1] === 'kunde') ? `<button class="primary" data-act="kunde-nach" data-id="${r.id}"${pdf ? ' data-pdf="1"' : ''}>Speichern und ${pdf ? 'PDF' : 'E-Rechnung'} erzeugen</button>` : ''}
   </div>`);
 }
 
@@ -2568,8 +2568,7 @@ async function saveMahnung(el) {
   druckMahnung(r, m);
 }
 function fussHtml() {
-  const f = S.firma;
-  return `<div class="fuss">${[[f.name, f.inhaber && gfLabel() + ': ' + f.inhaber, f.strasse, [f.plz, f.ort].join(' ')], [f.tel && 'Tel. ' + f.tel, f.email, f.steuernr && 'Steuernr. ' + f.steuernr, f.ustid && 'USt-IdNr. ' + f.ustid, REGISTER_RF.includes(f.rechtsform) && f.registernr && [f.registergericht, f.registernr].filter(Boolean).join(' ')], [f.bank, f.iban && 'IBAN ' + f.iban, f.bic && 'BIC ' + f.bic]].map((col) => `<div>${col.filter((x) => x && String(x).trim()).map(esc).join('<br>')}</div>`).join('')}</div>`;
+  return `<div class="fuss">${fussSpalten().map((col) => `<div>${col.map(esc).join('<br>')}</div>`).join('')}</div>`;
 }
 function druckMahnung(r, m) {
   const f = S.firma, s = summen(r), M = MAHN[m.stufe];
@@ -2886,10 +2885,10 @@ function vMail(k, id) {
       <label class="full">Text<textarea name="text" rows="10">${esc(v.text)}</textarea></label>
     </div>
     <div class="card" style="margin-top:12px"><b>So geht's</b><ol class="small" style="margin:6px 0 0;padding-left:20px">
-      <li><a href="#" data-act="print" data-id="${d.id}" data-t="${k}">${isRe ? 'Rechnung' : 'Angebot'} als PDF speichern</a> (im Druckfenster „Als PDF speichern“ wählen).</li>
-      ${isRe ? `<li>${xmlOk ? `<a href="#" data-act="xml" data-id="${d.id}">E-Rechnung (XML) speichern</a>. Firmenkunden müssen sie seit 2025 annehmen können, für Behörden ist sie Pflicht.` : 'Für die E-Rechnung fehlen noch Angaben. Öffne dafür „E-Rechnung (XML)“ in der Rechnung.'}</li>` : ''}
-      <li>Auf „E-Mail-Programm öffnen“ tippen und ${isRe ? 'die Dateien' : 'das PDF'} an die Mail anhängen.</li></ol></div>
-  </form><div class="dlg-foot"><button data-act="${isRe ? 'open-re' : 'open-an'}" data-id="${d.id}">Zurück</button><button data-act="mail-copy">Text kopieren</button>${isRe && xmlOk && navigator.canShare ? '<button data-act="mail-share">Teilen mit E-Rechnung</button>' : ''}<button class="primary" data-act="mail-los">E-Mail-Programm öffnen</button></div>`);
+      ${isRe ? `<li><a href="#" data-act="zugferd" data-id="${d.id}">PDF mit E-Rechnung speichern</a>. Das ist ein normales PDF, in dem die E-Rechnung steckt. Firmenkunden müssen E-Rechnungen seit 2025 annehmen können. Behörden wollen meist die <a href="#" data-act="xml" data-id="${d.id}">XRechnung (XML)</a>.</li>`
+        : `<li><a href="#" data-act="print" data-id="${d.id}" data-t="${k}">Angebot als PDF speichern</a> (im Druckfenster „Als PDF speichern“ wählen).</li>`}
+      <li>Auf „E-Mail-Programm öffnen“ tippen und die Datei an die Mail anhängen.</li></ol></div>
+  </form><div class="dlg-foot"><button data-act="${isRe ? 'open-re' : 'open-an'}" data-id="${d.id}">Zurück</button><button data-act="mail-copy">Text kopieren</button>${isRe && navigator.canShare ? '<button data-act="mail-share">Teilen mit PDF</button>' : ''}<button class="primary" data-act="mail-los">E-Mail-Programm öffnen</button></div>`);
 }
 async function mailVerschickt() { mailDoc.d.versendetAm = heute(); if (!mailDoc.d.kunde.email && $('#mailForm')) mailDoc.d.kunde.email = $('#mailForm').elements.an.value.trim(); await save(); render(); }
 const mailFelder = () => { const f = $('#mailForm').elements; return { an: f.an.value.trim(), betreff: f.betreff.value, text: f.text.value }; };
@@ -3001,10 +3000,11 @@ function xrechnung(r) {
   ${orig ? `<cac:BillingReference><cac:InvoiceDocumentReference><cbc:ID>${x(orig.nr)}</cbc:ID><cbc:IssueDate>${orig.datum}</cbc:IssueDate></cac:InvoiceDocumentReference></cac:BillingReference>` : ''}${istSchluss(r) ? r.abzuege.map((z) => `<cac:BillingReference><cac:InvoiceDocumentReference><cbc:ID>${x(z.nr)}</cbc:ID><cbc:IssueDate>${z.datum}</cbc:IssueDate></cac:InvoiceDocumentReference></cac:BillingReference>`).join('') : ''}
   <cac:AccountingSupplierParty><cac:Party>
     ${f.email ? `<cbc:EndpointID schemeID="EM">${x(f.email)}</cbc:EndpointID>` : ''}
+    ${(!f.ustid || rcKat === 'O') && (f.steuernr || f.registernr) ? `<cac:PartyIdentification><cbc:ID>${x(f.steuernr || f.registernr)}</cbc:ID></cac:PartyIdentification>` : ''}
     <cac:PostalAddress><cbc:StreetName>${x(f.strasse)}</cbc:StreetName><cbc:CityName>${x(f.ort)}</cbc:CityName><cbc:PostalZone>${x(f.plz)}</cbc:PostalZone><cac:Country><cbc:IdentificationCode>DE</cbc:IdentificationCode></cac:Country></cac:PostalAddress>
     ${f.ustid && rcKat !== 'O' ? `<cac:PartyTaxScheme><cbc:CompanyID>${x(f.ustid)}</cbc:CompanyID><cac:TaxScheme><cbc:ID>VAT</cbc:ID></cac:TaxScheme></cac:PartyTaxScheme>` : ''}
     ${f.steuernr ? `<cac:PartyTaxScheme><cbc:CompanyID>${x(f.steuernr)}</cbc:CompanyID><cac:TaxScheme><cbc:ID>FC</cbc:ID></cac:TaxScheme></cac:PartyTaxScheme>` : ''}
-    <cac:PartyLegalEntity><cbc:RegistrationName>${x(f.name)}</cbc:RegistrationName></cac:PartyLegalEntity>
+    <cac:PartyLegalEntity><cbc:RegistrationName>${x(f.name)}</cbc:RegistrationName>${REGISTER_RF.includes(f.rechtsform) && f.registernr ? `<cbc:CompanyID>${x(f.registernr)}</cbc:CompanyID>` : ''}</cac:PartyLegalEntity>
     <cac:Contact><cbc:Name>${x(f.inhaber || f.name)}</cbc:Name><cbc:Telephone>${x(f.tel || '-')}</cbc:Telephone><cbc:ElectronicMail>${x(f.email || '-')}</cbc:ElectronicMail></cac:Contact>
   </cac:Party></cac:AccountingSupplierParty>
   <cac:AccountingCustomerParty><cac:Party>
@@ -3021,6 +3021,258 @@ function xrechnung(r) {
   <cac:LegalMonetaryTotal><cbc:LineExtensionAmount currencyID="EUR">${a(s.netto)}</cbc:LineExtensionAmount><cbc:TaxExclusiveAmount currencyID="EUR">${a(s.netto)}</cbc:TaxExclusiveAmount><cbc:TaxInclusiveAmount currencyID="EUR">${a(s.brutto)}</cbc:TaxInclusiveAmount>${vorab ? `<cbc:PrepaidAmount currencyID="EUR">${a(vorab)}</cbc:PrepaidAmount>` : ''}<cbc:PayableAmount currencyID="EUR">${a(r2(s.brutto - vorab))}</cbc:PayableAmount></cac:LegalMonetaryTotal>${lines}
 </ubl:Invoice>
 `;
+}
+/* ---------- ZUGFeRD / Factur-X: PDF mit eingebauter E-Rechnung (Profil EN 16931, XML im Format CII) ---------- */
+function fussSpalten() {
+  const f = S.firma;
+  return [[f.name, f.inhaber && gfLabel() + ': ' + f.inhaber, f.strasse, [f.plz, f.ort].join(' ')], [f.tel && 'Tel. ' + f.tel, f.email, f.steuernr && 'Steuernr. ' + f.steuernr, f.ustid && 'USt-IdNr. ' + f.ustid, REGISTER_RF.includes(f.rechtsform) && f.registernr && [f.registergericht, f.registernr].filter(Boolean).join(' ')], [f.bank, f.iban && 'IBAN ' + f.iban, f.bic && 'BIC ' + f.bic]]
+    .map((col) => col.filter((x) => x && String(x).trim()).map(String));
+}
+function ciiXml(r) {
+  const f = S.firma, s = summenVoll(r), x = (v) => esc(v || ''), a = (n) => r2(n).toFixed(2);
+  const d102 = (iso) => `<udt:DateTimeString format="102">${String(iso).replace(/-/g, '')}</udt:DateTimeString>`;
+  const credit = r.typ === 'gutschrift', k = kundenAdresse(r.kunde.adresse), land = kundenLand(r);
+  const rcKat = !r.ku && RC[r.rc] ? RC[r.rc].xml : '';
+  const kat = (satz) => r.ku ? 'E' : rcKat || (satz > 0 ? 'S' : 'Z');
+  const satzEl = (v) => rcKat === 'O' ? '' : `<ram:RateApplicablePercent>${rcKat || r.ku ? 0 : v}</ram:RateApplicablePercent>`;
+  const sub = r.ku ? [[0, s.netto]] : Object.entries(s.proSatz).map(([k2, v]) => [Number(k2), v]);
+  const vorab = istSchluss(r) ? r2(r.abzuege.reduce((q, z) => q + num(z.brutto), 0)) : 0;
+  const orig = r.stornoVon ? S.rechnungen.find((y) => y.id === r.stornoVon) : null;
+  const unit = (p) => /std/i.test(p.einheit) ? 'HUR' : /tag/i.test(p.einheit) ? 'DAY' : 'C62';
+  const lines = r.positionen.map((p, i) => `
+    <ram:IncludedSupplyChainTradeLineItem>
+      <ram:AssociatedDocumentLineDocument><ram:LineID>${i + 1}</ram:LineID></ram:AssociatedDocumentLineDocument>
+      <ram:SpecifiedTradeProduct><ram:Name>${x(p.text)}</ram:Name></ram:SpecifiedTradeProduct>
+      <ram:SpecifiedLineTradeAgreement><ram:NetPriceProductTradePrice><ram:ChargeAmount>${a(num(p.preis))}</ram:ChargeAmount></ram:NetPriceProductTradePrice></ram:SpecifiedLineTradeAgreement>
+      <ram:SpecifiedLineTradeDelivery><ram:BilledQuantity unitCode="${unit(p)}">${num(p.menge)}</ram:BilledQuantity></ram:SpecifiedLineTradeDelivery>
+      <ram:SpecifiedLineTradeSettlement>
+        <ram:ApplicableTradeTax><ram:TypeCode>VAT</ram:TypeCode><ram:CategoryCode>${kat(num(p.ust))}</ram:CategoryCode>${satzEl(r.ku ? 0 : num(p.ust))}</ram:ApplicableTradeTax>
+        ${num(p.rabatt) ? `<ram:SpecifiedTradeAllowanceCharge><ram:ChargeIndicator><udt:Indicator>false</udt:Indicator></ram:ChargeIndicator><ram:CalculationPercent>${num(p.rabatt)}</ram:CalculationPercent><ram:BasisAmount>${a(posBasis(p))}</ram:BasisAmount><ram:ActualAmount>${a(posRabatt(p))}</ram:ActualAmount><ram:ReasonCode>95</ram:ReasonCode><ram:Reason>Rabatt</ram:Reason></ram:SpecifiedTradeAllowanceCharge>` : ''}
+        <ram:SpecifiedTradeSettlementLineMonetarySummation><ram:LineTotalAmount>${a(posNetto(p))}</ram:LineTotalAmount></ram:SpecifiedTradeSettlementLineMonetarySummation>
+      </ram:SpecifiedLineTradeSettlement>
+    </ram:IncludedSupplyChainTradeLineItem>`).join('');
+  const befreiung = r.ku ? '<ram:ExemptionReason>Kleinunternehmer gemäß § 19 UStG</ram:ExemptionReason>' : rcKat ? `<ram:ExemptionReason>${RC[r.rc].hinweis}</ram:ExemptionReason>` : '';
+  const steuern = sub.map(([satz, basis]) => `
+      <ram:ApplicableTradeTax><ram:CalculatedAmount>${a(rcKat || r.ku ? 0 : basis * satz / 100)}</ram:CalculatedAmount><ram:TypeCode>VAT</ram:TypeCode>${befreiung}<ram:BasisAmount>${a(basis)}</ram:BasisAmount><ram:CategoryCode>${kat(satz)}</ram:CategoryCode>${rcKat ? `<ram:ExemptionReasonCode>${VATEX[rcKat]}</ram:ExemptionReasonCode>` : ''}${satzEl(satz)}</ram:ApplicableTradeTax>`).join('');
+  const adresse = (plz, str, ort, cc) => `<ram:PostalTradeAddress>${plz ? `<ram:PostcodeCode>${x(plz)}</ram:PostcodeCode>` : ''}${str ? `<ram:LineOne>${x(str)}</ram:LineOne>` : ''}${ort ? `<ram:CityName>${x(ort)}</ram:CityName>` : ''}<ram:CountryID>${cc}</ram:CountryID></ram:PostalTradeAddress>`;
+  const ustReg = (id) => id && rcKat !== 'O' ? `<ram:SpecifiedTaxRegistration><ram:ID schemeID="VA">${x(id.replace(/\s/g, ''))}</ram:ID></ram:SpecifiedTaxRegistration>` : '';
+  const notes = [r.ku ? KU_HINWEIS : '', r.hinweis || ''].filter(Boolean);
+  const zahlText = r.faellig && !credit ? `Zahlbar bis ${dat(r.faellig)}${hatSkonto(r) ? `\n#SKONTO#TAGE=${Math.round(num(r.skontoTage))}#PROZENT=${num(r.skontoProz).toFixed(2)}#\n` : ''}` : '';
+  return `<?xml version="1.0" encoding="UTF-8"?>
+<rsm:CrossIndustryInvoice xmlns:rsm="urn:un:unece:uncefact:data:standard:CrossIndustryInvoice:100" xmlns:ram="urn:un:unece:uncefact:data:standard:ReusableAggregateBusinessInformationEntity:100" xmlns:qdt="urn:un:unece:uncefact:data:standard:QualifiedDataType:100" xmlns:udt="urn:un:unece:uncefact:data:standard:UnqualifiedDataType:100">
+  <rsm:ExchangedDocumentContext><ram:GuidelineSpecifiedDocumentContextParameter><ram:ID>urn:cen.eu:en16931:2017</ram:ID></ram:GuidelineSpecifiedDocumentContextParameter></rsm:ExchangedDocumentContext>
+  <rsm:ExchangedDocument>
+    <ram:ID>${x(r.nr)}</ram:ID><ram:TypeCode>${credit ? 384 : r.art === 'abschlag' ? 326 : 380}</ram:TypeCode><ram:IssueDateTime>${d102(r.datum)}</ram:IssueDateTime>
+    ${notes.map((n) => `<ram:IncludedNote><ram:Content>${x(n)}</ram:Content></ram:IncludedNote>`).join('')}
+  </rsm:ExchangedDocument>
+  <rsm:SupplyChainTradeTransaction>${lines}
+    <ram:ApplicableHeaderTradeAgreement>
+      ${r.kunde.leitweg ? `<ram:BuyerReference>${x(r.kunde.leitweg)}</ram:BuyerReference>` : ''}
+      <ram:SellerTradeParty>${(!f.ustid || rcKat === 'O') && (f.steuernr || f.registernr) ? `<ram:ID>${x(f.steuernr || f.registernr)}</ram:ID>` : ''}<ram:Name>${x(f.name)}</ram:Name>${REGISTER_RF.includes(f.rechtsform) && f.registernr ? `<ram:SpecifiedLegalOrganization><ram:ID>${x(f.registernr)}</ram:ID></ram:SpecifiedLegalOrganization>` : ''}
+        ${f.tel || f.email ? `<ram:DefinedTradeContact><ram:PersonName>${x(f.inhaber || f.name)}</ram:PersonName>${f.tel ? `<ram:TelephoneUniversalCommunication><ram:CompleteNumber>${x(f.tel)}</ram:CompleteNumber></ram:TelephoneUniversalCommunication>` : ''}${f.email ? `<ram:EmailURIUniversalCommunication><ram:URIID>${x(f.email)}</ram:URIID></ram:EmailURIUniversalCommunication>` : ''}</ram:DefinedTradeContact>` : ''}
+        ${adresse(f.plz, f.strasse, f.ort, 'DE')}
+        ${f.email ? `<ram:URIUniversalCommunication><ram:URIID schemeID="EM">${x(f.email)}</ram:URIID></ram:URIUniversalCommunication>` : ''}
+        ${ustReg(f.ustid)}${f.steuernr ? `<ram:SpecifiedTaxRegistration><ram:ID schemeID="FC">${x(f.steuernr)}</ram:ID></ram:SpecifiedTaxRegistration>` : ''}
+      </ram:SellerTradeParty>
+      <ram:BuyerTradeParty><ram:Name>${x(r.kunde.name)}</ram:Name>
+        ${adresse(k.plz, k.strasse, k.ort, land)}
+        ${r.kunde.email ? `<ram:URIUniversalCommunication><ram:URIID schemeID="EM">${x(r.kunde.email)}</ram:URIID></ram:URIUniversalCommunication>` : ''}
+        ${ustReg(r.kunde.ustid)}
+      </ram:BuyerTradeParty>
+    </ram:ApplicableHeaderTradeAgreement>
+    <ram:ApplicableHeaderTradeDelivery>
+      ${rcKat === 'K' ? `<ram:ShipToTradeParty><ram:Name>${x(r.kunde.name)}</ram:Name>${adresse(k.plz, k.strasse, k.ort, land)}</ram:ShipToTradeParty>` : ''}
+      <ram:ActualDeliverySupplyChainEvent><ram:OccurrenceDateTime>${d102(r.leistungsdatum || r.datum)}</ram:OccurrenceDateTime></ram:ActualDeliverySupplyChainEvent>
+    </ram:ApplicableHeaderTradeDelivery>
+    <ram:ApplicableHeaderTradeSettlement>
+      ${r.nr ? `<ram:PaymentReference>${x(r.nr)}</ram:PaymentReference>` : ''}
+      <ram:InvoiceCurrencyCode>EUR</ram:InvoiceCurrencyCode>
+      ${f.iban ? `<ram:SpecifiedTradeSettlementPaymentMeans><ram:TypeCode>58</ram:TypeCode><ram:PayeePartyCreditorFinancialAccount><ram:IBANID>${x(f.iban.replace(/\s/g, ''))}</ram:IBANID><ram:AccountName>${x(f.name)}</ram:AccountName></ram:PayeePartyCreditorFinancialAccount>${f.bic ? `<ram:PayeeSpecifiedCreditorFinancialInstitution><ram:BICID>${x(f.bic.replace(/\s/g, ''))}</ram:BICID></ram:PayeeSpecifiedCreditorFinancialInstitution>` : ''}</ram:SpecifiedTradeSettlementPaymentMeans>` : ''}${steuern}
+      ${zahlText ? `<ram:SpecifiedTradePaymentTerms><ram:Description>${x(zahlText)}</ram:Description><ram:DueDateDateTime>${d102(r.faellig)}</ram:DueDateDateTime></ram:SpecifiedTradePaymentTerms>` : ''}
+      <ram:SpecifiedTradeSettlementHeaderMonetarySummation><ram:LineTotalAmount>${a(s.netto)}</ram:LineTotalAmount><ram:TaxBasisTotalAmount>${a(s.netto)}</ram:TaxBasisTotalAmount><ram:TaxTotalAmount currencyID="EUR">${a(s.ust)}</ram:TaxTotalAmount><ram:GrandTotalAmount>${a(s.brutto)}</ram:GrandTotalAmount>${vorab ? `<ram:TotalPrepaidAmount>${a(vorab)}</ram:TotalPrepaidAmount>` : ''}<ram:DuePayableAmount>${a(s.brutto - vorab)}</ram:DuePayableAmount></ram:SpecifiedTradeSettlementHeaderMonetarySummation>
+      ${(orig ? [{ nr: orig.nr, datum: orig.datum }] : []).concat(istSchluss(r) ? r.abzuege : []).map((z) => `<ram:InvoiceReferencedDocument><ram:IssuerAssignedID>${x(z.nr)}</ram:IssuerAssignedID><ram:FormattedIssueDateTime><qdt:DateTimeString format="102">${String(z.datum).replace(/-/g, '')}</qdt:DateTimeString></ram:FormattedIssueDateTime></ram:InvoiceReferencedDocument>`).join('')}
+    </ram:ApplicableHeaderTradeSettlement>
+  </rsm:SupplyChainTradeTransaction>
+</rsm:CrossIndustryInvoice>
+`;
+}
+/* Was ein ZUGFeRD-PDF mindestens braucht (EN 16931), sonst lehnt die Buchhaltung des Kunden es ab */
+function zugferdFehlt(r) {
+  const f = S.firma, k = kundenAdresse(r.kunde.adresse), m = [];
+  if (!f.strasse || !f.plz || !f.ort) m.push(['Deine vollständige Anschrift', 'firma']);
+  if (!f.ustid && !f.steuernr) m.push(['Deine Steuernummer oder USt-IdNr.', 'firma']);
+  if (!k.plz || !k.ort) m.push(['Kundenanschrift mit PLZ und Ort in der letzten Zeile', 'kunde']);
+  const kat = RC[r.rc] && !r.ku ? RC[r.rc].xml : '';
+  if (['AE', 'K', 'G'].includes(kat) && !f.ustid) m.push(['Deine USt-IdNr. (Pflicht bei diesem Steuerfall)', 'firma']);
+  if (['AE', 'K'].includes(kat) && !r.kunde.ustid) m.push(['USt-IdNr. des Kunden (Pflicht bei diesem Steuerfall)', 'kunde']);
+  if (r.rc && r.rc !== 'inland13b' && kundenLand(r) === 'DE') m.push(['Land des Kunden (nicht Deutschland)', 'kunde']);
+  return m;
+}
+
+/* Bibliotheken für das PDF werden erst beim ersten Gebrauch geladen (feste Version, Prüfsumme gegen Manipulation) */
+const PDF_LIBS = [
+  ['https://cdn.jsdelivr.net/npm/pdf-lib@1.17.1/dist/pdf-lib.min.js', 'sha384-weMABwrltA6jWR8DDe9Jp5blk+tZQh7ugpCsF3JwSA53WZM9/14PjS5LAJNHNjAI', 'PDFLib'],
+  ['https://cdn.jsdelivr.net/npm/@pdf-lib/fontkit@1.1.1/dist/fontkit.umd.min.js', 'sha384-2p6U+1mmqF10USehFeRiyG2ESG9FwIqN+jxULn5w9jjQIihSn9Pt13dVCn/Hawjn', 'fontkit']];
+const PDF_FONTS = {
+  normal: ['https://cdn.jsdelivr.net/npm/@fontsource/source-sans-3@5.0.12/files/source-sans-3-latin-400-normal.woff', 'sha384-rBcRLtsNSx5Lvm+uF2Wk9hOqZ7kLUFnOCLT4FeCT88WiI1Qy4L9tc6q5rX8Acadc'],
+  fett: ['https://cdn.jsdelivr.net/npm/@fontsource/source-sans-3@5.0.12/files/source-sans-3-latin-700-normal.woff', 'sha384-bUNdssLxlXNUcj1i+m/+ZdtElbdELYn7ELUGr8cJ2YXxVVqQ8xzi1FTUbQ507HSj']
+};
+let pdfBereit = null;
+function ladePdfLibs() {
+  if (pdfBereit) return pdfBereit;
+  pdfBereit = (async () => {
+    for (const [src, integrity, glob] of PDF_LIBS) {
+      if (window[glob]) continue;
+      await new Promise((res, rej) => { const el = document.createElement('script'); el.src = src; el.integrity = integrity; el.crossOrigin = 'anonymous'; el.onload = res; el.onerror = () => rej(new Error('laden')); document.head.appendChild(el); });
+    }
+    const fonts = {};
+    for (const [k, [url, integrity]] of Object.entries(PDF_FONTS)) { const r = await fetch(url, { integrity, mode: 'cors' }); if (!r.ok) throw new Error('Schrift'); fonts[k] = new Uint8Array(await r.arrayBuffer()); }
+    return fonts;
+  })();
+  pdfBereit.catch(() => { pdfBereit = null; });
+  return pdfBereit;
+}
+/* Kleines sRGB-Farbprofil (ICC v2), das PDF/A als „Ausgabebedingung“ verlangt */
+function srgbIcc() {
+  const tags = [], enc = (s) => [...s].map((c) => c.charCodeAt(0));
+  const u32 = (n) => [(n >>> 24) & 255, (n >>> 16) & 255, (n >>> 8) & 255, n & 255];
+  const s15 = (v) => u32(Math.round(v * 65536) >>> 0);
+  const xyz = (X, Y, Z) => [...enc('XYZ '), 0, 0, 0, 0, ...s15(X), ...s15(Y), ...s15(Z)];
+  const desc = (t) => { const b = [...enc('desc'), 0, 0, 0, 0, ...u32(t.length + 1), ...enc(t), 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]; for (let i = 0; i < 67; i++) b.push(0); return b; };
+  const curv = [...enc('curv'), 0, 0, 0, 0, ...u32(1), 2, 0x33, 0, 0]; // Gamma 2,2 (Festkomma 8.8)
+  tags.push(['desc', desc('sRGB IEC61966-2.1')], ['cprt', [...enc('text'), 0, 0, 0, 0, ...enc('No copyright, use freely'), 0]], ['wtpt', xyz(0.9642, 1, 0.8249)],
+    ['rXYZ', xyz(0.4361, 0.2225, 0.0139)], ['gXYZ', xyz(0.3851, 0.7169, 0.0971)], ['bXYZ', xyz(0.1431, 0.0606, 0.7141)], ['rTRC', curv], ['gTRC', curv], ['bTRC', curv]);
+  let off = 128 + 4 + tags.length * 12; const table = [...u32(tags.length)], data = [];
+  for (const [sig, b] of tags) { while ((off + data.length) % 4) data.push(0); table.push(...enc(sig), ...u32(off + data.length), ...u32(b.length)); data.push(...b); }
+  const body = [...table, ...data], size = 128 + body.length;
+  const h = [...u32(size), 0, 0, 0, 0, 2, 0x10, 0, 0, ...enc('mntrRGB XYZ '), 0, 0x07, 0, 0x0b, 0, 0x02, 0, 0, 0, 0, 0, 0, ...enc('acsp'), 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, ...s15(0.9642), ...s15(1), ...s15(0.8249)];
+  while (h.length < 128) h.push(0);
+  return new Uint8Array([...h, ...body]);
+}
+/* Logo auf weißen Grund legen (PDF/A mag keine Transparenz) und als JPEG liefern */
+function logoFlach(dataUrl) {
+  return new Promise((res) => {
+    if (!dataUrl) return res(null);
+    const img = new Image();
+    img.onload = () => { const c = document.createElement('canvas'); c.width = img.naturalWidth; c.height = img.naturalHeight; const g = c.getContext('2d'); g.fillStyle = '#fff'; g.fillRect(0, 0, c.width, c.height); g.drawImage(img, 0, 0); c.toBlob((b) => b ? b.arrayBuffer().then((x) => res({ bytes: new Uint8Array(x), w: c.width, h: c.height })) : res(null), 'image/jpeg', 0.92); };
+    img.onerror = () => res(null); img.src = dataUrl;
+  });
+}
+async function zugferdPdf(r) {
+  const fonts = await ladePdfLibs();
+  const { PDFDocument, rgb, PDFName, PDFString, PDFHexString, PDFArray } = window.PDFLib;
+  const doc = await PDFDocument.create({ updateMetadata: false });
+  doc.registerFontkit(window.fontkit);
+  const fN = await doc.embedFont(fonts.normal, { subset: true }), fB = await doc.embedFont(fonts.fett, { subset: true });
+  const f = S.firma, s = summen(r), sv = istSchluss(r) ? summenVoll(r) : s, titel = docTitel(r), rab = hatRabatt(r), grau = rgb(0.33, 0.33, 0.33);
+  const W = 595.28, H = 841.89, L = 56, R = W - 50, FUSS = 92;
+  const breite = (t, sz, fo) => (fo || fN).widthOfTextAtSize(t, sz);
+  const umbruch = (t, sz, max, fo) => {
+    const out = [];
+    for (const absatz of String(t || '').split('\n')) {
+      let z = '';
+      for (const w of absatz.split(' ')) { const v = z ? z + ' ' + w : w; if (breite(v, sz, fo) > max && z) { out.push(z); z = w; } else z = v; }
+      out.push(z);
+    }
+    return out;
+  };
+  const seiten = []; let pg, y;
+  const neueSeite = () => { pg = doc.addPage([W, H]); seiten.push(pg); y = H - 50; };
+  const text = (t, x, yy, o = {}) => pg.drawText(String(t), { x: o.rechts ? x - breite(String(t), o.size || 9.5, o.font) : x, y: yy, size: o.size || 9.5, font: o.font || fN, color: o.color || rgb(0, 0, 0) });
+  const platz = (h) => { if (y - h < FUSS + 10) { neueSeite(); kopfTabelle(); } };
+  neueSeite();
+  // Kopf: Absender, Anschrift, Logo, Nummern
+  const logo = await logoFlach(f.logo);
+  let rechtsY = H - 50;
+  if (logo) { const im = await doc.embedJpg(logo.bytes), z = Math.min(170 / logo.w, 62 / logo.h, 1); pg.drawImage(im, { x: R - logo.w * z, y: H - 50 - logo.h * z, width: logo.w * z, height: logo.h * z }); rechtsY -= logo.h * z + 12; }
+  const absender = [f.name, f.strasse, [f.plz, f.ort].join(' ')].filter((q) => q && q.trim()).join(' · ');
+  text(absender, L, H - 128, { size: 7.5, color: grau }); pg.drawLine({ start: { x: L, y: H - 130 }, end: { x: L + breite(absender, 7.5), y: H - 130 }, thickness: 0.4, color: grau });
+  let ay = H - 146; text(r.kunde.name, L, ay, { font: fB }); ay -= 13;
+  for (const l of String(r.kunde.adresse || '').split('\n').concat(r.kunde.ustid ? ['USt-IdNr.: ' + r.kunde.ustid] : [])) { text(l, L, ay); ay -= 13; }
+  const meta = [[titel === 'Angebot' ? 'Angebotsnr.' : 'Rechnungsnr.', r.nr, true], ['Datum', dat(r.datum)], ['Leistungsdatum', dat(r.leistungsdatum || r.datum)]];
+  if (f.steuernr) meta.push(['Steuernr.', f.steuernr]); if (f.ustid) meta.push(['USt-IdNr.', f.ustid]);
+  let my = Math.min(rechtsY, H - 128); const mx = R - 190;
+  for (const [k2, v, fett] of meta) { text(k2, mx, my, { color: grau }); text(v, R, my, { rechts: true, font: fett ? fB : fN }); my -= 13; }
+  y = Math.min(ay, my) - 26;
+  text(titel, L, y, { size: 17, font: fB }); y -= 22;
+  if (r.stornoVon) { const o = S.rechnungen.find((q) => q.id === r.stornoVon) || {}; text(`${r.teil ? 'Korrektur' : 'Stornorechnung'} zur Rechnung ${o.nr || ''} vom ${dat(o.datum)}.`, L, y); y -= 18; }
+  // Positionen
+  const sp = [{ t: 'Pos.', w: 26 }, { t: 'Beschreibung', w: 0 }, { t: 'Menge', w: 62, r: 1 }, { t: 'Einzelpreis', w: 66, r: 1 }].concat(rab ? [{ t: 'Rabatt', w: 40, r: 1 }] : [], r.ku ? [] : [{ t: 'USt', w: 34, r: 1 }], [{ t: 'Betrag', w: 70, r: 1 }]);
+  sp[1].w = R - L - sp.reduce((q, c) => q + c.w, 0);
+  let xx = L; for (const c of sp) { c.x = xx; xx += c.w; }
+  const kopfTabelle = () => { for (const c of sp) text(c.t, c.r ? c.x + c.w - 2 : c.x + 2, y, { font: fB, size: 9, rechts: !!c.r }); y -= 6; pg.drawLine({ start: { x: L, y }, end: { x: R, y }, thickness: 0.6, color: grau }); y -= 13; };
+  kopfTabelle();
+  r.positionen.forEach((p, i) => {
+    const zeilen = umbruch(p.text, 9.5, sp[1].w - 8);
+    platz(zeilen.length * 12 + 8);
+    const werte = [String(i + 1), null, `${String(p.menge).replace('.', ',')} ${p.einheit || ''}`.trim(), eur(num(p.preis))].concat(rab ? [num(p.rabatt) ? String(p.rabatt).replace('.', ',') + ' %' : ''] : [], r.ku ? [] : [num(p.ust) + ' %'], [eur(posNetto(p))]);
+    werte.forEach((v, j) => { if (v != null) text(v, sp[j].r ? sp[j].x + sp[j].w - 2 : sp[j].x + 2, y, { rechts: !!sp[j].r }); });
+    zeilen.forEach((z, j) => text(z, sp[1].x + 2, y - j * 12));
+    y -= zeilen.length * 12 + 2; pg.drawLine({ start: { x: L, y }, end: { x: R, y }, thickness: 0.3, color: rgb(0.7, 0.7, 0.7) }); y -= 13;
+  });
+  // Summen
+  const sumZeilen = [['Netto', eur(sv.netto)]].concat(r.ku ? [] : Object.keys(sv.proSatz).sort((a2, b2) => b2 - a2).map((k2) => [`USt ${k2} %`, eur(r2(sv.proSatz[k2] * k2 / 100))]), [['Gesamtbetrag', eur(sv.brutto), true]]);
+  if (istSchluss(r)) { for (const a2 of r.abzuege) sumZeilen.push([`Abzüglich Abschlag ${a2.nr}`, '−' + eur(a2.brutto)]); sumZeilen.push(['Noch zu zahlen', eur(s.brutto), true]); }
+  platz(sumZeilen.length * 14 + 10); y -= 4;
+  const sx = R - 220;
+  for (const [k2, v, fett] of sumZeilen) { if (fett) { pg.drawLine({ start: { x: sx, y: y + 10 }, end: { x: R, y: y + 10 }, thickness: 0.8 }); } text(k2, sx, y, { font: fett ? fB : fN }); text(v, R, y, { rechts: true, font: fett ? fB : fN }); y -= fett ? 17 : 14; }
+  y -= 8;
+  // Hinweise
+  const abs = [];
+  if (r.ku) abs.push(KU_HINWEIS);
+  if (RC[r.rc]) abs.push(RC[r.rc].hinweis);
+  if (r.typ !== 'gutschrift' && r.faellig) abs.push(`Bitte überweisen Sie den Betrag bis zum ${dat(r.faellig)} unter Angabe der Rechnungsnummer${f.iban ? ' auf das unten genannte Konto' : ''}.${hatSkonto(r) ? ' ' + skontoText(r) : ''}`);
+  if (r.hinweis) abs.push(r.hinweis);
+  for (const a2 of abs) { const z = umbruch(a2, 9.5, R - L); platz(z.length * 13 + 6); for (const l of z) { text(l, L, y); y -= 13; } y -= 6; }
+  // Fuß auf jeder Seite
+  const spalten = fussSpalten(), bw = (R - L) / 3;
+  seiten.forEach((p2, i) => {
+    p2.drawLine({ start: { x: L, y: FUSS - 4 }, end: { x: R, y: FUSS - 4 }, thickness: 0.4, color: grau });
+    spalten.forEach((col, c) => col.forEach((l, j) => p2.drawText(l, { x: L + c * bw, y: FUSS - 16 - j * 10, size: 7.5, font: fN, color: grau })));
+    if (seiten.length > 1) p2.drawText(`Seite ${i + 1} von ${seiten.length}`, { x: R - breite(`Seite ${i + 1} von ${seiten.length}`, 7.5), y: 30, size: 7.5, font: fN, color: grau });
+  });
+  // PDF/A-3: Metadaten, Farbprofil, eingebettete E-Rechnung
+  const jetzt = new Date(), isoZ = jetzt.toISOString().replace(/\.\d+Z$/, 'Z'), titelText = `${titel} ${r.nr}`;
+  doc.setTitle(titelText, { showInWindowTitleBar: true }); doc.setAuthor(f.name || ''); doc.setCreator('Steuer-Cockpit'); doc.setProducer('Steuer-Cockpit mit pdf-lib'); doc.setCreationDate(jetzt); doc.setModificationDate(jetzt);
+  const ctx = doc.context, cat = doc.catalog;
+  const xml = new TextEncoder().encode(ciiXml(r));
+  const pdfDatum = PDFString.fromDate(jetzt);
+  const efStream = ctx.flateStream(xml, { Type: 'EmbeddedFile', Subtype: 'text/xml', Params: { Size: xml.length, ModDate: pdfDatum } });
+  const efRef = ctx.register(efStream);
+  const spec = ctx.register(ctx.obj({ Type: 'Filespec', F: PDFString.of('factur-x.xml'), UF: PDFHexString.fromText('factur-x.xml'), EF: { F: efRef, UF: efRef }, Desc: PDFHexString.fromText('Factur-X/ZUGFeRD-Rechnung'), AFRelationship: 'Alternative' }));
+  cat.set(PDFName.of('Names'), ctx.obj({ EmbeddedFiles: { Names: [PDFHexString.fromText('factur-x.xml'), spec] } }));
+  cat.set(PDFName.of('AF'), ctx.obj([spec]));
+  const xe = (t) => esc(t);
+  const xmp = `<?xpacket begin="﻿" id="W5M0MpCehiHzreSzNTczkc9d"?>
+<x:xmpmeta xmlns:x="adobe:ns:meta/"><rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">
+<rdf:Description rdf:about="" xmlns:pdfaid="http://www.aiim.org/pdfa/ns/id/"><pdfaid:part>3</pdfaid:part><pdfaid:conformance>B</pdfaid:conformance></rdf:Description>
+<rdf:Description rdf:about="" xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:format>application/pdf</dc:format><dc:title><rdf:Alt><rdf:li xml:lang="x-default">${xe(titelText)}</rdf:li></rdf:Alt></dc:title><dc:creator><rdf:Seq><rdf:li>${xe(f.name || '')}</rdf:li></rdf:Seq></dc:creator></rdf:Description>
+<rdf:Description rdf:about="" xmlns:xmp="http://ns.adobe.com/xap/1.0/"><xmp:CreatorTool>Steuer-Cockpit</xmp:CreatorTool><xmp:CreateDate>${isoZ}</xmp:CreateDate><xmp:ModifyDate>${isoZ}</xmp:ModifyDate><xmp:MetadataDate>${isoZ}</xmp:MetadataDate></rdf:Description>
+<rdf:Description rdf:about="" xmlns:pdf="http://ns.adobe.com/pdf/1.3/"><pdf:Producer>Steuer-Cockpit mit pdf-lib</pdf:Producer></rdf:Description>
+<rdf:Description rdf:about="" xmlns:fx="urn:factur-x:pdfa:CrossIndustryDocument:invoice:1p0#"><fx:DocumentType>INVOICE</fx:DocumentType><fx:DocumentFileName>factur-x.xml</fx:DocumentFileName><fx:Version>1.0</fx:Version><fx:ConformanceLevel>EN 16931</fx:ConformanceLevel></rdf:Description>
+<rdf:Description rdf:about="" xmlns:pdfaExtension="http://www.aiim.org/pdfa/ns/extension/" xmlns:pdfaSchema="http://www.aiim.org/pdfa/ns/schema#" xmlns:pdfaProperty="http://www.aiim.org/pdfa/ns/property#">
+<pdfaExtension:schemas><rdf:Bag><rdf:li rdf:parseType="Resource">
+<pdfaSchema:schema>Factur-X PDFA Extension Schema</pdfaSchema:schema><pdfaSchema:namespaceURI>urn:factur-x:pdfa:CrossIndustryDocument:invoice:1p0#</pdfaSchema:namespaceURI><pdfaSchema:prefix>fx</pdfaSchema:prefix>
+<pdfaSchema:property><rdf:Seq>
+${[['DocumentFileName', 'name of the embedded XML invoice file'], ['DocumentType', 'INVOICE'], ['Version', 'The actual version of the Factur-X XML schema'], ['ConformanceLevel', 'The conformance level of the embedded Factur-X data']].map(([n, d]) => `<rdf:li rdf:parseType="Resource"><pdfaProperty:name>${n}</pdfaProperty:name><pdfaProperty:valueType>Text</pdfaProperty:valueType><pdfaProperty:category>external</pdfaProperty:category><pdfaProperty:description>${d}</pdfaProperty:description></rdf:li>`).join('\n')}
+</rdf:Seq></pdfaSchema:property></rdf:li></rdf:Bag></pdfaExtension:schemas></rdf:Description>
+</rdf:RDF></x:xmpmeta>
+<?xpacket end="w"?>`;
+  const xmpBytes = new TextEncoder().encode(xmp);
+  cat.set(PDFName.of('Metadata'), ctx.register(ctx.stream(xmpBytes, { Type: 'Metadata', Subtype: 'XML', Length: xmpBytes.length })));
+  const icc = srgbIcc();
+  const iccRef = ctx.register(ctx.flateStream(icc, { N: 3 }));
+  cat.set(PDFName.of('OutputIntents'), ctx.obj([{ Type: 'OutputIntent', S: 'GTS_PDFA1', OutputConditionIdentifier: PDFString.of('sRGB IEC61966-2.1'), Info: PDFString.of('sRGB IEC61966-2.1'), DestOutputProfile: iccRef }]));
+  cat.set(PDFName.of('MarkInfo'), ctx.obj({ Marked: false }));
+  const idHex = [...crypto.getRandomValues(new Uint8Array(16))].map((b) => b.toString(16).padStart(2, '0')).join('');
+  ctx.trailerInfo.ID = ctx.obj([PDFHexString.of(idHex), PDFHexString.of(idHex)]);
+  return doc.save({ useObjectStreams: false });
+}
+async function zugferdLos(r) {
+  const m = zugferdFehlt(r); if (m.length) return vERechnungFehlt(r, m, true);
+  toast('PDF wird erstellt …');
+  try { const bytes = await zugferdPdf(r); download(`${dateiName(r.nr)}.pdf`, new Blob([bytes], { type: 'application/pdf' })); toast('PDF mit E-Rechnung gespeichert'); return bytes; }
+  catch (err) { console.error(err); toast(navigator.onLine ? 'Das PDF konnte nicht erstellt werden.' : 'Beim ersten Mal braucht das PDF Internet. Bitte verbinden und nochmal versuchen.'); return null; }
 }
 function download(name, text, type) {
   const blob = text instanceof Blob ? text : new Blob([text], { type: type || 'application/octet-stream' });
@@ -3395,6 +3647,7 @@ const ACT = {
     const plz = f.elements.k_plz.value.trim(), ort = f.elements.k_ort.value.trim();
     if (plz && ort) { const k = kundenAdresse(r.kunde.adresse); r.kunde.adresse = (k.strasse ? k.strasse.split(', ').join('\n') + '\n' : '') + plz + ' ' + ort + (k.landZeile ? '\n' + k.landZeile : ''); }
     merkeKunde(r.kunde); await save();
+    if (el.dataset.pdf) { const m2 = zugferdFehlt(r); if (m2.length) return vERechnungFehlt(r, m2, true); vDetailRe(r.id); return zugferdLos(r); }
     const m = eRechnungFehlt(r); if (m.length) return vERechnungFehlt(r, m);
     download(`${dateiName(r.nr)}.xml`, xrechnung(r), 'application/xml'); toast('E-Rechnung gespeichert'); vDetailRe(r.id);
   },
@@ -3403,6 +3656,7 @@ const ACT = {
   abls: (el) => vAbLs(el.dataset.k, el.dataset.t, el.dataset.id),
   'abls-save': saveAbLs,
   mail: (el) => vMail(el.dataset.k, el.dataset.id),
+  zugferd: (el) => zugferdLos(S.rechnungen.find((x) => x.id === el.dataset.id)),
   'mail-los': async () => {
     const m = mailFelder();
     const a = document.createElement('a'); a.href = `mailto:${encodeURIComponent(m.an).replace(/%40/g, '@')}?subject=${encodeURIComponent(m.betreff)}&body=${encodeURIComponent(m.text)}`;
@@ -3411,7 +3665,10 @@ const ACT = {
   },
   'mail-copy': async () => { const m = mailFelder(); try { await navigator.clipboard.writeText(m.betreff + '\n\n' + m.text); toast('Text kopiert'); } catch (err) { toast('Kopieren geht hier nicht, bitte markieren und kopieren.'); } },
   'mail-share': async () => {
-    const m = mailFelder(), d = mailDoc.d, file = new File([xrechnung(d)], dateiName(d.nr) + '.xml', { type: 'application/xml' });
+    const m = mailFelder(), d = mailDoc.d;
+    if (zugferdFehlt(d).length) return toast('Für das PDF fehlen noch Angaben. Tippe in der Rechnung auf „PDF mit E-Rechnung“.');
+    let bytes; try { toast('PDF wird erstellt …'); bytes = await zugferdPdf(d); } catch (err) { return toast('Das PDF konnte nicht erstellt werden. Beim ersten Mal braucht es Internet.'); }
+    const file = new File([bytes], dateiName(d.nr) + '.pdf', { type: 'application/pdf' });
     const data = { title: m.betreff, text: m.text, files: [file] };
     if (!navigator.canShare || !navigator.canShare(data)) return toast('Teilen mit Datei geht auf diesem Gerät nicht. Nimm „E-Mail-Programm öffnen“.');
     try { await navigator.share(data); await mailVerschickt(); toast('Als verschickt vermerkt'); } catch (err) { if (err.name !== 'AbortError') toast('Teilen hat nicht geklappt.'); }
