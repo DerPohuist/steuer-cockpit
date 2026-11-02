@@ -291,11 +291,27 @@ function summen(doc) {
     const satz = doc.ku || doc.rc ? 0 : num(p.ust);
     proSatz[satz] = (proSatz[satz] || 0) + n;
   }
+  /* Schlussrechnung: schon abgerechnete Abschläge abziehen. Steuerlich zählt nur der Rest, die Abschläge sind eigene Rechnungen. */
+  if (doc.abzuege && doc.abzuege.length) {
+    for (const a of doc.abzuege) for (const k in a.proSatz || {}) proSatz[k] = (proSatz[k] || 0) - num(a.proSatz[k]);
+    netto = 0; for (const k in proSatz) { proSatz[k] = r2(proSatz[k]); netto += proSatz[k]; }
+  }
   let ust = 0;
   for (const s in proSatz) ust += r2(proSatz[s] * Number(s) / 100);
   netto = r2(netto); ust = r2(ust);
   return { netto, ust, brutto: r2(netto + ust), proSatz };
 }
+
+const summenVoll = (d) => summen(Object.assign({}, d, { abzuege: null }));
+const anAbschlaege = (a) => S.rechnungen.filter((x) => x.art === 'abschlag' && x.projektAngebot === a.id && x.status !== 'storniert');
+const istSchluss = (d) => !!(d.abzuege && d.abzuege.length);
+const docTitel = (d) => d.typ === 'angebot' ? 'Angebot' : d.typ === 'gutschrift' ? (d.teil ? 'Rechnungskorrektur' : 'Stornorechnung') : d.art === 'abschlag' ? 'Abschlagsrechnung' : istSchluss(d) ? 'Schlussrechnung' : 'Rechnung';
+/* Abschlagsrechnungen, die in eine Schlussrechnung übernommen werden können */
+function freieAbschlaege(kunde, ohneId) {
+  const benutzt = new Set(S.rechnungen.filter((x) => x.id !== ohneId && x.status !== 'storniert').flatMap((x) => (x.abzuege || []).map((a) => a.id)));
+  return S.rechnungen.filter((x) => x.art === 'abschlag' && zaehlt(x) && x.status !== 'storniert' && !benutzt.has(x.id) && (x.kunde.name || '').toLowerCase() === String(kunde || '').toLowerCase());
+}
+const abzugAus = (x) => { const s = summen(x); return { id: x.id, nr: x.nr, datum: x.datum, netto: s.netto, ust: s.ust, brutto: s.brutto, proSatz: s.proSatz }; };
 
 /* Nummernkreise. Platzhalter: {JJJJ} Jahr, {JJ} Jahr zweistellig, {MM} Monat, {NNN} laufende Nummer (Anzahl N = Stellen) */
 const NR_ARTEN = { RE: ['Rechnungen und Stornos', 'RE-{JJJJ}-{NNNN}'], AN: ['Angebote', 'AN-{JJJJ}-{NNN}'], AB: ['Auftragsbestätigungen', 'AB-{JJJJ}-{NNN}'], LS: ['Lieferscheine', 'LS-{JJJJ}-{NNN}'] };
@@ -323,12 +339,36 @@ function naechsteNr(art, datum) {
 }
 
 function reStatus(r) {
-  if (r.typ === 'gutschrift') return { k: 'storno', t: 'Stornorechnung', c: 'grey' };
   if (r.status === 'entwurf') return { k: 'entwurf', t: 'Entwurf', c: 'grey' };
+  if (r.typ === 'gutschrift') return { k: 'storno', t: r.teil ? 'Rechnungskorrektur' : 'Stornorechnung', c: 'grey' };
   if (r.status === 'storniert') return { k: 'storniert', t: 'Storniert', c: 'grey' };
   if (r.status === 'bezahlt') return { k: 'bezahlt', t: 'Bezahlt', c: 'good' };
-  if (r.faellig && tageBis(r.faellig) < 0) return { k: 'ueberfaellig', t: 'Überfällig seit ' + (-tageBis(r.faellig)) + ' T.', c: 'bad' };
-  return { k: 'offen', t: r.faellig ? 'Offen, fällig ' + dat(r.faellig) : 'Offen', c: 'warn' };
+  const kor = r.typ !== 'gutschrift' && korrektur(r);
+  if (kor && offenBetrag(r) <= 0.005) return { k: 'bezahlt', t: 'Erledigt durch Korrektur', c: 'good' };
+  const teil = (r.zahlungen && r.zahlungen.length) || kor ? `, ${eur(offenBetrag(r))} offen` : '';
+  if (r.faellig && tageBis(r.faellig) < 0) return { k: 'ueberfaellig', t: (teil ? (r.zahlungen ? 'Teilweise bezahlt' : 'Korrigiert') + teil + ', überfällig' : 'Überfällig seit ' + (-tageBis(r.faellig)) + ' T.'), c: 'bad' };
+  return { k: 'offen', t: teil ? (r.zahlungen ? 'Teilweise bezahlt' : 'Korrigiert') + teil : r.faellig ? 'Offen, fällig ' + dat(r.faellig) : 'Offen', c: 'warn' };
+}
+/* Zahlungen einer Rechnung: r.zahlungen = [{ id, datum, betrag, art: 'zahlung' | 'nachlass', bankId }].
+   „nachlass“ ist ein Betrag, den der Kunde nicht zahlen muss (Skonto, Rest erlassen); er mindert Umsatz und Umsatzsteuer.
+   Ältere Stände kennen nur bezahltAm, das gilt dann als eine Zahlung über den ganzen Betrag. */
+function zahlungen(r) {
+  if (r.zahlungen && r.zahlungen.length) return r.zahlungen;
+  return r.bezahltAm && r.typ !== 'gutschrift' ? [{ datum: r.bezahltAm, betrag: summen(r).brutto, art: 'zahlung', alt: true }] : [];
+}
+const zSumme = (r, nl) => r2(zahlungen(r).filter((z) => (z.art === 'nachlass') === nl).reduce((a, z) => a + num(z.betrag), 0));
+const gezahlt = (r) => zSumme(r, false);
+/* Rechnungskorrekturen (Teil-Gutschriften) zu dieser Rechnung, Betrag negativ */
+const korrektur = (r) => r2(S.rechnungen.filter((g) => g.typ === 'gutschrift' && g.teil && g.stornoVon === r.id && zaehlt(g)).reduce((a, g) => a + summen(g).brutto, 0));
+const offenBetrag = (r) => r.typ === 'gutschrift' || r.status === 'storniert' || r.status === 'entwurf' ? 0 : Math.max(0, r2(summen(r).brutto + korrektur(r) - zSumme(r, false) - zSumme(r, true)));
+const hatZahlung = (r) => zahlungen(r).some((z) => z.art !== 'nachlass');
+/* Teile der Rechnung als Bruchteil vom Brutto mit Datum: echte Zahlungen oder Nachlässe */
+function anteile(r, nl) { const b = summen(r).brutto; return b ? zahlungen(r).filter((z) => (z.art === 'nachlass') === !!nl).map((z) => ({ datum: z.datum, f: num(z.betrag) / b })) : []; }
+/* Nach jeder Änderung der Zahlungen: ganz bezahlt oder noch offen? */
+function zahlStatus(r) {
+  if (!r.zahlungen || !r.zahlungen.length) { delete r.zahlungen; r.status = 'offen'; delete r.bezahltAm; return; }
+  if (offenBetrag(Object.assign({}, r, { status: 'offen' })) <= 0.005) { r.status = 'bezahlt'; r.bezahltAm = r.zahlungen.map((z) => z.datum).sort().pop(); }
+  else { r.status = 'offen'; delete r.bezahltAm; }
 }
 function anStatus(a) {
   if (a.status === 'abgerechnet') return { k: 'abgerechnet', t: 'In Rechnung', c: 'good' };
@@ -397,20 +437,23 @@ function ustva(z) {
   const drin = (d) => d && d >= z.von && d <= z.bis;
   for (const r of S.rechnungen) {
     if (!zaehlt(r) || r.ku) continue;
-    let tag = r.datum;
-    if (ist) {
-      if (r.typ === 'gutschrift') { const o = S.rechnungen.find((x) => x.id === r.stornoVon); if (!o || !o.bezahltAm) continue; }
-      else { if (!r.bezahltAm) continue; tag = r.bezahltAm; }
-    }
-    if (!drin(tag)) continue;
+    // Ist: nur was im Zeitraum eingegangen ist (auch Teilzahlungen). Soll: Rechnungsdatum, Nachlässe (Skonto) mindern im Monat des Nachlasses.
+    let st;
+    if (r.typ === 'gutschrift') { const o = S.rechnungen.find((x) => x.id === r.stornoVon); if (ist && (!o || !hatZahlung(o))) continue; st = [[r.datum, 1]]; }
+    // Abschlagsrechnungen auch bei Soll erst bei Zahlungseingang (Anzahlung, § 13 Abs. 1 Nr. 1a Satz 4 UStG)
+    else if (ist || r.art === 'abschlag') st = anteile(r, false).map((a) => [a.datum, a.f]);
+    else st = [[r.datum, 1]].concat(anteile(r, true).map((a) => [a.datum, -a.f]));
+    st = st.filter((x) => drin(x[0])); if (!st.length) continue;
+    const fa = st.reduce((a, x) => a + x[1], 0);
     n++;
     const s = summen(r), art = rcArt(r);
-    if (art) { b[RC[art].kz] += s.netto; continue; }
+    if (art) { b[RC[art].kz] += s.netto * fa; continue; }
     const teile = r.extern ? { [s.netto ? Math.round(s.ust / s.netto * 100) : 0]: s.netto } : s.proSatz;
     for (const k in teile) {
-      if (Number(k) === 19) b[81] += teile[k];
-      else if (Number(k) === 7) b[86] += teile[k];
-      else if (teile[k]) { frei += teile[k]; warn.push(`${esc(r.nr || 'Rechnung')}: ${eur(teile[k])} mit ${k} % USt ohne Steuerfall, nicht eingerechnet. Steuerfall in der Rechnung angeben oder mit dem Steuerberater klären.`); }
+      const t = r2(teile[k] * fa);
+      if (Number(k) === 19) b[81] += t;
+      else if (Number(k) === 7) b[86] += t;
+      else if (t) { frei += t; warn.push(`${esc(r.nr || 'Rechnung')}: ${eur(t)} mit ${k} % USt ohne Steuerfall, nicht eingerechnet. Steuerfall in der Rechnung angeben oder mit dem Steuerberater klären.`); }
     }
   }
   for (const be of S.belege) {
@@ -475,13 +518,13 @@ function gewinn(jahr) {
   for (const r of S.rechnungen) {
     if (!zaehlt(r)) continue;
     const s = summen(r);
-    let tag = r.datum;
-    if (!bilanz) {
-      if (r.typ === 'gutschrift') { const o = S.rechnungen.find((x) => x.id === r.stornoVon); tag = o && o.bezahltAm ? r.datum : ''; }
-      else tag = r.bezahltAm || '';
-    }
-    if (tag.startsWith(j)) { ein += s.netto; mEin[mon(tag)] += s.netto; }
-    if ((r.datum || '').startsWith(j) && r.typ !== 'gutschrift' && ['offen', 'ueberfaellig'].includes(reStatus(r).k)) { offen += s.brutto; nOffen++; }
+    let st;
+    // Bilanz: Abschläge sind noch kein Ertrag, die Schlussrechnung zählt voll
+    if (bilanz) st = r.art === 'abschlag' ? [] : [[r.datum, istSchluss(r) && s.netto ? summenVoll(r).netto / s.netto : 1]].concat(anteile(r, true).map((a) => [a.datum, -a.f]));
+    else if (r.typ === 'gutschrift') { const o = S.rechnungen.find((x) => x.id === r.stornoVon); st = o && hatZahlung(o) ? [[r.datum, 1]] : []; }
+    else st = anteile(r, false).map((a) => [a.datum, a.f]);
+    for (const [tag, f] of st) if ((tag || '').startsWith(j)) { ein += s.netto * f; mEin[mon(tag)] += s.netto * f; }
+    if ((r.datum || '').startsWith(j) && r.typ !== 'gutschrift' && ['offen', 'ueberfaellig'].includes(reStatus(r).k)) { offen += offenBetrag(r); nOffen++; }
   }
   const kat = {}, gross = [], ohne = [];
   let aus = 0, bewirt = 0;
@@ -695,7 +738,7 @@ function icsFalten(z) {
 }
 function kalTermine(mitRe) {
   const t = fristen().filter((x) => !x.erledigt && x.datum >= heute()).map((f) => ({ uid: f.key, datum: f.datum, t: f.t, s: f.s }));
-  if (mitRe) for (const r of offeneRe()) if (r.faellig && r.faellig >= heute()) t.push({ uid: 're-' + r.id, datum: r.faellig, t: `Zahlung fällig: ${r.kunde.name || 'Kunde'} ${eur(summen(r).brutto)}`, s: `Rechnung ${r.nr}. Ist das Geld nicht da, erinnert dich das Cockpit ans Mahnen.` });
+  if (mitRe) for (const r of offeneRe()) if (r.faellig && r.faellig >= heute()) t.push({ uid: 're-' + r.id, datum: r.faellig, t: `Zahlung fällig: ${r.kunde.name || 'Kunde'} ${eur(offenBetrag(r))}`, s: `Rechnung ${r.nr}. Ist das Geld nicht da, erinnert dich das Cockpit ans Mahnen.` });
   return t.sort((a, b) => a.datum.localeCompare(b.datum));
 }
 function icsDatei(termine, vorher, name) {
@@ -898,7 +941,7 @@ function estGewerbe(E, jahr) {
   let ustEin = 0;
   for (const r of S.rechnungen) {
     if (!zaehlt(r) || r.typ === 'gutschrift') continue;
-    if ((r.bezahltAm || '').startsWith(String(jahr))) ustEin += summen(r).ust;
+    for (const a of anteile(r, false)) if ((a.datum || '').startsWith(String(jahr))) ustEin += summen(r).ust * a.f;
   }
   let vst = 0;
   for (const b of S.belege) if ((b.datum || '').startsWith(String(jahr))) vst += num(b.vorsteuer);
@@ -1404,9 +1447,10 @@ function kuUmsatz(y, ohneId) {
   for (const r of S.rechnungen) {
     if (!zaehlt(r) || r.id === ohneId) continue;
     const n = summen(r).netto;
-    if (r.typ === 'gutschrift') { const o = S.rechnungen.find((x) => x.id === r.stornoVon); if (o && o.bezahltAm && (r.datum || '').startsWith(y)) bezahlt += n; else if ((r.datum || '').startsWith(y)) offen += n; continue; }
-    if ((r.bezahltAm || '').startsWith(y)) bezahlt += n;
-    else if (r.status !== 'storniert' && !r.bezahltAm && (r.datum || '').startsWith(y)) offen += n;
+    if (r.typ === 'gutschrift') { const o = S.rechnungen.find((x) => x.id === r.stornoVon); if (o && hatZahlung(o) && (r.datum || '').startsWith(y)) bezahlt += n; else if ((r.datum || '').startsWith(y)) offen += n; continue; }
+    for (const a of anteile(r, false)) if ((a.datum || '').startsWith(y)) bezahlt += n * a.f;
+    const br = summen(r).brutto;
+    if (r.status !== 'storniert' && br && (r.datum || '').startsWith(y)) offen += n * offenBetrag(r) / br;
   }
   return { bezahlt: r2(bezahlt), offen: r2(Math.max(0, offen)), summe: r2(bezahlt + Math.max(0, offen)) };
 }
@@ -1468,7 +1512,7 @@ function ruecklage() {
   const istRoh = S.steuer.ruecklageIst, ist = istRoh === '' || istRoh == null ? null : num(istRoh);
   const c = ist == null ? 'grey' : ist >= soll ? 'good' : ist >= soll * 0.75 ? 'warn' : 'bad';
   // Faustregel: welcher Anteil der Zahlungseingänge dieses Jahres an Steuern hängt
-  const eingang = S.rechnungen.filter((r) => zaehlt(r) && r.typ !== 'gutschrift' && (r.bezahltAm || '').startsWith(String(y0))).reduce((a, r) => a + summen(r).brutto, 0);
+  const eingang = S.rechnungen.filter((r) => zaehlt(r) && r.typ !== 'gutschrift').reduce((a, r) => a + anteile(r, false).filter((x) => (x.datum || '').startsWith(String(y0))).reduce((b2, x) => b2 + summen(r).brutto * x.f, 0), 0);
   const uj = ustva({ von: y0 + '-01-01', bis: y0 + '-12-31', dez: false });
   const quote = eingang > 500 ? Math.min(60, Math.round((Math.max(0, ku() ? 0 : uj.zahl) + sch.summe) / eingang * 100)) : 0;
   return { teile, soll, ist, c, fehlt: ist == null ? 0 : Math.max(0, r2(soll - ist)), quote, personen: sch.personen };
@@ -1494,7 +1538,7 @@ function vStart() {
   const re = S.rechnungen.filter(zaehlt);
   const offen = S.rechnungen.filter((r) => r.typ !== 'gutschrift' && ['offen', 'ueberfaellig'].includes(reStatus(r).k));
   const ueber = offen.filter((r) => reStatus(r).k === 'ueberfaellig');
-  const offenSum = offen.reduce((a, r) => a + summen(r).brutto, 0);
+  const offenSum = offen.reduce((a, r) => a + offenBetrag(r), 0);
   const umsatzJahr = re.filter((r) => (r.datum || '').startsWith(jahr)).reduce((a, r) => a + summen(r).netto, 0);
   const angOffen = S.angebote.filter((a) => anStatus(a).k === 'offen');
   const angSum = angOffen.reduce((a, x) => a + summen(x).netto, 0);
@@ -1502,7 +1546,7 @@ function vStart() {
   const todos = [];
 
   if (!S.firma.name || !S.firma.rechtsform) todos.push({ c: 'warn', t: 'Firmendaten und Rechtsform eintragen', s: 'Ohne sie fehlen Pflichtangaben auf Rechnungen.', act: 'tab', k: 'firma', b: 'Jetzt eintragen' });
-  for (const r of ueber.filter(mahnenFaellig).slice(0, 5)) todos.push({ c: 'bad', t: `${esc(r.kunde.name || 'Kunde')} zahlt ${eur(summen(r).brutto)} nicht`, s: `Rechnung ${esc(r.nr)}, fällig seit ${dat(r.faellig)}.${mahnStufe(r) ? ` ${MAHN[mahnStufe(r)].t} vom ${dat(letzteMahnung(r).datum)} ist abgelaufen.` : ''} Zahlung prüfen, dann ${MAHN[mahnStufe(r) + 1].t} schicken.`, act: 'mahnen', id: r.id, b: mahnStufe(r) ? 'Mahnen' : 'Erinnern' });
+  for (const r of ueber.filter(mahnenFaellig).slice(0, 5)) todos.push({ c: 'bad', t: `${esc(r.kunde.name || 'Kunde')} zahlt ${eur(offenBetrag(r))} nicht`, s: `Rechnung ${esc(r.nr)}, fällig seit ${dat(r.faellig)}.${mahnStufe(r) ? ` ${MAHN[mahnStufe(r)].t} vom ${dat(letzteMahnung(r).datum)} ist abgelaufen.` : ''} Zahlung prüfen, dann ${MAHN[mahnStufe(r) + 1].t} schicken.`, act: 'mahnen', id: r.id, b: mahnStufe(r) ? 'Mahnen' : 'Erinnern' });
   for (const r of ueber.filter((x) => !mahnenFaellig(x) && mahnStufe(x) && tageBis(letzteMahnung(x).frist) >= 0).slice(0, 3)) todos.push({ c: 'warn', t: `Warten auf Zahlung von ${esc(r.kunde.name || 'Kunde')}`, s: `${MAHN[mahnStufe(r)].t} zu ${esc(r.nr)} läuft bis ${dat(letzteMahnung(r).frist)}. Danach erinnert dich die App an den nächsten Schritt.`, act: 'open-re', id: r.id, b: 'Öffnen' });
   for (const r of ueber.filter((x) => mahnStufe(x) >= 3 && tageBis(letzteMahnung(x).frist) < 0).slice(0, 3)) todos.push({ c: 'bad', t: `${esc(r.kunde.name || 'Kunde')} zahlt trotz letzter Mahnung nicht`, s: `Rechnung ${esc(r.nr)}, ${eur(summen(r).brutto)}. Mahnbescheid oder Inkasso prüfen.`, act: 'open-re', id: r.id, b: 'Öffnen' });
   if (S.firma.name) for (const f of fristen().filter((x) => !x.erledigt && tageBis(x.datum) <= 10)) todos.push({ c: tageBis(f.datum) < 0 ? 'bad' : 'warn', t: `${f.t} bis ${dat(f.datum)}`, s: f.s, act: 'tab', k: 'steuern', b: 'Ansehen' });
@@ -1690,9 +1734,9 @@ function vRechnungen() {
   const ueber = offen.filter((r) => reStatus(r).k === 'ueberfaellig');
   return `
   <h1>Rechnungen</h1>
-  <div class="status"><div class="big">${offen.length ? `${eur(offen.reduce((s, r) => s + summen(r).brutto, 0))} offen` : 'Alle Rechnungen bezahlt'}</div>
+  <div class="status"><div class="big">${offen.length ? `${eur(offen.reduce((s, r) => s + offenBetrag(r), 0))} offen` : 'Alle Rechnungen bezahlt'}</div>
   <p class="small muted" style="margin-top:4px">${offen.length ? `${offen.length} Rechnung${offen.length > 1 ? 'en' : ''} offen${ueber.length ? `, davon <b style="color:var(--bad)">${ueber.length} überfällig</b>` : ', keine überfällig'}.` : 'Neue Rechnungen legst du über den Plus-Knopf an.'}</p>
-  ${ueber.length ? `<table class="tab" style="margin-top:8px">${[['Noch nicht fällig', (r) => reStatus(r).k === 'offen'], ['Bis 30 Tage überfällig', (r) => reStatus(r).k === 'ueberfaellig' && verzugTage(r) <= 30], ['31 bis 60 Tage', (r) => verzugTage(r) > 30 && verzugTage(r) <= 60 && reStatus(r).k === 'ueberfaellig'], ['Über 60 Tage', (r) => verzugTage(r) > 60 && reStatus(r).k === 'ueberfaellig']].map(([t, fn]) => { const l = offen.filter(fn); return l.length ? `<tr><td>${t}</td><td>${l.length}</td><td style="text-align:right">${eur(l.reduce((a, x) => a + summen(x).brutto, 0))}</td></tr>` : ''; }).join('')}</table>` : ''}</div>
+  ${ueber.length ? `<table class="tab" style="margin-top:8px">${[['Noch nicht fällig', (r) => reStatus(r).k === 'offen'], ['Bis 30 Tage überfällig', (r) => reStatus(r).k === 'ueberfaellig' && verzugTage(r) <= 30], ['31 bis 60 Tage', (r) => verzugTage(r) > 30 && verzugTage(r) <= 60 && reStatus(r).k === 'ueberfaellig'], ['Über 60 Tage', (r) => verzugTage(r) > 60 && reStatus(r).k === 'ueberfaellig']].map(([t, fn]) => { const l = offen.filter(fn); return l.length ? `<tr><td>${t}</td><td>${l.length}</td><td style="text-align:right">${eur(l.reduce((a, x) => a + offenBetrag(x), 0))}</td></tr>` : ''; }).join('')}</table>` : ''}</div>
   <div class="card">
     ${chips('re', [['offen', 'Offen'], ['bezahlt', 'Bezahlt'], ['alle', 'Alle']])}
     ${list.length ? `<ul class="list">${list.map((r) => { const st = reStatus(r); return `<li><button class="item" data-act="open-re" data-id="${r.id}"><div class="grow"><div class="t">${esc(r.kunde.name || 'Ohne Kunde')}</div><div class="s">${esc(r.nr || 'ohne Nummer')} · ${dat(r.datum)}${r.extern ? ' · hinterlegt' : ''}${mahnStufe(r) && !['bezahlt', 'storniert'].includes(st.k) ? ' · ' + MAHN[mahnStufe(r)].t : ''}</div></div><div><div class="amt">${eur(summen(r).brutto)}</div><div style="text-align:right"><span class="pill ${st.c}">${st.t}</span></div></div></button></li>`; }).join('')}</ul>`
@@ -1828,7 +1872,7 @@ const offeneRe = () => S.rechnungen.filter((r) => r.typ !== 'gutschrift' && ['of
 function bankTreffer(b) {
   if (b.betrag <= 0 || b.rechnungId) return [];
   const z = (b.zweck + ' ' + b.gegenpartei).toLowerCase();
-  return offeneRe().map((r) => ({ r, p: (r.nr && z.includes(String(r.nr).toLowerCase()) ? 2 : 0) + (Math.abs(summen(r).brutto - b.betrag) < 0.01 ? 1 : 0) }))
+  return offeneRe().map((r) => ({ r, p: (r.nr && z.includes(String(r.nr).toLowerCase()) ? 2 : 0) + (Math.abs(offenBetrag(r) - b.betrag) < 0.01 || (hatSkonto(r) && Math.abs(r2(offenBetrag(r) * (1 - num(r.skontoProz) / 100)) - b.betrag) < 0.01) ? 1 : 0) }))
     .filter((x) => x.p).sort((a, c) => c.p - a.p).map((x) => x.r);
 }
 const bankOffen = (b) => !b.ohneBeleg && (b.betrag > 0 ? !b.rechnungId : !b.belegId);
@@ -1896,7 +1940,7 @@ function vBuchung(id) {
   const re = b.rechnungId && S.rechnungen.find((r) => r.id === b.rechnungId);
   const be = b.belegId && S.belege.find((x) => x.id === b.belegId);
   const t = bankTreffer(b), rest = b.betrag > 0 && !re ? offeneRe().filter((r) => !t.includes(r)) : [], bt = be ? [] : belegTreffer(b);
-  const reBtn = (r, gut) => `<li><button class="item" data-act="bk-zu" data-id="${esc(b.id)}" data-k="${r.id}"><div class="grow"><div class="t">${esc(r.kunde.name || 'Ohne Kunde')}</div><div class="s">${esc(r.nr)} · ${dat(r.datum)}</div></div><div><div class="amt">${eur(summen(r).brutto)}</div><div style="text-align:right">${gut ? '<span class="pill good">passt</span>' : ''}</div></div></button></li>`;
+  const reBtn = (r, gut) => `<li><button class="item" data-act="bk-zu" data-id="${esc(b.id)}" data-k="${r.id}"><div class="grow"><div class="t">${esc(r.kunde.name || 'Ohne Kunde')}</div><div class="s">${esc(r.nr)} · ${dat(r.datum)}${gezahlt(r) ? ' · noch offen' : ''}</div></div><div><div class="amt">${eur(offenBetrag(r))}</div><div style="text-align:right">${gut ? '<span class="pill good">passt</span>' : ''}</div></div></button></li>`;
   openDlg(`${head(b.betrag > 0 ? 'Zahlungseingang' : 'Ausgabe')}<div class="dlg-body">
     <p style="font-size:1.4rem"><b>${eur(b.betrag)}</b></p>
     <p>${esc(b.gegenpartei || 'Ohne Namen')}<br><span class="small muted">${dat(b.datum)}${b.zweck ? ' · ' + esc(b.zweck) : ''}</span></p>
@@ -2235,6 +2279,7 @@ function readEditor() {
     rabatt: Math.min(100, Math.max(0, num(p.querySelector('[name=p_rabatt]').value)))
   }));
   if (f.elements.skontoProz) Object.assign(edit, { skontoProz: num(g('skontoProz')), skontoTage: Math.round(num(g('skontoTage'))) });
+  if (edit.artSchluss || istSchluss(edit)) { const ids = [...f.querySelectorAll('[name=abz]:checked')].map((x) => x.value); edit.abzuege = S.rechnungen.filter((x) => ids.includes(x.id)).map(abzugAus); }
 }
 function pflichtDoc(d) {
   const f = S.firma, c = [];
@@ -2262,10 +2307,11 @@ function posHtml(p, i) {
   </div>`;
 }
 function totalsHtml(d) {
-  const s = summen(d);
-  return `<div class="totals"><div><span>Netto</span><span>${eur(s.netto)}</span></div>
-    ${d.ku || d.rc ? `<div><span>Umsatzsteuer</span><span>0,00 €</span></div>` : Object.keys(s.proSatz).sort((a, b) => b - a).map((k) => `<div><span>USt ${k} % auf ${eur(s.proSatz[k])}</span><span>${eur(r2(s.proSatz[k] * k / 100))}</span></div>`).join('')}
-    <div class="gross"><span>Gesamt</span><span>${eur(s.brutto)}</span></div></div>`;
+  const s = summen(d), v = istSchluss(d) ? summenVoll(d) : s;
+  return `<div class="totals"><div><span>Netto</span><span>${eur(v.netto)}</span></div>
+    ${d.ku || d.rc ? `<div><span>Umsatzsteuer</span><span>0,00 €</span></div>` : Object.keys(v.proSatz).sort((a, b) => b - a).map((k) => `<div><span>USt ${k} % auf ${eur(v.proSatz[k])}</span><span>${eur(r2(v.proSatz[k] * k / 100))}</span></div>`).join('')}
+    <div class="gross"><span>Gesamt</span><span>${eur(v.brutto)}</span></div>
+    ${istSchluss(d) ? d.abzuege.map((a) => `<div><span>Abzüglich Abschlag ${esc(a.nr)}</span><span>−${eur(a.brutto)}</span></div>`).join('') + `<div class="gross"><span>Noch zu zahlen</span><span>${eur(s.brutto)}</span></div>` : ''}</div>`;
 }
 // Warnung, wenn genau diese Rechnung die Kleinunternehmer-Grenze reißt
 function kuWarnung(d) {
@@ -2277,16 +2323,22 @@ function kuWarnung(d) {
   return '';
 }
 function vEditor() {
-  const d = edit, isRe = d.typ === 'rechnung';
-  const locked = isRe && d.status !== 'entwurf';
+  const d = edit, isRe = d.typ !== 'angebot', gut = d.typ === 'gutschrift';
+  const orig = gut ? S.rechnungen.find((x) => x.id === d.stornoVon) : null;
+  const frei = isRe && !gut ? freieAbschlaege(d.kunde.name, d.id) : [];
+  const gewaehlt = new Set((d.abzuege || []).map((a) => a.id));
+  const abList = frei.concat(S.rechnungen.filter((x) => gewaehlt.has(x.id) && !frei.includes(x)));
   const checks = isRe ? pflichtDoc(d) : [];
   const allOk = checks.every((c) => c[1]);
-  openDlg(`${head((d.nr ? esc(d.nr) + ' · ' : '') + (isRe ? (d.status === 'entwurf' ? 'Rechnung schreiben' : 'Rechnung') : 'Angebot schreiben'))}
+  openDlg(`${head((d.nr ? esc(d.nr) + ' · ' : '') + (gut ? 'Rechnungskorrektur schreiben' : isRe ? (d.status === 'entwurf' ? docTitel(d) + ' schreiben' : docTitel(d)) : 'Angebot schreiben'))}
   <form id="edForm" class="dlg-body" autocomplete="off">
     <datalist id="kunden">${S.kunden.map((k) => `<option value="${esc(k.name)}">`).join('')}</datalist>
     <datalist id="artikel">${S.artikel.map((a) => `<option value="${esc(a.name)}">${esc(eur(num(a.preis)) + ' je ' + a.einheit)}</option>`).join('')}</datalist>
     <datalist id="einheiten"><option value="Stk."><option value="Std."><option value="Tag"><option value="pauschal"><option value="Monat"><option value="km"></datalist>
-    <h3 style="margin-top:0">Für wen?</h3>
+    ${gut ? `<div class="card" style="margin-top:0;background:var(--soft);border:0"><b>Korrektur zur Rechnung ${esc(orig ? orig.nr : '')}</b><p class="small" style="margin:4px 0 0">Die Positionen stehen mit Minus-Menge da. Lösch alles, was richtig war, und lass nur stehen, was du gutschreiben willst, z. B. eine Position ganz oder mit kleinerer Menge. Der offene Betrag der Rechnung sinkt um diese Summe.</p></div>` : ''}
+    ${isRe && !gut ? `<div class="filters" role="group" style="margin-bottom:6px">${[['', 'Rechnung'], ['abschlag', 'Abschlagsrechnung'], ['schluss', 'Schlussrechnung']].map(([k, t]) => `<button type="button" class="chip" data-act="re-art" data-k="${k}" aria-pressed="${(d.art || (istSchluss(d) || d.artSchluss ? 'schluss' : '')) === k}">${t}</button>`).join('')}</div>
+      ${d.art === 'abschlag' ? '<p class="small muted" style="margin:0 0 8px">Eine Abzahlung vor oder während der Arbeit. Später ziehst du sie in der Schlussrechnung ab. Umsatzsteuer fällt bei Abschlägen erst an, wenn das Geld da ist.</p>' : ''}` : ''}
+    <h3 style="margin-top:${isRe && !gut ? '12px' : '0'}">Für wen?</h3>
     <div class="grid2">
       <label>Kunde<input name="k_name" list="kunden" value="${esc(d.kunde.name)}" placeholder="Firmen- oder Personenname"></label>
       <label>E-Mail (optional)<input name="k_email" type="email" value="${esc(d.kunde.email)}"></label>
@@ -2308,6 +2360,7 @@ function vEditor() {
     <div id="posList">${d.positionen.map(posHtml).join('')}</div>
     <div class="btns" style="margin-top:0"><button type="button" data-act="pos-add">+ Position</button>
     ${S.artikel.length ? `<select id="artPick" aria-label="Aus der Artikelliste einfügen" style="width:auto"><option value="">+ Aus der Artikelliste …</option>${S.artikel.slice().sort((a, b) => a.name.localeCompare(b.name, 'de')).map((a) => `<option value="${a.id}">${esc(a.name)} · ${eur(num(a.preis))}</option>`).join('')}</select>` : '<button type="button" data-act="artikel">Artikelliste anlegen</button>'}</div>
+    ${isRe && !gut && (d.artSchluss || istSchluss(d)) ? `<h3>Abschläge abziehen</h3>${abList.length ? `<div id="abzList">${abList.map((x) => `<label class="check"><input type="checkbox" name="abz" value="${x.id}"${gewaehlt.has(x.id) ? ' checked' : ''}> ${esc(x.nr)} vom ${dat(x.datum)}: ${eur(summen(x).netto)} netto, ${eur(summen(x).brutto)} brutto${hatZahlung(x) ? '' : ' <span class="small muted">(noch nicht bezahlt)</span>'}</label>`).join('')}</div>` : `<p class="small muted">Für ${esc(d.kunde.name || 'diesen Kunden')} gibt es keine Abschlagsrechnung, die noch nicht abgezogen wurde. Der Kundenname muss genau gleich geschrieben sein.</p>`}` : ''}
     <div id="totals" style="margin-top:10px">${totalsHtml(d)}</div>
     ${d.ku ? `<p class="small muted">${KU_HINWEIS} Steht automatisch auf dem Dokument.</p>` : ''}
     <div id="kuWarn">${kuWarnung(d)}</div>
@@ -2318,8 +2371,9 @@ function vEditor() {
   <div class="dlg-foot">
     ${!d.neu && !isRe ? '<button class="danger" data-act="del-doc">Löschen</button>' : ''}
     ${!d.neu && isRe && d.status === 'entwurf' ? '<button class="danger" data-act="del-doc">Entwurf löschen</button>' : ''}
+    ${gut ? `<button data-act="open-re" data-id="${d.stornoVon}">Abbrechen</button>` : ''}
     <button data-act="save-doc">${isRe ? 'Als Entwurf speichern' : 'Speichern'}</button>
-    ${isRe ? `<button class="primary" data-act="stellen" id="btnStellen"${allOk ? '' : ' disabled'}>Rechnung stellen</button>` : ''}
+    ${isRe ? `<button class="primary" data-act="stellen" id="btnStellen"${allOk ? '' : ' disabled'}>${gut ? 'Korrektur stellen' : docTitel(d) + ' stellen'}</button>` : ''}
   </div>`);
 }
 function refreshEditor() {
@@ -2327,7 +2381,7 @@ function refreshEditor() {
   $('#totals').innerHTML = totalsHtml(edit);
   if ($('#kuWarn')) $('#kuWarn').innerHTML = kuWarnung(edit);
   document.querySelectorAll('#posList .pos').forEach((el, i) => { el.querySelector('.sum').textContent = eur(posNetto(edit.positionen[i])); });
-  if (edit.typ === 'rechnung') {
+  if (edit.typ !== 'angebot') {
     const c = pflichtDoc(edit), ok = c.every((x) => x[1]);
     $('#checks').innerHTML = c.map((x) => `<li class="${x[1] ? 'ok' : 'miss'}">${x[0]}</li>`).join('');
     $('#chkHead').textContent = ok ? 'Alle Pflichtangaben nach § 14 UStG sind da' : 'Es fehlen noch Pflichtangaben';
@@ -2347,6 +2401,7 @@ async function saveDoc(stellen) {
   if (d.typ === 'angebot' && !d.nr) d.nr = naechsteNr('AN', d.datum || heute());
   if (stellen) {
     if (!pflichtDoc(d).every((c) => c[1])) return toast('Es fehlen noch Pflichtangaben.');
+    if (d.typ === 'gutschrift' && summen(d).brutto >= 0) return toast('Eine Korrektur muss einen Minus-Betrag haben. Mengen bitte mit Minus eintragen.');
     d.nr = naechsteNr('RE', d.datum || heute());
     d.status = 'offen'; d.gestelltAm = heute();
   }
@@ -2354,8 +2409,9 @@ async function saveDoc(stellen) {
   const i = coll.findIndex((x) => x.id === d.id);
   if (i >= 0) coll[i] = d; else coll.push(d);
   if (d.ausAngebot && stellen) { const a = S.angebote.find((x) => x.id === d.ausAngebot); if (a) a.status = 'abgerechnet'; }
+  if (stellen && d.typ === 'gutschrift') { const o = S.rechnungen.find((x) => x.id === d.stornoVon); if (o && o.zahlungen && o.zahlungen.length) zahlStatus(o); }
   await save();
-  toast(stellen ? `Rechnung ${d.nr} gestellt` : 'Gespeichert');
+  toast(stellen ? `${docTitel(d)} ${d.nr} gestellt` : 'Gespeichert');
   tab = d.typ === 'angebot' ? 'angebote' : 'rechnungen';
   if (stellen) vDetailRe(d.id); else closeDlg();
   render();
@@ -2375,6 +2431,7 @@ function vDetailAn(id) {
   openDlg(`${head('Angebot ' + esc(a.nr))}<div class="dlg-body">
     <p><span class="pill ${st.c}">${st.t}</span></p>
     ${kopfDaten(a)}
+    ${anAbschlaege(a).length ? `<p class="small">Abschläge: ${anAbschlaege(a).map((x) => `<a href="#" data-act="open-re" data-id="${x.id}">${esc(x.nr || 'Entwurf')}</a> ${eur(summen(x).brutto)}${x.status === 'bezahlt' ? ' (bezahlt)' : ''}`).join(', ')}</p>` : ''}
     <p class="small muted">Vom ${dat(a.datum)}, gültig bis ${dat(a.gueltigBis)}${a.versendetAm ? `, per E-Mail verschickt am ${dat(a.versendetAm)}` : ''}${a.ab ? `. Auftragsbestätigung ${esc(a.ab.nr)} vom ${dat(a.ab.datum)}` : ''}${a.ls ? `. Lieferschein ${esc(a.ls.nr)}` : ''}</p>
     ${posTabelle(a)}<div style="margin-top:8px">${totalsHtml(a)}</div>
     ${st.k === 'abgerechnet' ? '' : `<div class="card" style="margin-top:14px"><b>Wie hat der Kunde entschieden?</b><div class="btns">
@@ -2387,7 +2444,8 @@ function vDetailAn(id) {
     <button data-act="mail" data-k="an" data-id="${a.id}">Per E-Mail</button>
     ${a.status !== 'abgelehnt' ? `<button data-act="abls" data-k="ab" data-t="an" data-id="${a.id}">Auftragsbestätigung</button><button data-act="abls" data-k="ls" data-t="an" data-id="${a.id}">Lieferschein</button>` : ''}
     ${st.k === 'abgerechnet' ? '' : `<button data-act="edit-an" data-id="${a.id}">Bearbeiten</button>`}
-    ${st.k === 'abgerechnet' ? '' : `<button class="primary" data-act="an-to-re" data-id="${a.id}">In Rechnung umwandeln</button>`}
+    ${st.k === 'abgerechnet' ? '' : `<button data-act="an-abschlag" data-id="${a.id}">Abschlagsrechnung</button>`}
+    ${st.k === 'abgerechnet' ? '' : `<button class="primary" data-act="an-to-re" data-id="${a.id}">${anAbschlaege(a).length ? 'Schlussrechnung erstellen' : 'In Rechnung umwandeln'}</button>`}
   </div>`);
 }
 function vDetailRe(id) {
@@ -2396,29 +2454,38 @@ function vDetailRe(id) {
   const st = reStatus(r);
   const storno = r.stornoId ? S.rechnungen.find((x) => x.id === r.stornoId) : null;
   const orig = r.stornoVon ? S.rechnungen.find((x) => x.id === r.stornoVon) : null;
-  openDlg(`${head((r.typ === 'gutschrift' ? 'Stornorechnung ' : 'Rechnung ') + esc(r.nr))}<div class="dlg-body">
+  const korr = S.rechnungen.filter((g) => g.typ === 'gutschrift' && g.teil && g.stornoVon === r.id && zaehlt(g));
+  openDlg(`${head((r.extern ? 'Rechnung ' : docTitel(r) + ' ') + esc(r.nr))}<div class="dlg-body">
     <p><span class="pill ${st.c}">${st.t}</span>${r.extern ? ' <span class="pill grey">Hinterlegt</span>' : ''}</p>
     ${kopfDaten(r)}
     <p class="small muted">Rechnungsdatum ${dat(r.datum)}${r.leistungsdatum ? ', Leistung ' + dat(r.leistungsdatum) : ''}${r.faellig && r.typ !== 'gutschrift' ? ', zahlbar bis ' + dat(r.faellig) : ''}${r.bezahltAm ? ', bezahlt am ' + dat(r.bezahltAm) : ''}${r.versendetAm ? ', per E-Mail verschickt am ' + dat(r.versendetAm) : ''}${r.ls ? `. Lieferschein ${esc(r.ls.nr)}` : ''}</p>
     ${hatSkonto(r) && ['offen', 'ueberfaellig'].includes(st.k) ? `<p class="small">${tageBis(plusTage(r.datum, num(r.skontoTage))) >= 0 ? `Skonto: ${String(r.skontoProz).replace('.', ',')} % bis ${dat(plusTage(r.datum, num(r.skontoTage)))}, dann ${eur(r2(summen(r).brutto * (1 - num(r.skontoProz) / 100)))}.` : 'Die Skonto-Frist ist abgelaufen.'}</p>` : ''}
     ${posTabelle(r)}<div style="margin-top:8px">${totalsHtml(r)}</div>
     ${storno ? `<p class="small">Storniert durch <a href="#" data-act="open-re" data-id="${storno.id}">${esc(storno.nr)}</a>.</p>` : ''}
-    ${orig ? `<p class="small">Storniert die Rechnung <a href="#" data-act="open-re" data-id="${orig.id}">${esc(orig.nr)}</a>.</p>` : ''}
+    ${orig ? `<p class="small">${r.teil ? 'Korrigiert' : 'Storniert'} die Rechnung <a href="#" data-act="open-re" data-id="${orig.id}">${esc(orig.nr)}</a>.</p>` : ''}
+    ${korr.length ? `<p class="small">Korrigiert durch ${korr.map((g) => `<a href="#" data-act="open-re" data-id="${g.id}">${esc(g.nr)}</a> (${eur(summen(g).brutto)})`).join(', ')}.</p>` : ''}
+    ${istSchluss(r) ? `<p class="small">Abgezogene Abschläge: ${r.abzuege.map((a) => `<a href="#" data-act="open-re" data-id="${a.id}">${esc(a.nr)}</a>`).join(', ')}.</p>` : ''}
     ${r.dateiId ? `<p><button data-act="file" data-id="${r.dateiId}">📎 ${esc(r.dateiName || 'Datei')} öffnen</button></p>` : ''}
+    ${r.zahlungen && r.zahlungen.length ? `<div class="card" style="margin-top:14px"><b>Zahlungen</b><ul class="list" style="margin-top:6px">${r.zahlungen.map((z) => `<li style="display:flex;justify-content:space-between;align-items:center;gap:8px;padding:6px 0"><span>${z.art === 'nachlass' ? 'Nachlass (nicht gezahlt)' : 'Zahlung'} am ${dat(z.datum)}${z.bankId ? ' <span class="small muted">· vom Konto</span>' : ''}</span><span style="display:flex;gap:8px;align-items:center"><b>${eur(num(z.betrag))}</b><button class="del" data-act="zahlung-del" data-id="${r.id}" data-k="${z.id}" aria-label="Zahlung entfernen">✕</button></span></li>`).join('')}</ul>
+      ${offenBetrag(r) ? `<p class="small" style="margin:6px 0 0">Noch offen: <b>${eur(offenBetrag(r))}</b></p>` : ''}</div>` : ''}
     ${['offen', 'ueberfaellig'].includes(st.k) ? `<div class="card" style="margin-top:14px"><b>Ist das Geld da?</b>
-      <div class="grid2" style="margin-top:8px"><label>Bezahlt am<input type="date" id="bezDat" value="${heute()}"></label></div>
-      <div class="btns"><button class="primary" data-act="bezahlt" data-id="${r.id}">Als bezahlt markieren</button></div></div>` : ''}
+      <div class="grid2" style="margin-top:8px"><label>Bezahlt am<input type="date" id="bezDat" value="${heute()}"></label><label>Betrag €<input id="bezBetrag" inputmode="decimal" value="${String(offenBetrag(r).toFixed(2)).replace('.', ',')}"></label></div>
+      <label class="check" style="margin-top:8px"><input type="checkbox" id="bezRest"> Der Rest ist erledigt, der Kunde muss ihn nicht mehr zahlen (z. B. Skonto abgezogen)</label>
+      ${hatSkonto(r) ? `<p class="small muted" style="margin:6px 0 0">Mit ${String(r.skontoProz).replace('.', ',')} % Skonto wären es ${eur(r2(offenBetrag(r) * (1 - num(r.skontoProz) / 100)))}. <button type="button" class="chip" data-act="bez-skonto" data-k="${r2(offenBetrag(r) * (1 - num(r.skontoProz) / 100))}">Eintragen</button></p>` : ''}
+      <p class="small muted" style="margin:6px 0 0">Weniger als den offenen Betrag eintragen, wenn der Kunde nur einen Teil gezahlt hat. Ein erlassener Rest mindert Umsatz und Umsatzsteuer.</p>
+      <div class="btns"><button class="primary" data-act="bezahlt" data-id="${r.id}">Zahlung eintragen</button></div></div>` : ''}
     ${(r.mahnungen || []).length || st.k === 'ueberfaellig' ? `<div class="card" style="margin-top:14px"><b>Mahnungen</b>
       ${(r.mahnungen || []).length ? `<ul class="list" style="margin-top:6px">${r.mahnungen.map((m, i) => `<li style="display:flex;justify-content:space-between;align-items:center;gap:8px;padding:6px 0"><span>${MAHN[m.stufe].t} vom ${dat(m.datum)}<br><span class="small muted">Frist bis ${dat(m.frist)}${num(m.gebuehr) + num(m.zinsen) + num(m.pauschale) ? ', ' + eur(num(m.gebuehr) + num(m.zinsen) + num(m.pauschale)) + ' Gebühren und Zinsen' : ''}</span></span><button data-act="mahn-print" data-id="${r.id}" data-i="${i}">Drucken</button></li>`).join('')}</ul>` : '<p class="small muted" style="margin:6px 0 0">Noch nicht gemahnt.</p>'}
       ${st.k === 'ueberfaellig' && mahnStufe(r) < 3 ? `<p class="small muted" style="margin:6px 0 0">${mahnenFaellig(r) ? 'Der nächste Schritt ist dran.' : `Die Frist der letzten Mahnung läuft noch bis ${dat(letzteMahnung(r).frist)}.`}</p><div class="btns"><button${mahnenFaellig(r) ? ' class="primary"' : ''} data-act="mahnen" data-id="${r.id}">${MAHN[mahnStufe(r) + 1].b}</button></div>` : ''}
       ${st.k === 'ueberfaellig' && mahnStufe(r) >= 3 && tageBis(letzteMahnung(r).frist) < 0 ? '<p class="small" style="margin:6px 0 0">Alle Mahnstufen sind durch. Nächster Schritt wäre ein gerichtlicher Mahnbescheid (online über mahngerichte.de) oder ein Inkassobüro.</p>' : ''}</div>` : ''}
     ${st.k === 'bezahlt' ? `<div class="btns"><button data-act="unbezahlt" data-id="${r.id}">Doch nicht bezahlt</button></div>` : ''}
-    <details><summary>Warum kann ich die Rechnung nicht ändern oder löschen?</summary><p class="small muted" style="margin-top:6px">Eine gestellte Rechnung darf nach GoBD nicht mehr verändert werden, und die Nummern müssen lückenlos sein. Wenn sie falsch ist, erstellst du eine Stornorechnung und danach eine neue Rechnung.</p></details>
+    <details><summary>Warum kann ich die Rechnung nicht ändern oder löschen?</summary><p class="small muted" style="margin-top:6px">Eine gestellte Rechnung darf nach GoBD nicht mehr verändert werden, und die Nummern müssen lückenlos sein. Ist sie ganz falsch, stornierst du sie und schreibst eine neue. Stimmt nur ein Teil nicht (z. B. eine Position zu viel oder ein Preisnachlass), nimm „Teil gutschreiben“.</p></details>
   </div>
   <div class="dlg-foot">
     ${!r.extern ? `<button data-act="print" data-id="${r.id}" data-t="re">Drucken / PDF</button><button data-act="xml" data-id="${r.id}">E-Rechnung (XML)</button><button data-act="mail" data-k="re" data-id="${r.id}">Per E-Mail</button>` : ''}
     ${!r.extern && r.typ !== 'gutschrift' && r.status !== 'storniert' ? `<button data-act="abls" data-k="ls" data-t="re" data-id="${r.id}">Lieferschein</button>` : ''}
     ${!r.extern && r.typ !== 'gutschrift' && r.status !== 'storniert' ? `<button data-act="vl-neu" data-k="rechnung" data-id="${r.id}">Regelmäßig wiederholen</button>` : ''}
+    ${!r.extern && r.typ !== 'gutschrift' && r.status !== 'storniert' ? `<button data-act="korrektur" data-id="${r.id}">Teil gutschreiben</button>` : ''}
     ${r.typ !== 'gutschrift' && r.status !== 'storniert' ? `<button class="danger" data-act="storno" data-id="${r.id}">Stornieren</button>` : ''}
     ${r.extern ? `<button class="danger" data-act="del-ext" data-id="${r.id}">Entfernen</button>` : ''}
   </div>`);
@@ -2461,7 +2528,7 @@ function mahnenFaellig(r) {
 const verzugTage = (r) => Math.max(0, -tageBis(r.faellig));
 function mahnZinsen(r, firma) {
   const satz = num(S.firma.basiszins) + (firma ? 9 : 5);
-  return { satz: r2(satz), tage: verzugTage(r), betrag: r2(summen(r).brutto * satz / 100 * verzugTage(r) / 365) };
+  return { satz: r2(satz), tage: verzugTage(r), betrag: r2(offenBetrag(r) * satz / 100 * verzugTage(r) / 365) };
 }
 function vMahnen(id) {
   const r = S.rechnungen.find((x) => x.id === id); if (!r) return;
@@ -2469,7 +2536,7 @@ function vMahnen(id) {
   const firma = !!r.kunde.ustid, z = mahnZinsen(r, firma);
   const hatPauschale = (r.mahnungen || []).some((x) => x.pauschale), hatZinsen = (r.mahnungen || []).some((x) => x.zinsen);
   openDlg(`${head(M.t + ' zu ' + esc(r.nr))}<form id="mahnForm" class="dlg-body" autocomplete="off" data-id="${r.id}" data-stufe="${stufe}">
-    <p>${esc(r.kunde.name)} schuldet dir <b>${eur(summen(r).brutto)}</b>, fällig seit ${dat(r.faellig)} (${z.tage} Tage).${mahnStufe(r) ? ` Zuletzt: ${MAHN[mahnStufe(r)].t} vom ${dat(letzteMahnung(r).datum)}.` : ''}</p>
+    <p>${esc(r.kunde.name)} schuldet dir <b>${eur(offenBetrag(r))}</b>${gezahlt(r) ? ` (von ${eur(summen(r).brutto)}, ${eur(gezahlt(r))} schon bezahlt)` : ''}, fällig seit ${dat(r.faellig)} (${z.tage} Tage).${mahnStufe(r) ? ` Zuletzt: ${MAHN[mahnStufe(r)].t} vom ${dat(letzteMahnung(r).datum)}.` : ''}</p>
     <div class="grid2">
       <label>Neue Zahlungsfrist<input type="date" name="frist" value="${plusTage(heute(), M.frist)}"></label>
       <label>Mahngebühr €<input name="gebuehr" inputmode="decimal" value="${String(M.gebuehr).replace('.', ',')}"></label>
@@ -2510,7 +2577,8 @@ function druckMahnung(r, m) {
   const frueher = (r.mahnungen || []).filter((x) => x !== m && x.stufe < m.stufe);
   /* Gebühren früherer Mahnungen bleiben offen und werden mitgeführt */
   const alt = frueher.reduce((a, x) => a + num(x.gebuehr) + num(x.pauschale), 0);
-  const gesamt = r2(s.brutto + alt + num(m.gebuehr) + num(m.zinsen) + num(m.pauschale));
+  const schon = gezahlt(r) + zSumme(r, true);
+  const gesamt = r2(s.brutto - schon + alt + num(m.gebuehr) + num(m.zinsen) + num(m.pauschale));
   const text = {
     1: `sicher ist es im Alltag untergegangen: Unsere Rechnung ${esc(r.nr)} vom ${dat(r.datum)} über ${eur(s.brutto)} war am ${dat(r.faellig)} fällig. Bis heute haben wir keinen Zahlungseingang festgestellt.</p><p>Bitte überweisen Sie den offenen Betrag bis zum <b>${dat(m.frist)}</b>. Falls Sie bereits gezahlt haben, betrachten Sie dieses Schreiben bitte als gegenstandslos.`,
     2: `leider konnten wir für unsere Rechnung ${esc(r.nr)} vom ${dat(r.datum)}, fällig am ${dat(r.faellig)}, trotz ${frueher.length ? 'unserer Zahlungserinnerung vom ' + dat(frueher[frueher.length - 1].datum) : 'Fälligkeit'} noch keinen Zahlungseingang feststellen. Sie befinden sich seit dem ${dat(plusTage(r.faellig, 1))} in Zahlungsverzug.</p><p>Bitte überweisen Sie den unten genannten Gesamtbetrag bis spätestens <b>${dat(m.frist)}</b>.`,
@@ -2522,6 +2590,7 @@ function druckMahnung(r, m) {
     <h1>${M.t}</h1>
     <p>Sehr geehrte Damen und Herren,</p><p>${text}</p>
     <div class="sum"><div><span>Rechnungsbetrag</span><span>${eur(s.brutto)}</span></div>
+    ${schon ? `<div><span>Bereits bezahlt</span><span>−${eur(schon)}</span></div>` : ''}
     ${alt ? `<div><span>Gebühren aus früheren Mahnungen</span><span>${eur(alt)}</span></div>` : ''}
     ${num(m.gebuehr) ? `<div><span>Mahngebühr</span><span>${eur(m.gebuehr)}</span></div>` : ''}
     ${num(m.zinsen) ? `<div><span>Verzugszinsen ${String(m.zinsSatz).replace('.', ',')} % p. a. für ${m.zinsTage} Tage</span><span>${eur(m.zinsen)}</span></div>` : ''}
@@ -2828,7 +2897,7 @@ const mailFelder = () => { const f = $('#mailForm').elements; return { an: f.an.
 /* ---------- Druck / PDF ---------- */
 /* modus: '' Angebot/Rechnung, 'ab' Auftragsbestätigung, 'ls' Lieferschein (ohne Preise) */
 function druck(d, titel, modus) {
-  const f = S.firma, s = summen(d), ls = modus === 'ls', ab = modus === 'ab';
+  const f = S.firma, s = summen(d), sv = istSchluss(d) ? summenVoll(d) : s, ls = modus === 'ls', ab = modus === 'ab';
   const absender = [f.name, f.strasse, [f.plz, f.ort].join(' ')].filter((x) => x && x.trim()).join(' · ');
   const isRe = d.typ !== 'angebot' && !modus, rab = hatRabatt(d) && !ls;
   const bez = d.typ === 'angebot' ? 'Angebot' : 'Rechnung';
@@ -2846,12 +2915,13 @@ function druck(d, titel, modus) {
     ${f.steuernr && !ls ? `<tr><td>Steuernr.</td><td>${esc(f.steuernr)}</td></tr>` : ''}${f.ustid && !ls ? `<tr><td>USt-IdNr.</td><td>${esc(f.ustid)}</td></tr>` : ''}</table></div></div>
     <h1>${titel}</h1>
     ${ab ? '<p>Sehr geehrte Damen und Herren,</p><p>vielen Dank für Ihren Auftrag. Wir bestätigen ihn wie folgt:</p>' : ''}
-    ${d.stornoVon ? `<p>Stornorechnung zur Rechnung ${esc((S.rechnungen.find((x) => x.id === d.stornoVon) || {}).nr || '')}.</p>` : ''}
+    ${d.stornoVon ? `<p>${d.teil ? 'Korrektur' : 'Stornorechnung'} zur Rechnung ${esc((S.rechnungen.find((x) => x.id === d.stornoVon) || {}).nr || '')} vom ${dat((S.rechnungen.find((x) => x.id === d.stornoVon) || {}).datum)}.</p>` : ''}
     <table class="p">${kopfP}${d.positionen.map(zeile).join('')}</table>
     ${ls ? `<p style="margin-top:14mm">Ware vollständig und in einwandfreiem Zustand erhalten:</p><div style="display:flex;gap:12mm;margin-top:14mm"><div style="flex:1;border-top:.3mm solid #000;padding-top:1mm;font-size:8.5pt">Datum</div><div style="flex:2;border-top:.3mm solid #000;padding-top:1mm;font-size:8.5pt">Name und Unterschrift</div></div>` : `
-    <div class="sum"><div><span>Netto</span><span>${eur(s.netto)}</span></div>
-    ${d.ku ? '' : Object.keys(s.proSatz).sort((a, b) => b - a).map((k) => `<div><span>USt ${k} %</span><span>${eur(r2(s.proSatz[k] * k / 100))}</span></div>`).join('')}
-    <div class="g"><span>Gesamtbetrag</span><span>${eur(s.brutto)}</span></div></div>
+    <div class="sum"><div><span>Netto</span><span>${eur(sv.netto)}</span></div>
+    ${d.ku ? '' : Object.keys(sv.proSatz).sort((a, b) => b - a).map((k) => `<div><span>USt ${k} %</span><span>${eur(r2(sv.proSatz[k] * k / 100))}</span></div>`).join('')}
+    <div class="g"><span>Gesamtbetrag</span><span>${eur(sv.brutto)}</span></div>
+    ${istSchluss(d) ? d.abzuege.map((a) => `<div><span>Abzüglich Abschlagsrechnung ${esc(a.nr)} vom ${dat(a.datum)}${d.ku ? '' : `<br><small>netto ${eur(a.netto)}, USt ${eur(a.ust)}</small>`}</span><span>−${eur(a.brutto)}</span></div>`).join('') + `<div class="g"><span>Noch zu zahlen</span><span>${eur(s.brutto)}</span></div>` : ''}</div>
     ${d.ku ? `<p>${KU_HINWEIS}</p>` : ''}
     ${RC[d.rc] ? `<p>${RC[d.rc].hinweis}</p>` : ''}
     ${isRe && d.typ !== 'gutschrift' && d.faellig ? `<p>Bitte überweisen Sie den Betrag bis zum ${dat(d.faellig)} unter Angabe der Rechnungsnummer${f.iban ? ' auf das unten genannte Konto' : ''}.${hatSkonto(d) ? ' ' + skontoText(d) : ''}</p>` : ''}
@@ -2895,7 +2965,8 @@ function eRechnungFehlt(r) {
 }
 
 function xrechnung(r) {
-  const f = S.firma, s = summen(r), x = (v) => esc(v || '');
+  /* Schlussrechnung: volle Beträge, Abschläge als schon gezahlt (PrepaidAmount) */
+  const f = S.firma, s = summenVoll(r), x = (v) => esc(v || ''), vorab = istSchluss(r) ? r2(r.abzuege.reduce((a2, z) => a2 + num(z.brutto), 0)) : 0;
   const a = (n) => n.toFixed(2);
   const credit = r.typ === 'gutschrift';
   const adr = kundenAdresse;
@@ -2923,11 +2994,11 @@ function xrechnung(r) {
   <cbc:ID>${x(r.nr)}</cbc:ID>
   <cbc:IssueDate>${r.datum}</cbc:IssueDate>
   ${r.faellig && !credit ? `<cbc:DueDate>${r.faellig}</cbc:DueDate>` : ''}
-  <cbc:InvoiceTypeCode>${credit ? 384 : 380}</cbc:InvoiceTypeCode>
+  <cbc:InvoiceTypeCode>${credit ? 384 : r.art === 'abschlag' ? 326 : 380}</cbc:InvoiceTypeCode>
   ${r.ku ? `<cbc:Note>${KU_HINWEIS}</cbc:Note>` : ''}${r.hinweis ? `<cbc:Note>${x(r.hinweis)}</cbc:Note>` : ''}
   <cbc:DocumentCurrencyCode>EUR</cbc:DocumentCurrencyCode>
   <cbc:BuyerReference>${x(r.kunde.leitweg || r.leitwegId || r.nr)}</cbc:BuyerReference>
-  ${orig ? `<cac:BillingReference><cac:InvoiceDocumentReference><cbc:ID>${x(orig.nr)}</cbc:ID><cbc:IssueDate>${orig.datum}</cbc:IssueDate></cac:InvoiceDocumentReference></cac:BillingReference>` : ''}
+  ${orig ? `<cac:BillingReference><cac:InvoiceDocumentReference><cbc:ID>${x(orig.nr)}</cbc:ID><cbc:IssueDate>${orig.datum}</cbc:IssueDate></cac:InvoiceDocumentReference></cac:BillingReference>` : ''}${istSchluss(r) ? r.abzuege.map((z) => `<cac:BillingReference><cac:InvoiceDocumentReference><cbc:ID>${x(z.nr)}</cbc:ID><cbc:IssueDate>${z.datum}</cbc:IssueDate></cac:InvoiceDocumentReference></cac:BillingReference>`).join('') : ''}
   <cac:AccountingSupplierParty><cac:Party>
     ${f.email ? `<cbc:EndpointID schemeID="EM">${x(f.email)}</cbc:EndpointID>` : ''}
     <cac:PostalAddress><cbc:StreetName>${x(f.strasse)}</cbc:StreetName><cbc:CityName>${x(f.ort)}</cbc:CityName><cbc:PostalZone>${x(f.plz)}</cbc:PostalZone><cac:Country><cbc:IdentificationCode>DE</cbc:IdentificationCode></cac:Country></cac:PostalAddress>
@@ -2947,7 +3018,7 @@ function xrechnung(r) {
   ${r.faellig && !credit ? `<cac:PaymentTerms><cbc:Note>Zahlbar bis ${dat(r.faellig)}${hatSkonto(r) ? `&#10;#SKONTO#TAGE=${Math.round(num(r.skontoTage))}#PROZENT=${num(r.skontoProz).toFixed(2)}#&#10;` : ''}</cbc:Note></cac:PaymentTerms>` : ''}
   <cac:TaxTotal><cbc:TaxAmount currencyID="EUR">${a(s.ust)}</cbc:TaxAmount>${taxSub}
   </cac:TaxTotal>
-  <cac:LegalMonetaryTotal><cbc:LineExtensionAmount currencyID="EUR">${a(s.netto)}</cbc:LineExtensionAmount><cbc:TaxExclusiveAmount currencyID="EUR">${a(s.netto)}</cbc:TaxExclusiveAmount><cbc:TaxInclusiveAmount currencyID="EUR">${a(s.brutto)}</cbc:TaxInclusiveAmount><cbc:PayableAmount currencyID="EUR">${a(s.brutto)}</cbc:PayableAmount></cac:LegalMonetaryTotal>${lines}
+  <cac:LegalMonetaryTotal><cbc:LineExtensionAmount currencyID="EUR">${a(s.netto)}</cbc:LineExtensionAmount><cbc:TaxExclusiveAmount currencyID="EUR">${a(s.netto)}</cbc:TaxExclusiveAmount><cbc:TaxInclusiveAmount currencyID="EUR">${a(s.brutto)}</cbc:TaxInclusiveAmount>${vorab ? `<cbc:PrepaidAmount currencyID="EUR">${a(vorab)}</cbc:PrepaidAmount>` : ''}<cbc:PayableAmount currencyID="EUR">${a(r2(s.brutto - vorab))}</cbc:PayableAmount></cac:LegalMonetaryTotal>${lines}
 </ubl:Invoice>
 `;
 }
@@ -3143,11 +3214,10 @@ function datev(j) {
   for (const r of S.rechnungen) {
     if (!zaehlt(r)) continue;
     const s = summen(r), art = rcArt(r), kn = r.kunde && r.kunde.name;
-    let tag = r.datum;
-    if (ist) {
-      if (r.typ === 'gutschrift') { const o = S.rechnungen.find((x) => x.id === r.stornoVon); if (!o || !o.bezahltAm) continue; }
-      else { if (!r.bezahltAm) continue; tag = r.bezahltAm; }
-    }
+    let st;
+    if (r.typ === 'gutschrift') { const o = S.rechnungen.find((x) => x.id === r.stornoVon); if (ist && (!o || !hatZahlung(o))) continue; st = [[r.datum, 1]]; }
+    else if (ist || r.art === 'abschlag') st = anteile(r, false).map((a) => [a.datum, a.f]);
+    else st = [[r.datum, 1]].concat(anteile(r, true).map((a) => [a.datum, -a.f]));
     const teile = [];
     if (r.ku) teile.push([K('ku'), s.netto]);
     else if (art) teile.push([K(art), s.netto]);
@@ -3155,8 +3225,8 @@ function datev(j) {
       const proSatz = r.extern ? { [s.netto ? Math.round(s.ust / s.netto * 100) : 0]: s.netto } : s.proSatz;
       for (const k in proSatz) teile.push([Number(k) === 19 ? K('e19') : Number(k) === 7 ? K('e7') : K('frei'), r2(proSatz[k] * (1 + Number(k) / 100))]);
     }
-    if ((tag || '').startsWith(y)) for (const [konto, b] of teile) add(b, ist ? K('bank') : K('ford'), konto, '', tag, r.nr, `${kn || 'Kunde'} ${r.typ === 'gutschrift' ? 'Storno' : 'Rechnung'} ${r.nr || ''}`);
-    if (!ist && r.typ !== 'gutschrift' && (r.bezahltAm || '').startsWith(y)) add(s.brutto, K('bank'), K('ford'), '', r.bezahltAm, r.nr, `Zahlung ${kn || 'Kunde'} ${r.nr || ''}`);
+    for (const [tag, f] of st) if ((tag || '').startsWith(y)) for (const [konto, b] of teile) add(b * f, ist ? K('bank') : K('ford'), konto, '', tag, r.nr, `${kn || 'Kunde'} ${r.typ === 'gutschrift' ? 'Storno' : f < 0 ? 'Nachlass' : f < 1 && ist ? 'Teilzahlung' : 'Rechnung'} ${r.nr || ''}`);
+    if (!ist && r.typ !== 'gutschrift' && r.art !== 'abschlag') for (const a of anteile(r, false)) if ((a.datum || '').startsWith(y)) add(s.brutto * a.f, K('bank'), K('ford'), '', a.datum, r.nr, `Zahlung ${kn || 'Kunde'} ${r.nr || ''}`);
   }
   // Belege: Aufwand an Bank, Kasse, Privateinlage oder Verbindlichkeit
   let n = 0;
@@ -3252,11 +3322,51 @@ const ACT = {
   'an-to-re': (el) => {
     const a = S.angebote.find((x) => x.id === el.dataset.id);
     const r = neuesDoc('rechnung');
-    Object.assign(r, { kunde: JSON.parse(JSON.stringify(a.kunde)), positionen: JSON.parse(JSON.stringify(a.positionen)), ausAngebot: a.id, hinweis: '', neu: true, ku: a.ku });
-    edit = r; vEditor(); toast('Positionen aus dem Angebot übernommen');
+    Object.assign(r, { kunde: JSON.parse(JSON.stringify(a.kunde)), positionen: JSON.parse(JSON.stringify(a.positionen)), ausAngebot: a.id, hinweis: '', neu: true, ku: a.ku, rc: a.rc || '' });
+    const abs = anAbschlaege(a).filter(zaehlt);
+    if (abs.length) { r.artSchluss = true; r.abzuege = abs.map(abzugAus); }
+    edit = r; vEditor(); toast(abs.length ? `Schlussrechnung: ${abs.length} Abschl${abs.length > 1 ? 'äge' : 'ag'} werden abgezogen` : 'Positionen aus dem Angebot übernommen');
   },
-  bezahlt: async (el) => { const r = S.rechnungen.find((x) => x.id === el.dataset.id); r.status = 'bezahlt'; r.bezahltAm = ($('#bezDat') || {}).value || heute(); await save(); vDetailRe(r.id); render(); toast('Als bezahlt markiert'); },
-  unbezahlt: async (el) => { const r = S.rechnungen.find((x) => x.id === el.dataset.id); r.status = 'offen'; delete r.bezahltAm; for (const b of S.bank) if (b.rechnungId === r.id) b.rechnungId = null; await save(); vDetailRe(r.id); render(); },
+  'an-abschlag': (el) => {
+    const a = S.angebote.find((x) => x.id === el.dataset.id), s = summen(a), schon = anAbschlaege(a).length;
+    const r = neuesDoc('rechnung');
+    Object.assign(r, { art: 'abschlag', projektAngebot: a.id, kunde: JSON.parse(JSON.stringify(a.kunde)), ku: a.ku, rc: a.rc || '', neu: true,
+      positionen: Object.keys(s.proSatz).filter((k) => s.proSatz[k]).map((k) => ({ text: `${schon + 1}. Abschlag laut Angebot ${a.nr}`, menge: 1, einheit: 'pauschal', preis: r2(s.proSatz[k] * 0.3), ust: a.ku || a.rc ? 0 : Number(k), rabatt: 0 })) });
+    edit = r; vEditor(); toast('Abschlag mit 30 % vorbelegt, den Betrag kannst du ändern');
+  },
+  bezahlt: async (el) => {
+    const r = S.rechnungen.find((x) => x.id === el.dataset.id), datum = ($('#bezDat') || {}).value || heute(), offen = offenBetrag(r);
+    const betrag = r2(num(($('#bezBetrag') || {}).value)), restWeg = ($('#bezRest') || {}).checked;
+    if (betrag <= 0 && !restWeg) return toast('Bitte einen Betrag eintragen.');
+    if (betrag > offen + 0.005 && !confirm(`Das ist mehr als offen (${eur(offen)}). Trotzdem so eintragen?`)) return;
+    r.zahlungen = (r.zahlungen || []).slice();
+    if (betrag > 0) r.zahlungen.push({ id: uid(), datum, betrag, art: 'zahlung' });
+    if (restWeg && offen - betrag > 0.005) r.zahlungen.push({ id: uid(), datum, betrag: r2(offen - betrag), art: 'nachlass' });
+    zahlStatus(r); await save(); vDetailRe(r.id); render();
+    toast(r.status === 'bezahlt' ? 'Als bezahlt markiert' : `Teilzahlung eingetragen, offen ${eur(offenBetrag(r))}`);
+  },
+  're-art': (el) => {
+    readEditor(); const k = el.dataset.k;
+    edit.art = k === 'abschlag' ? 'abschlag' : ''; edit.artSchluss = k === 'schluss';
+    if (k === 'schluss') { if (!istSchluss(edit)) edit.abzuege = freieAbschlaege(edit.kunde.name, edit.id).map(abzugAus); } else edit.abzuege = null;
+    vEditor();
+  },
+  korrektur: (el) => {
+    const r = S.rechnungen.find((x) => x.id === el.dataset.id); if (!r) return;
+    const g = JSON.parse(JSON.stringify(r));
+    Object.assign(g, { id: uid(), typ: 'gutschrift', teil: true, nr: '', datum: heute(), status: 'entwurf', stornoVon: r.id, hinweis: '', ausAngebot: null, art: '', abzuege: null, artSchluss: false, skontoProz: 0, skontoTage: 0, neu: true });
+    for (const k of ['bezahltAm', 'stornoId', 'zahlungen', 'mahnungen', 'versendetAm', 'ls', 'gestelltAm', 'vorlage']) delete g[k];
+    g.positionen = g.positionen.map((p) => Object.assign(p, { menge: -Math.abs(num(p.menge)) }));
+    edit = g; vEditor();
+  },
+  'bez-skonto': (el) => { $('#bezBetrag').value = String(el.dataset.k).replace('.', ','); $('#bezRest').checked = true; },
+  'zahlung-del': async (el) => {
+    const r = S.rechnungen.find((x) => x.id === el.dataset.id); if (!confirm('Diese Zahlung entfernen?')) return;
+    const z = (r.zahlungen || []).find((x) => x.id === el.dataset.k);
+    if (z && z.bankId) { const b = S.bank.find((x) => x.id === z.bankId); if (b) b.rechnungId = null; }
+    r.zahlungen = (r.zahlungen || []).filter((x) => x.id !== el.dataset.k); zahlStatus(r); await save(); vDetailRe(r.id); render();
+  },
+  unbezahlt: async (el) => { const r = S.rechnungen.find((x) => x.id === el.dataset.id); r.status = 'offen'; delete r.bezahltAm; delete r.zahlungen; for (const b of S.bank) if (b.rechnungId === r.id) b.rechnungId = null; await save(); vDetailRe(r.id); render(); },
   storno: async (el) => {
     const r = S.rechnungen.find((x) => x.id === el.dataset.id);
     if (!confirm(`Rechnung ${r.nr} stornieren? Es wird eine Stornorechnung mit negativen Beträgen erstellt.`)) return;
@@ -3269,7 +3379,7 @@ const ACT = {
   'del-ext': async (el) => { if (!confirm('Hinterlegte Rechnung entfernen?')) return; const r = S.rechnungen.find((x) => x.id === el.dataset.id); if (r.dateiId) await idbDel('datei:' + r.dateiId); S.rechnungen = S.rechnungen.filter((x) => x.id !== r.id); await save(); closeDlg(); render(); },
   print: (el) => {
     if (el.dataset.t === 'an') druck(S.angebote.find((x) => x.id === el.dataset.id), 'Angebot');
-    else { const r = S.rechnungen.find((x) => x.id === el.dataset.id); druck(r, r.typ === 'gutschrift' ? 'Stornorechnung' : 'Rechnung'); }
+    else { const r = S.rechnungen.find((x) => x.id === el.dataset.id); druck(r, docTitel(r)); }
   },
   xml: (el) => {
     const r = S.rechnungen.find((x) => x.id === el.dataset.id), m = eRechnungFehlt(r);
@@ -3374,12 +3484,17 @@ const ACT = {
   'open-bk': (el) => vBuchung(el.dataset.id),
   'bk-zu': async (el) => {
     const b = S.bank.find((x) => x.id === el.dataset.id), r = S.rechnungen.find((x) => x.id === el.dataset.k);
-    b.rechnungId = r.id; r.status = 'bezahlt'; r.bezahltAm = b.datum;
-    await save(); vBuchung(b.id); render(); toast(`Rechnung ${r.nr} als bezahlt markiert`);
+    const offen = offenBetrag(r), betrag = r2(Math.min(num(b.betrag), offen));
+    b.rechnungId = r.id; r.zahlungen = (r.zahlungen || []).concat({ id: uid(), datum: b.datum, betrag, art: 'zahlung', bankId: b.id });
+    // Fehlt genau der Skonto-Betrag, gilt der Rest als Skonto
+    const fehlt = r2(offen - betrag);
+    if (fehlt > 0.005 && hatSkonto(r) && Math.abs(r2(offen * num(r.skontoProz) / 100) - fehlt) < 0.02) r.zahlungen.push({ id: uid(), datum: b.datum, betrag: fehlt, art: 'nachlass', bankId: b.id });
+    zahlStatus(r);
+    await save(); vBuchung(b.id); render(); toast(r.status === 'bezahlt' ? `Rechnung ${r.nr} als bezahlt markiert` : `Teilzahlung zu ${r.nr}, offen ${eur(offenBetrag(r))}`);
   },
   'bk-los': async (el) => {
     const b = S.bank.find((x) => x.id === el.dataset.id), r = S.rechnungen.find((x) => x.id === b.rechnungId);
-    if (r && r.status === 'bezahlt') { r.status = 'offen'; delete r.bezahltAm; }
+    if (r) { if (r.zahlungen && r.zahlungen.some((z) => z.bankId === b.id)) { r.zahlungen = r.zahlungen.filter((z) => z.bankId !== b.id); zahlStatus(r); } else if (r.status === 'bezahlt') { r.status = 'offen'; delete r.bezahltAm; } }
     b.rechnungId = null; await save(); vBuchung(b.id); render();
   },
   backup, restore,
