@@ -113,7 +113,7 @@ textarea { min-height: 70px; resize: vertical; }
 .full { grid-column: 1 / -1; }
 .pos { border: 1px solid var(--line); border-radius: 10px; padding: 10px; margin-bottom: 8px; display: grid; gap: 8px; grid-template-columns: 1fr 1fr; }
 .pos .text { grid-column: 1 / -1; }
-@media (min-width: 640px) { .pos { grid-template-columns: 3fr 1fr 1fr 1.2fr 1fr auto; align-items: end; } .pos .text { grid-column: auto; } }
+@media (min-width: 640px) { .pos { grid-template-columns: 3fr .8fr 1fr 1.1fr .9fr .8fr auto; align-items: end; } .pos .text { grid-column: auto; } }
 .pos .sum { font-variant-numeric: tabular-nums; font-weight: 600; padding: 9px 0; }
 .pos .del { padding: 8px 10px; }
 .totals { margin-left: auto; max-width: 320px; font-variant-numeric: tabular-nums; }
@@ -232,8 +232,8 @@ const REGISTER_RF = ['ek', 'ohg', 'ug', 'gmbh'];
 function leer() {
   return {
     v: 2,
-    firma: { name: '', inhaber: '', strasse: '', plz: '', ort: '', steuernr: '', ustid: '', email: '', tel: '', iban: '', bic: '', bank: '', rechtsform: '', registergericht: '', registernr: '', logo: '', kleinunternehmer: false, gruendung: '', turnus: 'monat', dauerfrist: false, zahlungsziel: 14, angebotTage: 30, basiszins: 1.27 },
-    angebote: [], rechnungen: [], belege: [], kunden: [], lieferanten: [], bank: [], vorlagen: [], zaehler: {}, letzteSicherung: null,
+    firma: { name: '', inhaber: '', strasse: '', plz: '', ort: '', steuernr: '', ustid: '', email: '', tel: '', iban: '', bic: '', bank: '', rechtsform: '', registergericht: '', registernr: '', logo: '', kleinunternehmer: false, gruendung: '', turnus: 'monat', dauerfrist: false, zahlungsziel: 14, angebotTage: 30, basiszins: 1.27, skontoProz: '', skontoTage: '', nummern: {} },
+    angebote: [], rechnungen: [], belege: [], kunden: [], lieferanten: [], bank: [], vorlagen: [], artikel: [], zaehler: {}, letzteSicherung: null,
     steuer: { versteuerung: 'soll', hebesatz: 400, berater: false, svz: 0, vzEst: 0, vzGew: 0, erledigt: {}, ruecklageIst: '', kalVorher: 3, kalRe: true, skr: '03', beraterNr: '', mandantNr: '' },
     est: {}
   };
@@ -248,7 +248,7 @@ async function load() {
 }
 /* Ältere Stände: Kunden bekommen eine id, Lieferanten entstehen aus vorhandenen Belegen */
 function migriere() {
-  S.kunden = S.kunden || []; S.lieferanten = S.lieferanten || []; S.vorlagen = S.vorlagen || [];
+  S.kunden = S.kunden || []; S.lieferanten = S.lieferanten || []; S.vorlagen = S.vorlagen || []; S.artikel = S.artikel || []; S.firma.nummern = S.firma.nummern || {};
   for (const k of S.kunden) if (!k.id) k.id = uid();
   if ((S.v || 1) < 2) {
     for (const b of S.belege.slice().sort((x, y) => (x.datum || '').localeCompare(y.datum || ''))) merkeLieferant(b.lieferant, b.kategorie, b.rc);
@@ -274,6 +274,11 @@ const MONATE = ['Januar', 'Februar', 'März', 'April', 'Mai', 'Juni', 'Juli', 'A
 function toast(t) { const el = document.createElement('div'); el.className = 'toast'; el.setAttribute('role', 'status'); el.textContent = t; document.body.appendChild(el); setTimeout(() => el.remove(), 2600); }
 const ku = () => !!S.firma.kleinunternehmer;
 
+/* Positionsbetrag netto, nach Rabatt */
+const posBasis = (p) => r2(num(p.menge) * num(p.preis));
+const posRabatt = (p) => r2(posBasis(p) * num(p.rabatt) / 100);
+const posNetto = (p) => r2(posBasis(p) - posRabatt(p));
+const hatRabatt = (d) => (d.positionen || []).some((p) => num(p.rabatt));
 function summen(doc) {
   if (doc.extern) {
     const netto = num(doc.netto), ust = num(doc.ust);
@@ -281,7 +286,7 @@ function summen(doc) {
   }
   let netto = 0; const proSatz = {};
   for (const p of doc.positionen || []) {
-    const n = r2(num(p.menge) * num(p.preis));
+    const n = posNetto(p);
     netto += n;
     const satz = doc.ku || doc.rc ? 0 : num(p.ust);
     proSatz[satz] = (proSatz[satz] || 0) + n;
@@ -292,11 +297,29 @@ function summen(doc) {
   return { netto, ust, brutto: r2(netto + ust), proSatz };
 }
 
-function naechsteNr(art, jahr) {
+/* Nummernkreise. Platzhalter: {JJJJ} Jahr, {JJ} Jahr zweistellig, {MM} Monat, {NNN} laufende Nummer (Anzahl N = Stellen) */
+const NR_ARTEN = { RE: ['Rechnungen und Stornos', 'RE-{JJJJ}-{NNNN}'], AN: ['Angebote', 'AN-{JJJJ}-{NNN}'], AB: ['Auftragsbestätigungen', 'AB-{JJJJ}-{NNN}'], LS: ['Lieferscheine', 'LS-{JJJJ}-{NNN}'] };
+const nrFormat = (art) => (S.firma.nummern || {})[art] || NR_ARTEN[art][1];
+/* Ohne Jahr im Format läuft die Nummer über alle Jahre weiter */
+const nrKey = (art, jahr, fmt) => /\{JJ(JJ)?\}/.test(fmt || nrFormat(art)) ? String(jahr) : 'fort';
+function nrBau(fmt, datum, n) {
+  const j = String(datum).slice(0, 4), m = String(datum).length >= 7 ? String(datum).slice(5, 7) : String(new Date().getMonth() + 1).padStart(2, '0');
+  return fmt.replace(/\{JJJJ\}/g, j).replace(/\{JJ\}/g, j.slice(2)).replace(/\{MM\}/g, m).replace(/\{(N+)\}/g, (x, ns) => String(n).padStart(ns.length, '0'));
+}
+function vergebeneNr() {
+  const v = new Set();
+  for (const r of S.rechnungen) { if (r.nr) v.add(r.nr); if (r.ls) v.add(r.ls.nr); }
+  for (const a of S.angebote) { if (a.nr) v.add(a.nr); if (a.ab) v.add(a.ab.nr); if (a.ls) v.add(a.ls.nr); }
+  return v;
+}
+/* datum: ISO-Datum (oder nur das Jahr). Schon vergebene Nummern werden übersprungen, damit nie eine doppelt vorkommt. */
+function naechsteNr(art, datum) {
+  const fmt = nrFormat(art), key = nrKey(art, String(datum).slice(0, 4), fmt), vergeben = vergebeneNr();
   S.zaehler[art] = S.zaehler[art] || {};
-  const n = (S.zaehler[art][jahr] || 0) + 1;
-  S.zaehler[art][jahr] = n;
-  return art + '-' + jahr + '-' + String(n).padStart(art === 'RE' ? 4 : 3, '0');
+  let n = S.zaehler[art][key] || 0, nr;
+  do { n++; nr = nrBau(fmt, datum, n); } while (vergeben.has(nr) && n < 1e6);
+  S.zaehler[art][key] = n;
+  return nr;
 }
 
 function reStatus(r) {
@@ -1343,7 +1366,7 @@ function beispielDaten() {
     { id: uid(), name: 'Shell Station Pforzheim', adresse: '', ustid: '', email: '', tel: '', kategorie: 'Fahrzeug und Reise', rc: '', notiz: '' }
   ];
   const kd = (k) => ({ name: k.name, adresse: k.adresse, ustid: k.ustid, email: k.email, leitweg: '', land: '' });
-  const nr = (art, d) => { const S0 = S; S = B; const n = naechsteNr(art, d.slice(0, 4)); S = S0; return n; };
+  const nr = (art, d) => { const S0 = S; S = B; const n = naechsteNr(art, d); S = S0; return n; };
   const doc = (typ, k, datum, pos, extra) => Object.assign({ id: uid(), typ, nr: '', datum, leistungsdatum: datum, faellig: '', gueltigBis: '', kunde: kd(k), positionen: pos, hinweis: '', status: 'offen', ku: false }, extra);
   const a1 = doc('angebot', K[1], tag(-50), [{ text: 'Fahrzeugbeschriftung Transporter, beidseitig', menge: 2, einheit: 'Stk.', preis: 890, ust: 19 }, { text: 'Montage', menge: 4, einheit: 'Std.', preis: 65, ust: 19 }], { gueltigBis: tag(-20), status: 'abgerechnet' });
   const a2 = doc('angebot', K[2], tag(-6), [{ text: 'Schaufensterfolie mit Logo', menge: 1, einheit: 'pauschal', preis: 480, ust: 19 }, { text: 'Speisekarten, Druck', menge: 200, einheit: 'Stk.', preis: 1.2, ust: 19 }], { gueltigBis: tag(24) });
@@ -1366,6 +1389,11 @@ function beispielDaten() {
   const k4 = bk(tag(-3), -24.99, 'Amazon EU S.a.r.l.', 'Bestellung 302-4455667');
   b1.buchungId = k2.id; b2.buchungId = k3.id;
   B.bank = [k1, k2, k3, k4];
+  B.artikel = [
+    { id: uid(), name: 'Montage vor Ort', einheit: 'Std.', preis: 65, ust: 19 },
+    { id: uid(), name: 'Gestaltung und Satz', einheit: 'Std.', preis: 75, ust: 19 },
+    { id: uid(), name: 'Werbeschild Alu-Dibond 120×60 cm', einheit: 'Stk.', preis: 640, ust: 19 }
+  ];
   return B;
 }
 
@@ -1918,6 +1946,8 @@ function vFirma() {
       <label class="check" style="align-self:end"><input type="checkbox" name="dauerfrist"${f.dauerfrist ? ' checked' : ''}> Dauerfristverlängerung (+1 Monat)</label>
       <label>Zahlungsziel in Tagen<input name="zahlungsziel" inputmode="numeric" value="${esc(f.zahlungsziel)}"></label>
       <label>Angebote gültig für Tage<input name="angebotTage" inputmode="numeric" value="${esc(f.angebotTage)}"></label>
+      <label>Skonto % für neue Rechnungen (leer = keins)<input name="skontoProz" inputmode="decimal" value="${num(f.skontoProz) ? esc(String(f.skontoProz).replace('.', ',')) : ''}" placeholder="z. B. 2"></label>
+      <label>Skonto bei Zahlung innerhalb von Tagen<input name="skontoTage" inputmode="numeric" value="${num(f.skontoTage) ? esc(f.skontoTage) : ''}" placeholder="z. B. 7"></label>
       <label>Basiszinssatz % (für Verzugszinsen in Mahnungen)<input name="basiszins" inputmode="decimal" value="${esc(String(f.basiszins).replace('.', ','))}"></label>
     </div>
     <p class="small muted" style="margin-top:6px">Der Basiszinssatz ändert sich jeweils zum 1. Januar und 1. Juli. Den aktuellen Wert veröffentlicht die Deutsche Bundesbank.</p>
@@ -1927,6 +1957,9 @@ function vFirma() {
     <h2>Kunden und Lieferanten</h2>
     <p class="small muted">Kunden merkt sich die App beim Schreiben von Angeboten und Rechnungen, Lieferanten beim Speichern von Belegen. Hier kannst du sie ansehen, ergänzen und neu anlegen.</p>
     <div class="btns"><button data-act="kontakte" data-k="kunden">Kunden (${S.kunden.length})</button><button data-act="kontakte" data-k="lieferanten">Lieferanten (${S.lieferanten.length})</button></div>
+    <h2 style="margin-top:18px">Artikel und Nummern</h2>
+    <p class="small muted">Leistungen und Produkte mit festem Preis, und wie deine Rechnungs- und Angebotsnummern aussehen.</p>
+    <div class="btns"><button data-act="artikel">Artikel und Leistungen (${S.artikel.length})</button><button data-act="nummern">Nummern (${esc(nrBau(nrFormat('RE'), heute(), 1))})</button></div>
   </div>
   <div class="card">
     <h2>Sind meine Daten sicher?</h2>
@@ -2079,6 +2112,76 @@ async function saveKontakt() {
   await save(); render(); vKontakte(); toast('Gespeichert');
 }
 
+/* ---------- Nummernkreise einstellen ---------- */
+function vNummern() {
+  const j = heute().slice(0, 4);
+  openDlg(`${head('Nummern')}<form id="nrForm" class="dlg-body" autocomplete="off">
+    <p class="small muted" style="margin-top:0">Du legst fest, wie die Nummern aussehen und mit welcher Zahl die nächste beginnt. Platzhalter: <b>{JJJJ}</b> Jahr, <b>{JJ}</b> Jahr zweistellig, <b>{MM}</b> Monat, <b>{NNNN}</b> laufende Zahl (so viele N, wie die Zahl Stellen haben soll). Steht das Jahr in der Nummer, beginnt die Zählung jedes Jahr neu bei 1.</p>
+    ${Object.entries(NR_ARTEN).map(([art, [t]]) => {
+      const fmt = nrFormat(art), next = ((S.zaehler[art] || {})[nrKey(art, j, fmt)] || 0) + 1;
+      return `<h3>${t}</h3><div class="grid2">
+      <label>Aufbau<input name="f_${art}" value="${esc(fmt)}" data-art="${art}"></label>
+      <label>Nächste Zahl<input name="n_${art}" inputmode="numeric" value="${next}" data-art="${art}"></label>
+      <p class="small muted full" style="margin:0">Nächste Nummer: <b id="nv_${art}">${esc(nrBau(fmt, heute(), next))}</b></p></div>`;
+    }).join('')}
+    <details style="margin-top:10px"><summary>Was ist erlaubt?</summary><p class="small muted" style="margin-top:6px">Rechnungsnummern müssen einmalig sein und fortlaufend vergeben werden. Lücken sind erlaubt, wenn sie erklärbar sind, zum Beispiel bei einem Wechsel des Aufbaus zum Jahresanfang. Eine Nummer, die es schon gibt, vergibt die App nie ein zweites Mal, sie springt dann automatisch weiter.</p></details>
+  </form><div class="dlg-foot"><button data-act="close">Abbrechen</button><button class="primary" data-act="nr-save">Speichern</button></div>`);
+  $('#nrForm').addEventListener('input', () => {
+    for (const art of Object.keys(NR_ARTEN)) {
+      const f = $('#nrForm').elements, fmt = f['f_' + art].value.trim();
+      $('#nv_' + art).textContent = /\{N+\}/.test(fmt) ? nrBau(fmt, heute(), Math.max(1, Math.round(num(f['n_' + art].value)))) : 'Es fehlt die laufende Zahl {NNN}';
+    }
+  });
+}
+async function saveNummern() {
+  const f = $('#nrForm').elements, j = heute().slice(0, 4), neu = {};
+  for (const art of Object.keys(NR_ARTEN)) {
+    const fmt = f['f_' + art].value.trim();
+    if (!/\{N+\}/.test(fmt)) return toast(`Bei ${NR_ARTEN[art][0]} fehlt die laufende Zahl, z. B. {NNN}.`);
+    if (fmt.length > 30 || /[^\w{}\-\/.#]/.test(fmt.replace(/\{(JJJJ|JJ|MM|N+)\}/g, ''))) return toast(`Bei ${NR_ARTEN[art][0]}: bitte nur Buchstaben, Zahlen und - / . # verwenden.`);
+    neu[art] = { fmt, n: Math.max(1, Math.round(num(f['n_' + art].value))) };
+  }
+  for (const [art, { fmt, n }] of Object.entries(neu)) {
+    S.firma.nummern[art] = fmt === NR_ARTEN[art][1] ? '' : fmt;
+    S.zaehler[art] = S.zaehler[art] || {};
+    S.zaehler[art][nrKey(art, j, fmt)] = n - 1;
+  }
+  await save(); closeDlg(); render(); toast('Nummern gespeichert');
+}
+
+/* ---------- Artikelliste ---------- */
+let artEdit = null;
+function vArtikelListe() {
+  const list = S.artikel.slice().sort((a, b) => a.name.localeCompare(b.name, 'de'));
+  openDlg(`${head('Artikel und Leistungen')}<div class="dlg-body">
+    <p class="small muted" style="margin-top:0">Was du oft verkaufst, speicherst du hier einmal mit Preis. Beim Schreiben von Angeboten und Rechnungen wählst du es dann aus, statt es jedes Mal neu einzutippen.</p>
+    ${list.length ? `<ul class="list">${list.map((a) => `<li><button class="item" data-act="art-edit" data-id="${a.id}"><div class="grow"><div class="t">${esc(a.name)}</div><div class="s">je ${esc(a.einheit || 'Stk.')}${ku() ? '' : ' · ' + num(a.ust) + ' % USt'}${a.nr ? ' · Nr. ' + esc(a.nr) : ''}</div></div><div class="amt">${eur(num(a.preis))}</div></button></li>`).join('')}</ul>` : '<div class="empty">Noch keine Artikel.</div>'}
+  </div><div class="dlg-foot"><button class="primary" data-act="art-edit" data-id="">+ Artikel anlegen</button></div>`);
+}
+function vArtikel(id) {
+  const alt = S.artikel.find((x) => x.id === id);
+  const a = artEdit = alt ? JSON.parse(JSON.stringify(alt)) : { id: uid(), nr: '', name: '', einheit: 'Stk.', preis: '', ust: 19 };
+  openDlg(`${head(alt ? esc(a.name) : 'Neuer Artikel')}<form id="artForm" class="dlg-body" autocomplete="off"><div class="grid2">
+    <label class="full">Bezeichnung, so wie sie auf der Rechnung stehen soll<input name="name" value="${esc(a.name)}" placeholder="z. B. Beratung, Logo-Entwurf, Druck A4"></label>
+    <label>Einzelpreis netto €<input name="preis" inputmode="decimal" value="${a.preis === '' ? '' : esc(String(a.preis).replace('.', ','))}" placeholder="0,00"></label>
+    <label>Einheit<input name="einheit" list="einheitenArt" value="${esc(a.einheit)}"></label>
+    ${ku() ? '<input type="hidden" name="ust" value="0">' : `<label>Umsatzsteuer<select name="ust">${[19, 7, 0].map((v) => `<option value="${v}"${num(a.ust) === v ? ' selected' : ''}>${v} %</option>`).join('')}</select></label>`}
+    <label>Artikelnummer (optional)<input name="nr" value="${esc(a.nr || '')}"></label>
+  </div><datalist id="einheitenArt"><option value="Stk."><option value="Std."><option value="Tag"><option value="pauschal"><option value="Monat"><option value="km"></datalist>
+  <p class="small muted">Preisänderungen gelten nur für neue Angebote und Rechnungen. Schon geschriebene bleiben, wie sie sind.</p>
+  </form><div class="dlg-foot"><button data-act="artikel">Zurück zur Liste</button>${alt ? '<button class="danger" data-act="art-del">Löschen</button>' : ''}<button class="primary" data-act="art-save">Speichern</button></div>`);
+}
+async function saveArtikel() {
+  const f = $('#artForm'), a = artEdit;
+  a.name = f.elements.name.value.trim(); a.nr = f.elements.nr.value.trim(); a.einheit = f.elements.einheit.value.trim() || 'Stk.';
+  a.preis = r2(num(f.elements.preis.value)); a.ust = num(f.elements.ust.value);
+  if (!a.name) return toast('Bitte eine Bezeichnung eintragen.');
+  if (S.artikel.some((x) => x.id !== a.id && x.name.toLowerCase() === a.name.toLowerCase())) return toast('Diesen Artikel gibt es schon.');
+  const i = S.artikel.findIndex((x) => x.id === a.id);
+  if (i >= 0) S.artikel[i] = a; else S.artikel.push(a);
+  await save(); render(); vArtikelListe(); toast('Gespeichert');
+}
+
 /* ---------- Dialoge ---------- */
 const dlg = $('#dlg');
 function openDlg(html) { dlg.innerHTML = html; if (!dlg.open) dlg.showModal(); dlg.scrollTop = 0; }
@@ -2106,8 +2209,20 @@ function neuesDoc(typ) {
     gueltigBis: typ === 'angebot' ? plusTage(t, num(S.firma.angebotTage) || 30) : '',
     kunde: { name: '', adresse: '', ustid: '', email: '', leitweg: '', land: '' },
     positionen: [{ text: '', menge: 1, einheit: 'Stk.', preis: 0, ust: 19 }],
-    hinweis: '', status: typ === 'rechnung' ? 'entwurf' : 'offen', ku: ku()
+    hinweis: '', status: typ === 'rechnung' ? 'entwurf' : 'offen', ku: ku(),
+    skontoProz: typ === 'rechnung' ? num(S.firma.skontoProz) : 0, skontoTage: typ === 'rechnung' ? num(S.firma.skontoTage) : 0
   };
+}
+/* Skonto: x % weniger bei Zahlung innerhalb von n Tagen ab Rechnungsdatum */
+const hatSkonto = (d) => d.typ === 'rechnung' && num(d.skontoProz) > 0 && num(d.skontoTage) > 0;
+function skontoText(d) {
+  if (!hatSkonto(d)) return '';
+  const b = summen(d).brutto;
+  return `Bei Zahlung bis zum ${dat(plusTage(d.datum, num(d.skontoTage)))} ziehen Sie bitte ${String(d.skontoProz).replace('.', ',')} % Skonto ab und überweisen ${eur(r2(b - b * num(d.skontoProz) / 100))}.`;
+}
+/* Artikel und Leistungen, die man immer wieder abrechnet */
+function artikelPosition(a) {
+  return { text: a.name, menge: 1, einheit: a.einheit || 'Stk.', preis: num(a.preis), ust: edit && (edit.ku || edit.rc) ? 0 : num(a.ust), rabatt: 0 };
 }
 function readEditor() {
   const f = $('#edForm'); if (!f) return;
@@ -2116,8 +2231,10 @@ function readEditor() {
   edit.kunde = { name: g('k_name').trim(), adresse: g('k_adresse').trim(), ustid: g('k_ustid').trim(), email: g('k_email').trim(), leitweg: g('k_leitweg').trim(), land: g('k_land').trim().toUpperCase() };
   edit.positionen = [...f.querySelectorAll('.pos')].map((p) => ({
     text: p.querySelector('[name=p_text]').value, menge: num(p.querySelector('[name=p_menge]').value), einheit: p.querySelector('[name=p_einheit]').value,
-    preis: num(p.querySelector('[name=p_preis]').value), ust: edit.ku || edit.rc ? 0 : num(p.querySelector('[name=p_ust]').value)
+    preis: num(p.querySelector('[name=p_preis]').value), ust: edit.ku || edit.rc ? 0 : num(p.querySelector('[name=p_ust]').value),
+    rabatt: Math.min(100, Math.max(0, num(p.querySelector('[name=p_rabatt]').value)))
   }));
+  if (f.elements.skontoProz) Object.assign(edit, { skontoProz: num(g('skontoProz')), skontoTage: Math.round(num(g('skontoTage'))) });
 }
 function pflichtDoc(d) {
   const f = S.firma, c = [];
@@ -2133,13 +2250,14 @@ function pflichtDoc(d) {
   return c;
 }
 function posHtml(p, i) {
-  const s = r2(num(p.menge) * num(p.preis));
+  const s = posNetto(p);
   return `<div class="pos" data-i="${i}">
-    <label class="text">Beschreibung<input name="p_text" value="${esc(p.text)}" placeholder="z. B. Webdesign Startseite"></label>
+    <label class="text">Beschreibung<input name="p_text" list="artikel" value="${esc(p.text)}" placeholder="z. B. Webdesign Startseite"></label>
     <label>Menge<input name="p_menge" inputmode="decimal" value="${esc(String(p.menge).replace('.', ','))}"></label>
     <label>Einheit<input name="p_einheit" value="${esc(p.einheit)}" list="einheiten"></label>
     <label>Einzelpreis netto €<input name="p_preis" inputmode="decimal" value="${esc(p.preis ? String(p.preis).replace('.', ',') : '')}" placeholder="0,00"></label>
     ${edit.ku || edit.rc ? '<input type="hidden" name="p_ust" value="0">' : `<label>USt<select name="p_ust">${[19, 7, 0].map((v) => `<option value="${v}"${num(p.ust) === v ? ' selected' : ''}>${v} %</option>`).join('')}</select></label>`}
+    <label>Rabatt %<input name="p_rabatt" inputmode="decimal" value="${num(p.rabatt) ? esc(String(p.rabatt).replace('.', ',')) : ''}" placeholder="0"></label>
     <div style="display:flex;gap:6px;align-items:end;justify-content:space-between"><span class="sum">${eur(s)}</span><button type="button" class="del" data-act="pos-del" data-i="${i}" aria-label="Position entfernen">✕</button></div>
   </div>`;
 }
@@ -2166,6 +2284,7 @@ function vEditor() {
   openDlg(`${head((d.nr ? esc(d.nr) + ' · ' : '') + (isRe ? (d.status === 'entwurf' ? 'Rechnung schreiben' : 'Rechnung') : 'Angebot schreiben'))}
   <form id="edForm" class="dlg-body" autocomplete="off">
     <datalist id="kunden">${S.kunden.map((k) => `<option value="${esc(k.name)}">`).join('')}</datalist>
+    <datalist id="artikel">${S.artikel.map((a) => `<option value="${esc(a.name)}">${esc(eur(num(a.preis)) + ' je ' + a.einheit)}</option>`).join('')}</datalist>
     <datalist id="einheiten"><option value="Stk."><option value="Std."><option value="Tag"><option value="pauschal"><option value="Monat"><option value="km"></datalist>
     <h3 style="margin-top:0">Für wen?</h3>
     <div class="grid2">
@@ -2181,12 +2300,14 @@ function vEditor() {
     <h3>Wann?</h3>
     <div class="grid2">
       <label>${isRe ? 'Rechnungsdatum' : 'Angebotsdatum'}<input type="date" name="datum" value="${esc(d.datum)}"></label>
-      ${isRe ? `<label>Leistungsdatum<input type="date" name="leistungsdatum" value="${esc(d.leistungsdatum)}"></label><label>Zahlbar bis<input type="date" name="faellig" value="${esc(d.faellig)}"></label>`
+      ${isRe ? `<label>Leistungsdatum<input type="date" name="leistungsdatum" value="${esc(d.leistungsdatum)}"></label><label>Zahlbar bis<input type="date" name="faellig" value="${esc(d.faellig)}"></label>
+        <label>Skonto % (optional)<input name="skontoProz" inputmode="decimal" value="${num(d.skontoProz) ? esc(String(d.skontoProz).replace('.', ',')) : ''}" placeholder="z. B. 2"></label><label>Skonto bei Zahlung innerhalb von Tagen<input name="skontoTage" inputmode="numeric" value="${num(d.skontoTage) ? esc(d.skontoTage) : ''}" placeholder="z. B. 7"></label>`
         : `<label>Gültig bis<input type="date" name="gueltigBis" value="${esc(d.gueltigBis)}"></label>`}
     </div>
     <h3>Was?</h3>
     <div id="posList">${d.positionen.map(posHtml).join('')}</div>
-    <button type="button" data-act="pos-add">+ Position</button>
+    <div class="btns" style="margin-top:0"><button type="button" data-act="pos-add">+ Position</button>
+    ${S.artikel.length ? `<select id="artPick" aria-label="Aus der Artikelliste einfügen" style="width:auto"><option value="">+ Aus der Artikelliste …</option>${S.artikel.slice().sort((a, b) => a.name.localeCompare(b.name, 'de')).map((a) => `<option value="${a.id}">${esc(a.name)} · ${eur(num(a.preis))}</option>`).join('')}</select>` : '<button type="button" data-act="artikel">Artikelliste anlegen</button>'}</div>
     <div id="totals" style="margin-top:10px">${totalsHtml(d)}</div>
     ${d.ku ? `<p class="small muted">${KU_HINWEIS} Steht automatisch auf dem Dokument.</p>` : ''}
     <div id="kuWarn">${kuWarnung(d)}</div>
@@ -2205,7 +2326,7 @@ function refreshEditor() {
   readEditor();
   $('#totals').innerHTML = totalsHtml(edit);
   if ($('#kuWarn')) $('#kuWarn').innerHTML = kuWarnung(edit);
-  document.querySelectorAll('#posList .pos').forEach((el, i) => { el.querySelector('.sum').textContent = eur(r2(num(edit.positionen[i].menge) * num(edit.positionen[i].preis))); });
+  document.querySelectorAll('#posList .pos').forEach((el, i) => { el.querySelector('.sum').textContent = eur(posNetto(edit.positionen[i])); });
   if (edit.typ === 'rechnung') {
     const c = pflichtDoc(edit), ok = c.every((x) => x[1]);
     $('#checks').innerHTML = c.map((x) => `<li class="${x[1] ? 'ok' : 'miss'}">${x[0]}</li>`).join('');
@@ -2223,10 +2344,10 @@ async function saveDoc(stellen) {
   readEditor();
   const d = edit; delete d.neu;
   const coll = d.typ === 'angebot' ? S.angebote : S.rechnungen;
-  if (d.typ === 'angebot' && !d.nr) d.nr = naechsteNr('AN', (d.datum || heute()).slice(0, 4));
+  if (d.typ === 'angebot' && !d.nr) d.nr = naechsteNr('AN', d.datum || heute());
   if (stellen) {
     if (!pflichtDoc(d).every((c) => c[1])) return toast('Es fehlen noch Pflichtangaben.');
-    d.nr = naechsteNr('RE', (d.datum || heute()).slice(0, 4));
+    d.nr = naechsteNr('RE', d.datum || heute());
     d.status = 'offen'; d.gestelltAm = heute();
   }
   merkeKunde(d.kunde);
@@ -2246,7 +2367,7 @@ function kopfDaten(d) {
 }
 function posTabelle(d) {
   if (d.extern) return '';
-  return `<table class="tab"><tr><th>Position</th><th style="text-align:right">Betrag</th></tr>${d.positionen.map((p) => `<tr><td>${esc(p.text)}<div class="small muted">${String(p.menge).replace('.', ',')} ${esc(p.einheit)} × ${eur(num(p.preis))}${d.ku ? '' : ' · ' + num(p.ust) + ' % USt'}</div></td><td style="text-align:right">${eur(r2(num(p.menge) * num(p.preis)))}</td></tr>`).join('')}</table>`;
+  return `<table class="tab"><tr><th>Position</th><th style="text-align:right">Betrag</th></tr>${d.positionen.map((p) => `<tr><td>${esc(p.text)}<div class="small muted">${String(p.menge).replace('.', ',')} ${esc(p.einheit)} × ${eur(num(p.preis))}${num(p.rabatt) ? ' · ' + String(p.rabatt).replace('.', ',') + ' % Rabatt' : ''}${d.ku ? '' : ' · ' + num(p.ust) + ' % USt'}</div></td><td style="text-align:right">${eur(posNetto(p))}</td></tr>`).join('')}</table>`;
 }
 function vDetailAn(id) {
   const a = S.angebote.find((x) => x.id === id); if (!a) return;
@@ -2254,7 +2375,7 @@ function vDetailAn(id) {
   openDlg(`${head('Angebot ' + esc(a.nr))}<div class="dlg-body">
     <p><span class="pill ${st.c}">${st.t}</span></p>
     ${kopfDaten(a)}
-    <p class="small muted">Vom ${dat(a.datum)}, gültig bis ${dat(a.gueltigBis)}</p>
+    <p class="small muted">Vom ${dat(a.datum)}, gültig bis ${dat(a.gueltigBis)}${a.versendetAm ? `, per E-Mail verschickt am ${dat(a.versendetAm)}` : ''}${a.ab ? `. Auftragsbestätigung ${esc(a.ab.nr)} vom ${dat(a.ab.datum)}` : ''}${a.ls ? `. Lieferschein ${esc(a.ls.nr)}` : ''}</p>
     ${posTabelle(a)}<div style="margin-top:8px">${totalsHtml(a)}</div>
     ${st.k === 'abgerechnet' ? '' : `<div class="card" style="margin-top:14px"><b>Wie hat der Kunde entschieden?</b><div class="btns">
       <button data-act="an-status" data-k="angenommen" data-id="${a.id}"${a.status === 'angenommen' ? ' aria-pressed="true"' : ''}>Angenommen</button>
@@ -2263,6 +2384,8 @@ function vDetailAn(id) {
   </div>
   <div class="dlg-foot">
     <button data-act="print" data-id="${a.id}" data-t="an">Drucken / PDF</button>
+    <button data-act="mail" data-k="an" data-id="${a.id}">Per E-Mail</button>
+    ${a.status !== 'abgelehnt' ? `<button data-act="abls" data-k="ab" data-t="an" data-id="${a.id}">Auftragsbestätigung</button><button data-act="abls" data-k="ls" data-t="an" data-id="${a.id}">Lieferschein</button>` : ''}
     ${st.k === 'abgerechnet' ? '' : `<button data-act="edit-an" data-id="${a.id}">Bearbeiten</button>`}
     ${st.k === 'abgerechnet' ? '' : `<button class="primary" data-act="an-to-re" data-id="${a.id}">In Rechnung umwandeln</button>`}
   </div>`);
@@ -2276,7 +2399,8 @@ function vDetailRe(id) {
   openDlg(`${head((r.typ === 'gutschrift' ? 'Stornorechnung ' : 'Rechnung ') + esc(r.nr))}<div class="dlg-body">
     <p><span class="pill ${st.c}">${st.t}</span>${r.extern ? ' <span class="pill grey">Hinterlegt</span>' : ''}</p>
     ${kopfDaten(r)}
-    <p class="small muted">Rechnungsdatum ${dat(r.datum)}${r.leistungsdatum ? ', Leistung ' + dat(r.leistungsdatum) : ''}${r.faellig && r.typ !== 'gutschrift' ? ', zahlbar bis ' + dat(r.faellig) : ''}${r.bezahltAm ? ', bezahlt am ' + dat(r.bezahltAm) : ''}</p>
+    <p class="small muted">Rechnungsdatum ${dat(r.datum)}${r.leistungsdatum ? ', Leistung ' + dat(r.leistungsdatum) : ''}${r.faellig && r.typ !== 'gutschrift' ? ', zahlbar bis ' + dat(r.faellig) : ''}${r.bezahltAm ? ', bezahlt am ' + dat(r.bezahltAm) : ''}${r.versendetAm ? ', per E-Mail verschickt am ' + dat(r.versendetAm) : ''}${r.ls ? `. Lieferschein ${esc(r.ls.nr)}` : ''}</p>
+    ${hatSkonto(r) && ['offen', 'ueberfaellig'].includes(st.k) ? `<p class="small">${tageBis(plusTage(r.datum, num(r.skontoTage))) >= 0 ? `Skonto: ${String(r.skontoProz).replace('.', ',')} % bis ${dat(plusTage(r.datum, num(r.skontoTage)))}, dann ${eur(r2(summen(r).brutto * (1 - num(r.skontoProz) / 100)))}.` : 'Die Skonto-Frist ist abgelaufen.'}</p>` : ''}
     ${posTabelle(r)}<div style="margin-top:8px">${totalsHtml(r)}</div>
     ${storno ? `<p class="small">Storniert durch <a href="#" data-act="open-re" data-id="${storno.id}">${esc(storno.nr)}</a>.</p>` : ''}
     ${orig ? `<p class="small">Storniert die Rechnung <a href="#" data-act="open-re" data-id="${orig.id}">${esc(orig.nr)}</a>.</p>` : ''}
@@ -2292,7 +2416,8 @@ function vDetailRe(id) {
     <details><summary>Warum kann ich die Rechnung nicht ändern oder löschen?</summary><p class="small muted" style="margin-top:6px">Eine gestellte Rechnung darf nach GoBD nicht mehr verändert werden, und die Nummern müssen lückenlos sein. Wenn sie falsch ist, erstellst du eine Stornorechnung und danach eine neue Rechnung.</p></details>
   </div>
   <div class="dlg-foot">
-    ${!r.extern ? `<button data-act="print" data-id="${r.id}" data-t="re">Drucken / PDF</button><button data-act="xml" data-id="${r.id}">E-Rechnung (XML)</button>` : ''}
+    ${!r.extern ? `<button data-act="print" data-id="${r.id}" data-t="re">Drucken / PDF</button><button data-act="xml" data-id="${r.id}">E-Rechnung (XML)</button><button data-act="mail" data-k="re" data-id="${r.id}">Per E-Mail</button>` : ''}
+    ${!r.extern && r.typ !== 'gutschrift' && r.status !== 'storniert' ? `<button data-act="abls" data-k="ls" data-t="re" data-id="${r.id}">Lieferschein</button>` : ''}
     ${!r.extern && r.typ !== 'gutschrift' && r.status !== 'storniert' ? `<button data-act="vl-neu" data-k="rechnung" data-id="${r.id}">Regelmäßig wiederholen</button>` : ''}
     ${r.typ !== 'gutschrift' && r.status !== 'storniert' ? `<button class="danger" data-act="storno" data-id="${r.id}">Stornieren</button>` : ''}
     ${r.extern ? `<button class="danger" data-act="del-ext" data-id="${r.id}">Entfernen</button>` : ''}
@@ -2577,7 +2702,7 @@ async function wiederkehrend() {
         Object.assign(r, { kunde: q.kunde, positionen: q.positionen.map((x) => Object.assign(x, { text: vlText(x.text, d) })), rc: q.rc || '', hinweis: vlText(q.hinweis, d), ku: ku(), datum: d < h && v.stellen ? h : d, leistungsdatum: d, vorlage: v.id });
         r.faellig = plusTage(r.datum, num(S.firma.zahlungsziel) || 14);
         // Hat sich der Kleinunternehmer-Status geändert, erst prüfen lassen
-        if (v.stellen && !!q.ku === ku() && pflichtDoc(r).every((c) => c[1])) { r.nr = naechsteNr('RE', r.datum.slice(0, 4)); r.status = 'offen'; r.gestelltAm = h; }
+        if (v.stellen && !!q.ku === ku() && pflichtDoc(r).every((c) => c[1])) { r.nr = naechsteNr('RE', r.datum); r.status = 'offen'; r.gestelltAm = h; }
         else entwurf++;
         S.rechnungen.push(r); nRe++;
       } else {
@@ -2639,29 +2764,101 @@ async function saveVorlage() {
   await save(); await wiederkehrend(); render(); vVorlagen(); toast('Gespeichert');
 }
 
+/* ---------- Auftragsbestätigung und Lieferschein ---------- */
+function vAbLs(art, t, id) {
+  const d = (t === 'an' ? S.angebote : S.rechnungen).find((x) => x.id === id); if (!d) return;
+  const ab = art === 'ab', x = d[art] || {};
+  openDlg(`${head(ab ? 'Auftragsbestätigung' : 'Lieferschein')}<form id="ablsForm" class="dlg-body" autocomplete="off">
+    <p class="small muted" style="margin-top:0">${ab ? 'Damit bestätigst du dem Kunden schriftlich, dass du den Auftrag zu den Bedingungen aus dem Angebot annimmst. Positionen und Preise kommen aus dem Angebot.' : 'Der Lieferschein begleitet die Ware. Er zeigt Positionen und Mengen ohne Preise und hat ein Feld für die Unterschrift des Kunden.'}</p>
+    <p><b>${esc(d.kunde.name || 'Ohne Kunde')}</b> · ${t === 'an' ? 'Angebot' : 'Rechnung'} ${esc(d.nr)}</p>
+    ${x.nr ? `<p class="small">Schon angelegt: <b>${esc(x.nr)}</b> vom ${dat(x.datum)}. Du kannst sie erneut drucken.</p>` : ''}
+    <div class="grid2">
+      <label>Datum<input type="date" name="datum" value="${esc(x.datum || heute())}"></label>
+      ${ab ? `<label>Geplanter Leistungstermin (optional)<input type="date" name="termin" value="${esc(x.termin || '')}"></label>
+      <label class="full">Zusätzlicher Text (optional)<textarea name="text" rows="2" placeholder="z. B. Wir beginnen mit den Arbeiten in KW 12.">${esc(x.text || '')}</textarea></label>`
+      : `<label>Lieferdatum<input type="date" name="lieferdatum" value="${esc(x.lieferdatum || d.leistungsdatum || heute())}"></label>`}
+    </div>
+    ${ab && d.status === 'offen' ? '<p class="small muted">Das Angebot wird dabei als angenommen markiert.</p>' : ''}
+  </form><div class="dlg-foot"><button data-act="${t === 'an' ? 'open-an' : 'open-re'}" data-id="${d.id}">Zurück</button><button class="primary" data-act="abls-save" data-k="${art}" data-t="${t}" data-id="${d.id}">${x.nr ? 'Speichern und drucken' : 'Anlegen und drucken'}</button></div>`);
+}
+async function saveAbLs(el) {
+  const art = el.dataset.k, t = el.dataset.t, d = (t === 'an' ? S.angebote : S.rechnungen).find((x) => x.id === el.dataset.id), f = $('#ablsForm').elements;
+  const x = d[art] || {};
+  x.datum = f.datum.value || heute();
+  if (!x.nr) x.nr = naechsteNr(art.toUpperCase(), x.datum);
+  if (art === 'ab') { x.termin = f.termin.value; x.text = f.text.value.trim(); if (d.status === 'offen') d.status = 'angenommen'; }
+  else x.lieferdatum = f.lieferdatum.value;
+  d[art] = x;
+  await save(); render();
+  if (t === 'an') vDetailAn(d.id); else vDetailRe(d.id);
+  druck(d, art === 'ab' ? 'Auftragsbestätigung' : 'Lieferschein', art);
+}
+
+/* ---------- Per E-Mail verschicken ---------- */
+function mailVorschlag(d, isRe) {
+  const f = S.firma, s = summen(d), gruss = [f.inhaber || f.name, f.inhaber && f.name !== f.inhaber ? f.name : '', f.tel ? 'Tel. ' + f.tel : ''].filter(Boolean).join('\n');
+  if (isRe) {
+    const storno = d.typ === 'gutschrift';
+    return { betreff: `${storno ? 'Stornorechnung' : 'Rechnung'} ${d.nr}${f.name ? ' von ' + f.name : ''}`,
+      text: `Guten Tag,\n\nanbei erhalten Sie ${storno ? 'unsere Stornorechnung' : 'unsere Rechnung'} ${d.nr} vom ${dat(d.datum)} über ${eur(s.brutto)}.${!storno && d.faellig ? `\nBitte überweisen Sie den Betrag bis zum ${dat(d.faellig)}${f.iban ? ` auf das Konto IBAN ${f.iban}` : ''} und geben Sie als Verwendungszweck die Rechnungsnummer an.` : ''}${hatSkonto(d) ? '\n' + skontoText(d) : ''}\n\nVielen Dank für Ihren Auftrag.\n\nMit freundlichen Grüßen\n${gruss}` };
+  }
+  return { betreff: `Angebot ${d.nr}${f.name ? ' von ' + f.name : ''}`,
+    text: `Guten Tag,\n\nvielen Dank für Ihre Anfrage. Anbei erhalten Sie unser Angebot ${d.nr} über ${eur(s.netto)} netto${d.ku ? '' : ` (${eur(s.brutto)} brutto)`}. Es gilt bis zum ${dat(d.gueltigBis)}.\n\nWir freuen uns auf Ihre Rückmeldung.\n\nMit freundlichen Grüßen\n${gruss}` };
+}
+let mailDoc = null;
+function vMail(k, id) {
+  const isRe = k === 're', d = (isRe ? S.rechnungen : S.angebote).find((x) => x.id === id); if (!d) return;
+  mailDoc = { d, isRe };
+  const v = mailVorschlag(d, isRe), xmlOk = isRe && !eRechnungFehlt(d).length;
+  openDlg(`${head('Per E-Mail verschicken')}<form id="mailForm" class="dlg-body" autocomplete="off">
+    <div class="grid2">
+      <label class="full">An<input name="an" type="email" value="${esc(d.kunde.email)}" placeholder="E-Mail des Kunden"></label>
+      <label class="full">Betreff<input name="betreff" value="${esc(v.betreff)}"></label>
+      <label class="full">Text<textarea name="text" rows="10">${esc(v.text)}</textarea></label>
+    </div>
+    <div class="card" style="margin-top:12px"><b>So geht's</b><ol class="small" style="margin:6px 0 0;padding-left:20px">
+      <li><a href="#" data-act="print" data-id="${d.id}" data-t="${k}">${isRe ? 'Rechnung' : 'Angebot'} als PDF speichern</a> (im Druckfenster „Als PDF speichern“ wählen).</li>
+      ${isRe ? `<li>${xmlOk ? `<a href="#" data-act="xml" data-id="${d.id}">E-Rechnung (XML) speichern</a>. Firmenkunden müssen sie seit 2025 annehmen können, für Behörden ist sie Pflicht.` : 'Für die E-Rechnung fehlen noch Angaben. Öffne dafür „E-Rechnung (XML)“ in der Rechnung.'}</li>` : ''}
+      <li>Auf „E-Mail-Programm öffnen“ tippen und ${isRe ? 'die Dateien' : 'das PDF'} an die Mail anhängen.</li></ol></div>
+  </form><div class="dlg-foot"><button data-act="${isRe ? 'open-re' : 'open-an'}" data-id="${d.id}">Zurück</button><button data-act="mail-copy">Text kopieren</button>${isRe && xmlOk && navigator.canShare ? '<button data-act="mail-share">Teilen mit E-Rechnung</button>' : ''}<button class="primary" data-act="mail-los">E-Mail-Programm öffnen</button></div>`);
+}
+async function mailVerschickt() { mailDoc.d.versendetAm = heute(); if (!mailDoc.d.kunde.email && $('#mailForm')) mailDoc.d.kunde.email = $('#mailForm').elements.an.value.trim(); await save(); render(); }
+const mailFelder = () => { const f = $('#mailForm').elements; return { an: f.an.value.trim(), betreff: f.betreff.value, text: f.text.value }; };
+
 /* ---------- Druck / PDF ---------- */
-function druck(d, titel) {
-  const f = S.firma, s = summen(d);
+/* modus: '' Angebot/Rechnung, 'ab' Auftragsbestätigung, 'ls' Lieferschein (ohne Preise) */
+function druck(d, titel, modus) {
+  const f = S.firma, s = summen(d), ls = modus === 'ls', ab = modus === 'ab';
   const absender = [f.name, f.strasse, [f.plz, f.ort].join(' ')].filter((x) => x && x.trim()).join(' · ');
-  const isRe = d.typ !== 'angebot';
+  const isRe = d.typ !== 'angebot' && !modus, rab = hatRabatt(d) && !ls;
+  const bez = d.typ === 'angebot' ? 'Angebot' : 'Rechnung';
+  const nrZeilen = ls ? `<tr><td>Lieferschein-Nr.</td><td><b>${esc(d.ls.nr)}</b></td></tr><tr><td>Datum</td><td>${dat(d.ls.datum)}</td></tr><tr><td>Lieferdatum</td><td>${dat(d.ls.lieferdatum || d.leistungsdatum || d.ls.datum)}</td></tr><tr><td>Zu ${bez}</td><td>${esc(d.nr)}</td></tr>`
+    : ab ? `<tr><td>Auftragsbest.-Nr.</td><td><b>${esc(d.ab.nr)}</b></td></tr><tr><td>Datum</td><td>${dat(d.ab.datum)}</td></tr><tr><td>Zum Angebot</td><td>${esc(d.nr)} vom ${dat(d.datum)}</td></tr>${d.ab.termin ? `<tr><td>Geplante Leistung</td><td>${dat(d.ab.termin)}</td></tr>` : ''}`
+    : `<tr><td>${isRe ? 'Rechnungsnr.' : 'Angebotsnr.'}</td><td><b>${esc(d.nr)}</b></td></tr><tr><td>Datum</td><td>${dat(d.datum)}</td></tr>
+    ${isRe ? `<tr><td>Leistungsdatum</td><td>${dat(d.leistungsdatum)}</td></tr>` : `<tr><td>Gültig bis</td><td>${dat(d.gueltigBis)}</td></tr>`}`;
+  const kopfP = ls ? '<tr><th>Pos.</th><th>Beschreibung</th><th class="r">Menge</th></tr>'
+    : `<tr><th>Pos.</th><th>Beschreibung</th><th class="r">Menge</th><th class="r">Einzelpreis</th>${rab ? '<th class="r">Rabatt</th>' : ''}${d.ku ? '' : '<th class="r">USt</th>'}<th class="r">Betrag</th></tr>`;
+  const zeile = (p, i) => ls ? `<tr><td>${i + 1}</td><td>${esc(p.text)}</td><td class="r">${String(p.menge).replace('.', ',')} ${esc(p.einheit)}</td></tr>`
+    : `<tr><td>${i + 1}</td><td>${esc(p.text)}</td><td class="r">${String(p.menge).replace('.', ',')} ${esc(p.einheit)}</td><td class="r">${eur(num(p.preis))}</td>${rab ? `<td class="r">${num(p.rabatt) ? String(p.rabatt).replace('.', ',') + ' %' : ''}</td>` : ''}${d.ku ? '' : `<td class="r">${num(p.ust)} %</td>`}<td class="r">${eur(posNetto(p))}</td></tr>`;
   $('#druck').innerHTML = `
-    <div class="kopf"><div><div class="absender">${esc(absender)}</div><div style="white-space:pre-line"><b>${esc(d.kunde.name)}</b>\n${esc(d.kunde.adresse)}${d.kunde.ustid ? '\nUSt-IdNr.: ' + esc(d.kunde.ustid) : ''}</div></div>
-    <div>${f.logo ? `<img class="logo" src="${esc(f.logo)}" alt="">` : ''}<table class="meta"><tr><td>${isRe ? 'Rechnungsnr.' : 'Angebotsnr.'}</td><td><b>${esc(d.nr)}</b></td></tr><tr><td>Datum</td><td>${dat(d.datum)}</td></tr>
-    ${isRe ? `<tr><td>Leistungsdatum</td><td>${dat(d.leistungsdatum)}</td></tr>` : `<tr><td>Gültig bis</td><td>${dat(d.gueltigBis)}</td></tr>`}
-    ${f.steuernr ? `<tr><td>Steuernr.</td><td>${esc(f.steuernr)}</td></tr>` : ''}${f.ustid ? `<tr><td>USt-IdNr.</td><td>${esc(f.ustid)}</td></tr>` : ''}</table></div></div>
+    <div class="kopf"><div><div class="absender">${esc(absender)}</div><div style="white-space:pre-line"><b>${esc(d.kunde.name)}</b>\n${esc(d.kunde.adresse)}${d.kunde.ustid && !ls ? '\nUSt-IdNr.: ' + esc(d.kunde.ustid) : ''}</div></div>
+    <div>${f.logo ? `<img class="logo" src="${esc(f.logo)}" alt="">` : ''}<table class="meta">${nrZeilen}
+    ${f.steuernr && !ls ? `<tr><td>Steuernr.</td><td>${esc(f.steuernr)}</td></tr>` : ''}${f.ustid && !ls ? `<tr><td>USt-IdNr.</td><td>${esc(f.ustid)}</td></tr>` : ''}</table></div></div>
     <h1>${titel}</h1>
+    ${ab ? '<p>Sehr geehrte Damen und Herren,</p><p>vielen Dank für Ihren Auftrag. Wir bestätigen ihn wie folgt:</p>' : ''}
     ${d.stornoVon ? `<p>Stornorechnung zur Rechnung ${esc((S.rechnungen.find((x) => x.id === d.stornoVon) || {}).nr || '')}.</p>` : ''}
-    <table class="p"><tr><th>Pos.</th><th>Beschreibung</th><th class="r">Menge</th><th class="r">Einzelpreis</th>${d.ku ? '' : '<th class="r">USt</th>'}<th class="r">Betrag</th></tr>
-    ${d.positionen.map((p, i) => `<tr><td>${i + 1}</td><td>${esc(p.text)}</td><td class="r">${String(p.menge).replace('.', ',')} ${esc(p.einheit)}</td><td class="r">${eur(num(p.preis))}</td>${d.ku ? '' : `<td class="r">${num(p.ust)} %</td>`}<td class="r">${eur(r2(num(p.menge) * num(p.preis)))}</td></tr>`).join('')}</table>
+    <table class="p">${kopfP}${d.positionen.map(zeile).join('')}</table>
+    ${ls ? `<p style="margin-top:14mm">Ware vollständig und in einwandfreiem Zustand erhalten:</p><div style="display:flex;gap:12mm;margin-top:14mm"><div style="flex:1;border-top:.3mm solid #000;padding-top:1mm;font-size:8.5pt">Datum</div><div style="flex:2;border-top:.3mm solid #000;padding-top:1mm;font-size:8.5pt">Name und Unterschrift</div></div>` : `
     <div class="sum"><div><span>Netto</span><span>${eur(s.netto)}</span></div>
     ${d.ku ? '' : Object.keys(s.proSatz).sort((a, b) => b - a).map((k) => `<div><span>USt ${k} %</span><span>${eur(r2(s.proSatz[k] * k / 100))}</span></div>`).join('')}
     <div class="g"><span>Gesamtbetrag</span><span>${eur(s.brutto)}</span></div></div>
     ${d.ku ? `<p>${KU_HINWEIS}</p>` : ''}
     ${RC[d.rc] ? `<p>${RC[d.rc].hinweis}</p>` : ''}
-    ${isRe && d.typ !== 'gutschrift' && d.faellig ? `<p>Bitte überweisen Sie den Betrag bis zum ${dat(d.faellig)} unter Angabe der Rechnungsnummer${f.iban ? ' auf das unten genannte Konto' : ''}.</p>` : ''}
-    ${d.hinweis ? `<p style="white-space:pre-line">${esc(d.hinweis)}</p>` : ''}
+    ${isRe && d.typ !== 'gutschrift' && d.faellig ? `<p>Bitte überweisen Sie den Betrag bis zum ${dat(d.faellig)} unter Angabe der Rechnungsnummer${f.iban ? ' auf das unten genannte Konto' : ''}.${hatSkonto(d) ? ' ' + skontoText(d) : ''}</p>` : ''}
+    ${ab ? `<p>Die Rechnung erhalten Sie nach Erbringung der Leistung.${d.ab.text ? '' : ' Bei Fragen melden Sie sich gern.'}</p>${d.ab.text ? `<p style="white-space:pre-line">${esc(d.ab.text)}</p>` : ''}<p>Mit freundlichen Grüßen<br>${esc(f.inhaber || f.name)}</p>` : ''}`}
+    ${d.hinweis && !modus ? `<p style="white-space:pre-line">${esc(d.hinweis)}</p>` : ''}
     ${fussHtml()}`;
-  const alt = document.title; document.title = (d.nr || titel).replace(/[^\w-]+/g, '_');
+  const alt = document.title; document.title = ((ls ? d.ls.nr : ab ? d.ab.nr : d.nr) || titel).replace(/[^\w-]+/g, '_');
   window.print();
   setTimeout(() => { document.title = alt; }, 500);
 }
@@ -2714,7 +2911,8 @@ function xrechnung(r) {
       <cac:TaxSubtotal><cbc:TaxableAmount currencyID="EUR">${a(r2(basis))}</cbc:TaxableAmount><cbc:TaxAmount currencyID="EUR">${a(r2(basis * satz / 100))}</cbc:TaxAmount>
         <cac:TaxCategory><cbc:ID>${kat(satz)}</cbc:ID>${satzEl(satz)}${befreiung}<cac:TaxScheme><cbc:ID>VAT</cbc:ID></cac:TaxScheme></cac:TaxCategory></cac:TaxSubtotal>`).join('');
   const lines = r.positionen.map((p, i) => `
-  <cac:InvoiceLine><cbc:ID>${i + 1}</cbc:ID><cbc:InvoicedQuantity unitCode="${/std/i.test(p.einheit) ? 'HUR' : /tag/i.test(p.einheit) ? 'DAY' : 'C62'}">${num(p.menge)}</cbc:InvoicedQuantity><cbc:LineExtensionAmount currencyID="EUR">${a(r2(num(p.menge) * num(p.preis)))}</cbc:LineExtensionAmount>
+  <cac:InvoiceLine><cbc:ID>${i + 1}</cbc:ID><cbc:InvoicedQuantity unitCode="${/std/i.test(p.einheit) ? 'HUR' : /tag/i.test(p.einheit) ? 'DAY' : 'C62'}">${num(p.menge)}</cbc:InvoicedQuantity><cbc:LineExtensionAmount currencyID="EUR">${a(posNetto(p))}</cbc:LineExtensionAmount>${num(p.rabatt) ? `
+    <cac:AllowanceCharge><cbc:ChargeIndicator>false</cbc:ChargeIndicator><cbc:AllowanceChargeReasonCode>95</cbc:AllowanceChargeReasonCode><cbc:AllowanceChargeReason>Rabatt</cbc:AllowanceChargeReason><cbc:MultiplierFactorNumeric>${num(p.rabatt)}</cbc:MultiplierFactorNumeric><cbc:Amount currencyID="EUR">${a(posRabatt(p))}</cbc:Amount><cbc:BaseAmount currencyID="EUR">${a(posBasis(p))}</cbc:BaseAmount></cac:AllowanceCharge>` : ''}
     <cac:Item><cbc:Name>${x(p.text)}</cbc:Name><cac:ClassifiedTaxCategory><cbc:ID>${kat(num(p.ust))}</cbc:ID>${satzEl(r.ku ? 0 : num(p.ust))}<cac:TaxScheme><cbc:ID>VAT</cbc:ID></cac:TaxScheme></cac:ClassifiedTaxCategory></cac:Item>
     <cac:Price><cbc:PriceAmount currencyID="EUR">${a(num(p.preis))}</cbc:PriceAmount></cac:Price></cac:InvoiceLine>`).join('');
   const orig = r.stornoVon ? S.rechnungen.find((y) => y.id === r.stornoVon) : null;
@@ -2746,7 +2944,7 @@ function xrechnung(r) {
   </cac:Party></cac:AccountingCustomerParty>
   <cac:Delivery><cbc:ActualDeliveryDate>${r.leistungsdatum || r.datum}</cbc:ActualDeliveryDate>${rcKat === 'K' ? `<cac:DeliveryLocation><cac:Address><cbc:StreetName>${x(k.strasse)}</cbc:StreetName><cbc:CityName>${x(k.ort)}</cbc:CityName><cbc:PostalZone>${x(k.plz)}</cbc:PostalZone><cac:Country><cbc:IdentificationCode>${land}</cbc:IdentificationCode></cac:Country></cac:Address></cac:DeliveryLocation>` : ''}</cac:Delivery>
   ${f.iban ? `<cac:PaymentMeans><cbc:PaymentMeansCode>58</cbc:PaymentMeansCode><cbc:PaymentID>${x(r.nr)}</cbc:PaymentID><cac:PayeeFinancialAccount><cbc:ID>${x(f.iban.replace(/\s/g, ''))}</cbc:ID>${f.bank ? `<cbc:Name>${x(f.name)}</cbc:Name>` : ''}${f.bic ? `<cac:FinancialInstitutionBranch><cbc:ID>${x(f.bic)}</cbc:ID></cac:FinancialInstitutionBranch>` : ''}</cac:PayeeFinancialAccount></cac:PaymentMeans>` : ''}
-  ${r.faellig && !credit ? `<cac:PaymentTerms><cbc:Note>Zahlbar bis ${dat(r.faellig)}</cbc:Note></cac:PaymentTerms>` : ''}
+  ${r.faellig && !credit ? `<cac:PaymentTerms><cbc:Note>Zahlbar bis ${dat(r.faellig)}${hatSkonto(r) ? `&#10;#SKONTO#TAGE=${Math.round(num(r.skontoTage))}#PROZENT=${num(r.skontoProz).toFixed(2)}#&#10;` : ''}</cbc:Note></cac:PaymentTerms>` : ''}
   <cac:TaxTotal><cbc:TaxAmount currencyID="EUR">${a(s.ust)}</cbc:TaxAmount>${taxSub}
   </cac:TaxTotal>
   <cac:LegalMonetaryTotal><cbc:LineExtensionAmount currencyID="EUR">${a(s.netto)}</cbc:LineExtensionAmount><cbc:TaxExclusiveAmount currencyID="EUR">${a(s.netto)}</cbc:TaxExclusiveAmount><cbc:TaxInclusiveAmount currencyID="EUR">${a(s.brutto)}</cbc:TaxInclusiveAmount><cbc:PayableAmount currencyID="EUR">${a(s.brutto)}</cbc:PayableAmount></cac:LegalMonetaryTotal>${lines}
@@ -3063,8 +3261,8 @@ const ACT = {
     const r = S.rechnungen.find((x) => x.id === el.dataset.id);
     if (!confirm(`Rechnung ${r.nr} stornieren? Es wird eine Stornorechnung mit negativen Beträgen erstellt.`)) return;
     let g;
-    if (r.extern) { g = { id: uid(), typ: 'gutschrift', extern: true, nr: naechsteNr('RE', heute().slice(0, 4)), datum: heute(), kunde: r.kunde, netto: -num(r.netto), ust: -num(r.ust), status: 'offen', stornoVon: r.id }; }
-    else { g = JSON.parse(JSON.stringify(r)); Object.assign(g, { id: uid(), typ: 'gutschrift', nr: naechsteNr('RE', heute().slice(0, 4)), datum: heute(), status: 'offen', stornoVon: r.id, hinweis: '', ausAngebot: null }); delete g.bezahltAm; delete g.stornoId; g.positionen = g.positionen.map((p) => Object.assign(p, { menge: -num(p.menge) })); }
+    if (r.extern) { g = { id: uid(), typ: 'gutschrift', extern: true, nr: naechsteNr('RE', heute()), datum: heute(), kunde: r.kunde, netto: -num(r.netto), ust: -num(r.ust), status: 'offen', stornoVon: r.id }; }
+    else { g = JSON.parse(JSON.stringify(r)); Object.assign(g, { id: uid(), typ: 'gutschrift', nr: naechsteNr('RE', heute()), datum: heute(), status: 'offen', stornoVon: r.id, hinweis: '', ausAngebot: null }); delete g.bezahltAm; delete g.stornoId; g.positionen = g.positionen.map((p) => Object.assign(p, { menge: -num(p.menge) })); }
     r.status = 'storniert'; r.stornoId = g.id;
     S.rechnungen.push(g); await save(); vDetailRe(g.id); render(); toast(`Stornorechnung ${g.nr} erstellt`);
   },
@@ -3076,7 +3274,7 @@ const ACT = {
   xml: (el) => {
     const r = S.rechnungen.find((x) => x.id === el.dataset.id), m = eRechnungFehlt(r);
     if (m.length) return vERechnungFehlt(r, m);
-    download(`${r.nr}.xml`, xrechnung(r), 'application/xml'); toast('E-Rechnung gespeichert');
+    download(`${dateiName(r.nr)}.xml`, xrechnung(r), 'application/xml'); toast('E-Rechnung gespeichert');
   },
   'kunde-nach': async (el) => {
     const r = S.rechnungen.find((x) => x.id === el.dataset.id), f = $('#nachForm');
@@ -3088,10 +3286,26 @@ const ACT = {
     if (plz && ort) { const k = kundenAdresse(r.kunde.adresse); r.kunde.adresse = (k.strasse ? k.strasse.split(', ').join('\n') + '\n' : '') + plz + ' ' + ort + (k.landZeile ? '\n' + k.landZeile : ''); }
     merkeKunde(r.kunde); await save();
     const m = eRechnungFehlt(r); if (m.length) return vERechnungFehlt(r, m);
-    download(`${r.nr}.xml`, xrechnung(r), 'application/xml'); toast('E-Rechnung gespeichert'); vDetailRe(r.id);
+    download(`${dateiName(r.nr)}.xml`, xrechnung(r), 'application/xml'); toast('E-Rechnung gespeichert'); vDetailRe(r.id);
   },
   mahnen: (el) => vMahnen(el.dataset.id),
   'mahn-save': saveMahnung,
+  abls: (el) => vAbLs(el.dataset.k, el.dataset.t, el.dataset.id),
+  'abls-save': saveAbLs,
+  mail: (el) => vMail(el.dataset.k, el.dataset.id),
+  'mail-los': async () => {
+    const m = mailFelder();
+    const a = document.createElement('a'); a.href = `mailto:${encodeURIComponent(m.an).replace(/%40/g, '@')}?subject=${encodeURIComponent(m.betreff)}&body=${encodeURIComponent(m.text)}`;
+    document.body.appendChild(a); a.click(); a.remove();
+    await mailVerschickt(); toast('Als verschickt vermerkt');
+  },
+  'mail-copy': async () => { const m = mailFelder(); try { await navigator.clipboard.writeText(m.betreff + '\n\n' + m.text); toast('Text kopiert'); } catch (err) { toast('Kopieren geht hier nicht, bitte markieren und kopieren.'); } },
+  'mail-share': async () => {
+    const m = mailFelder(), d = mailDoc.d, file = new File([xrechnung(d)], dateiName(d.nr) + '.xml', { type: 'application/xml' });
+    const data = { title: m.betreff, text: m.text, files: [file] };
+    if (!navigator.canShare || !navigator.canShare(data)) return toast('Teilen mit Datei geht auf diesem Gerät nicht. Nimm „E-Mail-Programm öffnen“.');
+    try { await navigator.share(data); await mailVerschickt(); toast('Als verschickt vermerkt'); } catch (err) { if (err.name !== 'AbortError') toast('Teilen hat nicht geklappt.'); }
+  },
   'mahn-print': (el) => { const r = S.rechnungen.find((x) => x.id === el.dataset.id); druckMahnung(r, r.mahnungen[Number(el.dataset.i)]); },
   file: async (el) => {
     const d = await idbGet('datei:' + el.dataset.id); if (!d) return toast('Datei nicht gefunden.');
@@ -3119,6 +3333,12 @@ const ACT = {
   },
   'logo-del': async () => { leseFirma(); S.firma.logo = ''; await save(); render(); toast('Logo entfernt'); },
   kontakte: (el) => vKontakte(el.dataset.k),
+  artikel: () => { if (edit && $('#edForm')) { if (!confirm('Den Entwurf verlassen? Nicht gespeicherte Änderungen gehen verloren.')) return; } vArtikelListe(); },
+  'art-edit': (el) => vArtikel(el.dataset.id),
+  'art-save': saveArtikel,
+  'art-del': async () => { if (!confirm(`${artEdit.name} löschen? Schon geschriebene Rechnungen bleiben unverändert.`)) return; S.artikel = S.artikel.filter((x) => x.id !== artEdit.id); await save(); render(); vArtikelListe(); },
+  nummern: vNummern,
+  'nr-save': saveNummern,
   kontakt: (el) => vKontakt(el.dataset.id),
   'kontakt-save': saveKontakt,
   'kontakt-del': async () => {
@@ -3204,6 +3424,14 @@ document.addEventListener('click', (e) => {
 });
 document.addEventListener('input', (e) => {
   if (e.target.closest('#estForm') && e.target.name && e.target.tagName === 'INPUT' && e.target.type !== 'checkbox') estEingabe(e.target);
+  if (e.target.name === 'p_text' && e.target.closest('#edForm')) {
+    const a = S.artikel.find((x) => x.name === e.target.value), pos = e.target.closest('.pos');
+    if (a && !num(pos.querySelector('[name=p_preis]').value)) {
+      pos.querySelector('[name=p_preis]').value = String(num(a.preis)).replace('.', ',');
+      pos.querySelector('[name=p_einheit]').value = a.einheit || 'Stk.';
+      const u = pos.querySelector('select[name=p_ust]'); if (u) u.value = String(num(a.ust));
+    }
+  }
   if (e.target.closest('#edForm')) refreshEditor();
   if (e.target.closest('#beForm')) calcVst();
   if (e.target.name === 'lieferant' && e.target.closest('#beForm')) {
@@ -3218,6 +3446,14 @@ document.addEventListener('input', (e) => {
 document.addEventListener('change', async (e) => {
   if (e.target.closest('#estForm') && e.target.name && (e.target.type === 'checkbox' || e.target.tagName === 'SELECT' || e.target.type === 'date')) { estEingabe(e.target); if (e.target.type === 'checkbox' && e.target.name.startsWith('bereiche.')) { await save(); render(); } return; }
   if (e.target.name === 'rc' && e.target.closest('#edForm')) { readEditor(); vEditor(); return; }
+  if (e.target.id === 'artPick') {
+    const a = S.artikel.find((x) => x.id === e.target.value); if (!a) return;
+    readEditor();
+    const leer = edit.positionen.length === 1 && !edit.positionen[0].text.trim() && !num(edit.positionen[0].preis);
+    if (leer) edit.positionen = [];
+    edit.positionen.push(artikelPosition(a));
+    $('#posList').innerHTML = edit.positionen.map(posHtml).join(''); e.target.value = ''; refreshEditor(); return;
+  }
   if (e.target.name === 'rc' && e.target.closest('#beForm')) calcVst();
   if (e.target.id === 'ruIst') { S.steuer.ruecklageIst = e.target.value.trim() === '' ? '' : num(e.target.value); await save(); render(); toast('Gespeichert'); return; }
   if (e.target.id === 'bankMon') { filter.bankMon = e.target.value; render(); return; }
@@ -3235,7 +3471,7 @@ function leseFirma() {
   const f = $('#firmaForm'); if (!f) return;
   for (const k of Object.keys(S.firma)) {
     const el = f.elements[k]; if (!el) continue;
-    S.firma[k] = el.type === 'checkbox' ? el.checked : (['zahlungsziel', 'angebotTage', 'basiszins'].includes(k) ? num(el.value) : el.value.trim());
+    S.firma[k] = el.type === 'checkbox' ? el.checked : (['zahlungsziel', 'angebotTage', 'basiszins', 'skontoProz', 'skontoTage'].includes(k) ? num(el.value) : el.value.trim());
   }
 }
 /* Logo auf höchstens 600 × 200 Pixel verkleinern und als Bild-Daten speichern */
