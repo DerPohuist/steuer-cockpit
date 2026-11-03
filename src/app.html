@@ -526,7 +526,7 @@ function gewinn(jahr) {
     for (const [tag, f] of st) if ((tag || '').startsWith(j)) { ein += s.netto * f; mEin[mon(tag)] += s.netto * f; }
     if ((r.datum || '').startsWith(j) && r.typ !== 'gutschrift' && ['offen', 'ueberfaellig'].includes(reStatus(r).k)) { offen += offenBetrag(r); nOffen++; }
   }
-  const kat = {}, gross = [], ohne = [];
+  const kat = {}, mKat = {}, gross = [], ohne = [];
   let aus = 0, bewirt = 0;
   for (const b of S.belege) {
     if (!(b.datum || '').startsWith(j)) continue;
@@ -534,13 +534,14 @@ function gewinn(jahr) {
     if (!num(b.brutto)) ohne.push(b);
     const k = b.kategorie || 'Ohne Kategorie';
     kat[k] = r2((kat[k] || 0) + netto);
+    (mKat[k] = mKat[k] || Array(12).fill(0))[mon(b.datum)] += netto;
     aus += netto; mAus[mon(b.datum)] += netto;
     if (k === 'Bewirtung') bewirt += netto;
     if (netto > 800 && !['Miete', 'Versicherung', 'Fremdleistung', 'Werbung', 'Telefon und Internet', 'Wareneinkauf'].includes(k)) gross.push(b);
   }
   const nichtAbz = r2(bewirt * 0.3);
   ein = r2(ein); aus = r2(aus);
-  return { bilanz, ein, aus, nichtAbz, gewinn: r2(ein - aus + nichtAbz), kat, gross, ohne, offen: r2(offen), nOffen, mEin: mEin.map(r2), mAus: mAus.map(r2) };
+  return { bilanz, ein, aus, nichtAbz, gewinn: r2(ein - aus + nichtAbz), kat, mKat, gross, ohne, offen: r2(offen), nOffen, mEin: mEin.map(r2), mAus: mAus.map(r2) };
 }
 
 /* Grobe Steuerschätzung. Tarif nach § 32a EStG, Grundtabelle (ledig), ohne andere Einkünfte und Abzüge */
@@ -672,6 +673,10 @@ function vSteuern() {
     <table class="tab"><tr><th>Kunde</th><th>USt-IdNr.</th><th>Art</th><th style="text-align:right">Betrag</th></tr>${zmL.map((x) => `<tr><td>${esc(x.name)}</td><td>${x.land && x.nr ? esc(x.land + x.nr) : '<span class="pill bad">fehlt</span>'}</td><td>${x.art === 'S' ? 'Dienstleistung' : 'Lieferung'}</td><td style="text-align:right">${x.betrag.toLocaleString('de-DE')} €</td></tr>`).join('')}</table>
     <div class="btns"><button data-act="st-zm" data-k="${qy}-${qi}">Liste als Datei</button></div></div>` : ''}
 
+  <div class="card"><h2>Monatsauswertung (BWA)</h2>
+    <p class="small">Wie die Auswertung vom Steuerberater: Umsatz, Ware, Kosten und Ergebnis für jeden Monat, seit Jahresanfang und im Vergleich zum Vorjahr. Zum Ansehen, Drucken oder für die Bank.</p>
+    <div class="btns"><button class="primary" data-act="bwa">BWA ansehen</button></div></div>
+
   <div class="card">
     <h2>${gw.bilanz ? 'Gewinn-Vorschau (GuV)' : 'Einnahmen-Überschuss-Rechnung'} ${jahr}</h2>
     <div class="filters" role="group">${[y0, y0 - 1, y0 - 2].map((y) => `<button class="chip" data-act="st-jahr" data-k="${y}" aria-pressed="${y === jahr}">${y}</button>`).join('')}</div>
@@ -799,6 +804,98 @@ function stPrint(key) {
     <table class="p"><tr><th>Kennzahl</th><th>Bezeichnung</th><th class="r">Wert</th></tr>${u.rows.map((x) => `<tr><td>Kz ${x.kz}</td><td>${x.t}</td><td class="r">${x.cent ? eur(x.wert) : x.wert.toLocaleString('de-DE') + ' €'}</td></tr>`).join('')}</table>
     <p style="font-size:8.5pt">Erstellt mit dem Steuer-Cockpit am ${dat(heute())}. Ausfüllhilfe, keine Steuerberatung.</p>`;
   const alt = document.title; document.title = 'UStVA-' + key;
+  window.print();
+  setTimeout(() => { document.title = alt; }, 500);
+}
+
+/* ---------- BWA: Monatsauswertung wie vom Steuerberater, aus denselben Zahlen wie die EÜR ---------- */
+const BWA_KOSTEN = [
+  ['raum', 'Miete und Raumkosten', ['Miete']],
+  ['vers', 'Versicherungen und Beiträge', ['Versicherung', 'Beiträge und Gebühren']],
+  ['kfz', 'Fahrzeug und Reisen', ['Fahrzeug und Reise']],
+  ['werb', 'Werbung und Bewirtung', ['Werbung', 'Bewirtung']],
+  ['versand', 'Porto und Versand', ['Porto und Versand']],
+  ['anl', 'Anschaffungen (Geräte, Möbel)', ['Anschaffung (Gerät, Möbel)']],
+  ['buero', 'Büro, Software, Telefon', ['Büro und Software', 'Telefon und Internet']],
+  ['sonst', 'Bank, Fortbildung und Sonstiges', null]
+];
+const BWA_WAREN = ['Wareneinkauf', 'Fremdleistung'];
+// Werte eines Jahres je Zeile und Monat (netto). Gleiche Regeln wie gewinn(), damit BWA und EÜR zusammenpassen.
+function bwaJahr(j) {
+  const gw = gewinn(j), z = (arr) => (arr || Array(12).fill(0));
+  const summe = (kats) => Array.from({ length: 12 }, (_, i) => r2(kats.reduce((s, k) => s + z(gw.mKat[k])[i], 0)));
+  const bekannt = new Set(BWA_WAREN.concat(...BWA_KOSTEN.filter((x) => x[2]).map((x) => x[2])));
+  const rest = Object.keys(gw.mKat).filter((k) => !bekannt.has(k));
+  const umsatz = gw.mEin.slice(), waren = summe(BWA_WAREN);
+  const roh = umsatz.map((u, i) => r2(u - waren[i]));
+  const kosten = BWA_KOSTEN.map(([k, t, kats]) => ({ k, t, m: summe(kats || rest) }));
+  const kSum = Array.from({ length: 12 }, (_, i) => r2(kosten.reduce((s, x) => s + x.m[i], 0)));
+  const erg = roh.map((r, i) => r2(r - kSum[i]));
+  return { gw, umsatz, waren, roh, kosten, kSum, erg };
+}
+// Zeilen für Monat m (0–11): Monat, Vorjahresmonat, Jan bis m, Vorjahr Jan bis m
+function bwa(j, m) {
+  const a = bwaJahr(j), v = bwaJahr(j - 1);
+  const kum = (arr) => r2(arr.slice(0, m + 1).reduce((s, x) => s + x, 0));
+  const zeile = (t, x, y, art) => ({ t, art, mon: x[m], vmon: y[m], kum: kum(x), vkum: kum(y) });
+  const rows = [zeile('Umsatz (Einnahmen netto)', a.umsatz, v.umsatz, 'summe'), zeile('minus Wareneinkauf und Fremdleistungen', a.waren, v.waren), zeile('Rohertrag', a.roh, v.roh, 'summe')];
+  a.kosten.forEach((k, i) => { if (k.m.some((x) => x) || v.kosten[i].m.some((x) => x)) rows.push(zeile(k.t, k.m, v.kosten[i].m, 'kosten')); });
+  rows.push(zeile('Kosten gesamt', a.kSum, v.kSum, 'summe'), zeile('Ergebnis vor Steuern', a.erg, v.erg, 'ergebnis'));
+  const u = kum(a.umsatz);
+  for (const r of rows) r.quote = u ? Math.round(r.kum / u * 1000) / 10 : null;
+  return { j, m, rows, a, v, u, hat: a.umsatz.some((x) => x) || a.kSum.some((x) => x) || a.waren.some((x) => x) };
+}
+const pz = (x) => x == null ? '' : x.toLocaleString('de-DE', { maximumFractionDigits: 1 }) + ' %';
+const verae = (x, y) => !y ? '' : `${x - y >= 0 ? '+' : '−'}${Math.abs(Math.round((x - y) / Math.abs(y) * 100))} %`;
+function bwaStand() {
+  const y0 = new Date().getFullYear(), m0 = new Date().getMonth();
+  const j = Number(filter.bwaJahr) || y0, m = filter.bwaMon != null && filter.bwaMon !== '' ? Number(filter.bwaMon) : (j === y0 ? Math.max(0, m0 - (new Date().getDate() < 15 ? 1 : 0)) : 11);
+  return { j, m: Math.min(m, j === y0 ? m0 : 11) };
+}
+function vBwa() {
+  const y0 = new Date().getFullYear(), { j, m } = bwaStand(), B = bwa(j, m), E = B.rows[B.rows.length - 1], R = B.rows[2];
+  const zahl = (x, fett) => `<td style="text-align:right;white-space:nowrap">${fett ? '<b>' : ''}${eur(x)}${fett ? '</b>' : ''}</td>`;
+  const tr = (r) => { const f = r.art === 'summe' || r.art === 'ergebnis'; return `<tr${f ? ' style="background:var(--soft)"' : ''}><td>${f ? '<b>' + esc(r.t) + '</b>' : (r.art === 'kosten' ? '&nbsp;&nbsp;' : '') + esc(r.t)}</td>${zahl(r.mon, f)}${zahl(r.vmon)}${zahl(r.kum, f)}${zahl(r.vkum)}<td style="text-align:right;white-space:nowrap" class="small muted">${verae(r.kum, r.vkum)}</td><td style="text-align:right;white-space:nowrap" class="small muted">${pz(r.quote)}</td></tr>`; };
+  const bis = (m ? `Jan bis ${MON_K[m]}` : 'Januar');
+  openDlg(`${head('Monatsauswertung (BWA)')}<div class="dlg-body">
+    <div class="grid2"><label>Jahr<select id="bwaJahr">${[y0, y0 - 1, y0 - 2].map((y) => `<option${y === j ? ' selected' : ''}>${y}</option>`).join('')}</select></label>
+    <label>Monat<select id="bwaMon">${MONATE.map((n, i) => j === y0 && i > new Date().getMonth() ? '' : `<option value="${i}"${i === m ? ' selected' : ''}>${n}</option>`).join('')}</select></label></div>
+    ${B.hat ? `<div class="tiles" style="margin:12px 0 4px">
+      <div class="tile"><div class="q">Ergebnis ${MONATE[m]}</div><div class="v" style="color:${E.mon < 0 ? 'var(--bad)' : 'inherit'}">${eur(E.mon)}</div><div class="e">Vorjahr ${eur(E.vmon)}</div></div>
+      <div class="tile"><div class="q">Ergebnis ${bis}</div><div class="v" style="color:${E.kum < 0 ? 'var(--bad)' : 'inherit'}">${eur(E.kum)}</div><div class="e">${verae(E.kum, E.vkum) ? verae(E.kum, E.vkum) + ' zum Vorjahr' : 'kein Vorjahr'}</div></div>
+      <div class="tile"><div class="q">Vom Umsatz bleibt nach Ware</div><div class="v">${pz(R.quote) || '–'}</div><div class="e">Rohertrag ${bis}</div></div>
+      <div class="tile"><div class="q">Vom Umsatz bleibt als Gewinn</div><div class="v">${pz(E.quote) || '–'}</div><div class="e">${bis}</div></div>
+    </div>
+    <div style="overflow-x:auto;margin-top:10px"><table class="tab" style="min-width:640px"><tr><th></th><th style="text-align:right">${MON_K[m]} ${j}</th><th style="text-align:right">${MON_K[m]} ${j - 1}</th><th style="text-align:right">${bis} ${j}</th><th style="text-align:right">${bis} ${j - 1}</th><th style="text-align:right">Veränd.</th><th style="text-align:right">vom Umsatz</th></tr>
+      ${B.rows.map(tr).join('')}</table></div>
+    <p class="small muted" style="margin-top:8px">Alle Beträge netto. ${B.a.gw.bilanz ? 'Einnahmen nach Rechnungsdatum.' : 'Einnahmen zählen, wenn das Geld da ist, wie in der EÜR.'} Ausgaben nach Belegdatum. Die Zahlen sind dieselben wie in der EÜR und im DATEV-Export. Anschaffungen stehen hier voll im Monat des Kaufs, die Abschreibung über mehrere Jahre macht der Steuerberater. Gehälter, die nur über das Konto laufen, sind noch nicht dabei.</p>`
+    : `<p class="muted" style="margin-top:12px">Für ${j} gibt es noch keine bezahlten Rechnungen und keine Belege.</p>`}
+  </div>
+  <div class="dlg-foot"><button data-act="bwa-csv">Als Tabelle (CSV)</button><button class="primary" data-act="bwa-print">Drucken oder als PDF</button></div>`);
+}
+function bwaCsvJahr(j) {
+  const a = bwaJahr(j), rows = [['BWA ' + j + (S.firma.name ? ' ' + S.firma.name : '')].concat(MONATE, ['Summe'])];
+  const z = (t, arr) => rows.push([t].concat(arr, [r2(arr.reduce((s, x) => s + x, 0))]));
+  z('Umsatz (Einnahmen netto)', a.umsatz); z('Wareneinkauf und Fremdleistungen', a.waren); z('Rohertrag', a.roh);
+  for (const k of a.kosten) if (k.m.some((x) => x)) z(k.t, k.m);
+  z('Kosten gesamt', a.kSum); z('Ergebnis vor Steuern', a.erg);
+  rows.push([], ['Alle Beträge netto. ' + (a.gw.bilanz ? 'Einnahmen nach Rechnungsdatum.' : 'Einnahmen nach Zahlungseingang (EÜR).') + ' Ausgaben nach Belegdatum.']);
+  return csvText(rows);
+}
+function bwaCsv() {
+  const { j, m } = bwaStand(), B = bwa(j, m), bis = (m ? `Jan bis ${MON_K[m]}` : 'Januar');
+  const rows = [['BWA ' + MONATE[m] + ' ' + j, S.firma.name || ''], [], ['', `${MON_K[m]} ${j}`, `${MON_K[m]} ${j - 1}`, `${bis} ${j}`, `${bis} ${j - 1}`, 'Veränderung', 'Anteil am Umsatz']]
+    .concat(B.rows.map((r) => [r.t, r.mon, r.vmon, r.kum, r.vkum, verae(r.kum, r.vkum), pz(r.quote)]));
+  download(`BWA-${j}-${String(m + 1).padStart(2, '0')}.csv`, csvText(rows), 'text/csv');
+}
+function bwaPrint() {
+  const { j, m } = bwaStand(), B = bwa(j, m), f = S.firma, bis = (m ? `Jan bis ${MON_K[m]}` : 'Januar');
+  $('#druck').innerHTML = `<h1>Monatsauswertung (BWA) ${MONATE[m]} ${j}</h1>
+    <p>${esc(f.name)}${f.steuernr ? ' · Steuernummer ' + esc(f.steuernr) : ''}</p>
+    <table class="p"><tr><th></th><th class="r">${MON_K[m]} ${j}</th><th class="r">${MON_K[m]} ${j - 1}</th><th class="r">${bis} ${j}</th><th class="r">${bis} ${j - 1}</th><th class="r">Veränd.</th><th class="r">vom Umsatz</th></tr>
+    ${B.rows.map((r) => { const b = r.art === 'summe' || r.art === 'ergebnis'; const w = (x) => `<td class="r">${b ? '<b>' + eur(x) + '</b>' : eur(x)}</td>`; return `<tr><td>${b ? '<b>' + esc(r.t) + '</b>' : esc(r.t)}</td>${w(r.mon)}${w(r.vmon)}${w(r.kum)}${w(r.vkum)}<td class="r">${verae(r.kum, r.vkum)}</td><td class="r">${pz(r.quote)}</td></tr>`; }).join('')}</table>
+    <p style="font-size:8.5pt">Alle Beträge netto. ${B.a.gw.bilanz ? 'Einnahmen nach Rechnungsdatum.' : 'Einnahmen nach Zahlungseingang (EÜR).'} Ausgaben nach Belegdatum. Erstellt mit dem Steuer-Cockpit am ${dat(heute())}. Eigene Auswertung, keine Steuerberatung.</p>`;
+  const alt = document.title; document.title = `BWA-${j}-${String(m + 1).padStart(2, '0')}`;
   window.print();
   setTimeout(() => { document.title = alt; }, 500);
 }
@@ -3428,11 +3525,12 @@ async function paket(j, mitDatev) {
   const dv = mitDatev ? datev(j) : null;
   files.unshift(
     { name: `Uebersicht-${y}.csv`, data: csvText(mon) },
+    { name: `BWA-${y}.csv`, data: bwaCsvJahr(j) },
     { name: `Einnahmen-${y}.csv`, data: csvText(ein) },
     { name: `Ausgaben-${y}.csv`, data: csvText(aus) },
     ...(bank.length > 1 ? [{ name: `Bank-${y}.csv`, data: csvText(bank) }] : []),
-    ...(dv ? [{ name: `DATEV/EXTF_Buchungsstapel_${y}.csv`, data: dv.csv }, { name: 'DATEV/Kontenzuordnung.csv', data: datevKonten() }, ...(dv.hinweise.length ? [{ name: 'DATEV/Hinweise.txt', data: dv.hinweise.join('\r\n') + '\r\n' }] : [])] : []),
-    { name: 'LIESMICH.txt', data: `Jahrespaket ${y} aus dem Steuer-Cockpit${S.firma.name ? ' für ' + S.firma.name : ''}, erstellt am ${dat(heute())}.\r\n\r\nUebersicht: Einnahmen, Ausgaben und Überschuss je Monat, Ausgaben nach Kategorie.\r\nEinnahmen: alle Rechnungen des Jahres. Ausgaben: alle Belege des Jahres.\r\nBank: Buchungen aus den eingelesenen Kontoauszügen.\r\nDie CSV-Dateien öffnen sich in Excel, Numbers oder LibreOffice.\r\nIm Ordner Belege liegen die hochgeladenen Belege, in Rechnungen hinterlegte Rechnungen und E-Rechnungen (XML).\r\nIn der Spalte "Datei im Paket" steht, welche Datei zu welcher Zeile gehört.\r\n${dv ? `\r\nDATEV: EXTF_Buchungsstapel_${y}.csv im DATEV-Format (Buchungsstapel, SKR ${S.steuer.skr === '04' ? '04' : '03'}, ${S.steuer.versteuerung === 'ist' ? 'Ist' : 'Soll'}-Versteuerung). In DATEV über Bestand, Importieren, Buchungsdaten einlesen. Kontenzuordnung.csv zeigt, welche Kategorie auf welches Konto gebucht ist. Bitte in der Kanzlei prüfen.\r\n` : ''}Beträge netto ohne Umsatzsteuer, sofern nicht anders angegeben.\r\n` });
+    ...(dv ? [{ name: `DATEV/EXTF_Buchungsstapel_${y}.csv`, data: dv.csv }, { name: 'DATEV/Kontenzuordnung.csv', data: datevKonten() }, { name: 'DATEV/Kunden-und-Lieferanten.csv', data: datevKontakte() }, ...(dv.hinweise.length ? [{ name: 'DATEV/Hinweise.txt', data: dv.hinweise.join('\r\n') + '\r\n' }] : [])] : []),
+    { name: 'LIESMICH.txt', data: `Jahrespaket ${y} aus dem Steuer-Cockpit${S.firma.name ? ' für ' + S.firma.name : ''}, erstellt am ${dat(heute())}.\r\n\r\nUebersicht: Einnahmen, Ausgaben und Überschuss je Monat, Ausgaben nach Kategorie.\r\nEinnahmen: alle Rechnungen des Jahres. Ausgaben: alle Belege des Jahres.\r\nBank: Buchungen aus den eingelesenen Kontoauszügen.\r\nDie CSV-Dateien öffnen sich in Excel, Numbers oder LibreOffice.\r\nIm Ordner Belege liegen die hochgeladenen Belege, in Rechnungen hinterlegte Rechnungen und E-Rechnungen (XML).\r\nIn der Spalte "Datei im Paket" steht, welche Datei zu welcher Zeile gehört.\r\n${dv ? `\r\nDATEV: EXTF_Buchungsstapel_${y}.csv im DATEV-Format (Buchungsstapel, SKR ${S.steuer.skr === '04' ? '04' : '03'}, ${S.steuer.versteuerung === 'ist' ? 'Ist' : 'Soll'}-Versteuerung). In DATEV über Bestand, Importieren, Buchungsdaten einlesen. Kontenzuordnung.csv zeigt, welche Kategorie auf welches Konto gebucht ist. Kunden-und-Lieferanten.csv enthält alle Kunden und Lieferanten mit Adresse und USt-IdNr. Bitte in der Kanzlei prüfen.\r\n` : ''}BWA: Monatsauswertung mit Umsatz, Wareneinkauf, Kosten und Ergebnis je Monat.\r\nBeträge netto ohne Umsatzsteuer, sofern nicht anders angegeben.\r\n` });
   download(`Steuer-Cockpit-${y}${S.firma.name ? '-' + dateiName(S.firma.name).replace(/\s+/g, '-') : ''}.zip`, zipBlob(files));
   toast(`Jahrespaket ${y} heruntergeladen`);
 }
@@ -3443,8 +3541,20 @@ const KONTO = {
   bank: [1200, 1800], kasse: [1000, 1600], privat: [1890, 2180], verb: [1600, 3300], ford: [1400, 1200],
   e19: [8400, 4400], e7: [8300, 4300], ku: [8195, 4185], frei: [8100, 4100],
   'eu-leistung': [8336, 4336], 'eu-lieferung': [8125, 4125], inland13b: [8337, 4337], drittland: [8338, 4338], ausfuhr: [8120, 4120],
-  gwg: [480, 670], bga: [490, 690], bewirtNa: [4654, 6644]
+  gwg: [480, 670], bga: [490, 690], bewirtNa: [4654, 6644],
+  // Kontobewegungen ohne Beleg
+  pEnt: [1800, 2100], pSteuer: [1810, 2150], transit: [1360, 1460], lohn: [1740, 3720], geld: [4970, 6855], ustVz: [1780, 3820], gewSt: [4320, 7610], klaeren: [1590, 1370]
 };
+// Grund aus dem Beleg-Abgleich → Konto. Steuern und Unklares entscheidet der Verwendungszweck oder die Kanzlei.
+const BANK_KONTO = { 'Privatentnahme': 'pEnt', 'Privateinlage': 'privat', 'Umbuchung auf ein eigenes Konto': 'transit', 'Umbuchung von einem eigenen Konto': 'transit', 'Lohn oder Gehalt (Abrechnung liegt vor)': 'lohn', 'Kontoführung, der Kontoauszug reicht': 'geld' };
+function bankKonto(b) {
+  let k = BANK_KONTO[b.ohneBeleg];
+  if (!k && /steuer/i.test(b.ohneBeleg || '')) {
+    const z = `${b.zweck || ''} ${b.gegenpartei || ''}`.toLowerCase();
+    k = /umsatzst|\bust\b|voranmeld/.test(z) ? 'ustVz' : /gewerbest|gewst/.test(z) ? 'gewSt' : /einkommenst|kirchenst|solidarit|\best\b/.test(z) && !KAPITAL.includes(S.firma.rechtsform) ? 'pSteuer' : '';
+  }
+  return k || 'klaeren';
+}
 const KAT_KONTO = {
   'Wareneinkauf': [3200, 5200], 'Büro und Software': [4930, 6815], 'Telefon und Internet': [4920, 6805], 'Fahrzeug und Reise': [4530, 6530],
   'Werbung': [4600, 6600], 'Miete': [4210, 6310], 'Versicherung': [4360, 6400], 'Fremdleistung': [3100, 5900], 'Bewirtung': [4650, 6640],
@@ -3497,6 +3607,16 @@ function datev(j) {
     if (b.kategorie === 'Bewirtung') { const na = r2(br * 0.3); add(r2(br - na), konto, gegen, bu, b.datum, nr, text + ' 70 %'); add(na, K('bewirtNa'), gegen, bu, b.datum, nr, text + ' 30 % nicht abziehbar'); }
     else add(br, konto, gegen, bu, b.datum, nr, text);
   }
+  // Kontobewegungen, die keinen Beleg und keine Rechnung brauchen (Privatentnahme, Steuerzahlung, Umbuchung …)
+  let ohneZu = 0, nk = 0;
+  for (const b of (S.bank || []).filter((x) => (x.datum || '').startsWith(y)).sort((a, c) => a.datum.localeCompare(c.datum))) {
+    if (b.rechnungId || b.belegId) continue;
+    if (!b.ohneBeleg) { ohneZu++; continue; }
+    const k = bankKonto(b); nk++;
+    if (k === 'klaeren') hinweise.push(`Kontobewegung ${eur(Math.abs(b.betrag))} ${b.betrag < 0 ? 'raus' : 'rein'} vom ${dat(b.datum)} (${b.gegenpartei || 'ohne Namen'}, ${b.ohneBeleg}) auf "Durchlaufende Posten" gebucht, bitte in der Kanzlei zuordnen.`);
+    add(-b.betrag, K(k), K('bank'), '', b.datum, `K${b.datum.replace(/-/g, '')}-${nk}`, `${b.gegenpartei || 'Konto'} ${b.ohneBeleg}`);
+  }
+  if (ohneZu) hinweise.push(`${ohneZu} Kontobewegung${ohneZu > 1 ? 'en' : ''} ohne Beleg oder Rechnung nicht übernommen. Im Cockpit im Reiter Bank zuordnen oder als "braucht keinen Beleg" markieren.`);
   const ts = new Date(), z2 = (x) => String(x).padStart(2, '0');
   const stamp = `${ts.getFullYear()}${z2(ts.getMonth() + 1)}${z2(ts.getDate())}${z2(ts.getHours())}${z2(ts.getMinutes())}${z2(ts.getSeconds())}000`;
   const berater = String(S.steuer.beraterNr || '').replace(/\D/g, '') || '1001', mandant = String(S.steuer.mandantNr || '').replace(/\D/g, '') || '1';
@@ -3505,19 +3625,28 @@ function datev(j) {
   const kopf = [q('EXTF'), 700, 21, q('Buchungsstapel'), 13, stamp, '', q('SC'), q('Steuer-Cockpit'), q(''), berater, mandant, y + '0101', 4, y + '0101', y + '1231', q(txt('Steuer-Cockpit ' + y)), q(''), 1, 0, 0, q('EUR'), '', q(''), '', '', q(S.steuer.skr === '04' ? '04' : '03'), '', '', q(''), q('')].join(';');
   const spalten = ['Umsatz (ohne Soll/Haben-Kz)', 'Soll/Haben-Kennzeichen', 'WKZ Umsatz', 'Kurs', 'Basis-Umsatz', 'WKZ Basis-Umsatz', 'Konto', 'Gegenkonto (ohne BU-Schlüssel)', 'BU-Schlüssel', 'Belegdatum', 'Belegfeld 1', 'Belegfeld 2', 'Skonto', 'Buchungstext'].join(';');
   const body = zeilen.map((z) => [z[0], q(z[1]), q('EUR'), '', '', q(''), z[2], z[3], q(z[4]), z[5], q(z[6]), q(''), '', q(z[7])].join(';'));
-  return { csv: cp1252([kopf, spalten].concat(body).join('\r\n') + '\r\n'), n: zeilen.length, hinweise };
+  return { csv: cp1252([kopf, spalten].concat(body).join('\r\n') + '\r\n'), n: zeilen.length, hinweise, ohneZu };
 }
 function datevKonten() {
   const sk = S.steuer.skr === '04' ? 1 : 0, n = (k) => String(k).padStart(4, '0');
   const rows = [['Was', 'Konto SKR ' + (sk ? '04' : '03')]];
   for (const [k, v] of Object.entries(KAT_KONTO)) rows.push(['Ausgaben: ' + k, n(v[sk])]);
-  for (const [k, t] of [['gwg', 'Anschaffung bis 800 € netto (GWG)'], ['bga', 'Anschaffung über 800 € netto (Betriebsausstattung)'], ['bewirtNa', 'Bewirtung, 30 % nicht abziehbar'], ['e19', 'Erlöse 19 %'], ['e7', 'Erlöse 7 %'], ['ku', 'Erlöse als Kleinunternehmer'], ['eu-leistung', 'Erlöse Dienstleistung EU (Reverse Charge)'], ['eu-lieferung', 'Erlöse Lieferung EU'], ['inland13b', 'Erlöse § 13b Inland'], ['drittland', 'Erlöse Leistung Drittland'], ['ausfuhr', 'Erlöse Ausfuhr'], ['bank', 'Bank'], ['kasse', 'Kasse'], ['privat', 'Privateinlage (privat ausgelegt)'], ['ford', 'Forderungen'], ['verb', 'Verbindlichkeiten (noch nicht bezahlt)']]) rows.push([t, n(KONTO[k][sk])]);
+  for (const [k, t] of [['gwg', 'Anschaffung bis 800 € netto (GWG)'], ['bga', 'Anschaffung über 800 € netto (Betriebsausstattung)'], ['bewirtNa', 'Bewirtung, 30 % nicht abziehbar'], ['e19', 'Erlöse 19 %'], ['e7', 'Erlöse 7 %'], ['ku', 'Erlöse als Kleinunternehmer'], ['eu-leistung', 'Erlöse Dienstleistung EU (Reverse Charge)'], ['eu-lieferung', 'Erlöse Lieferung EU'], ['inland13b', 'Erlöse § 13b Inland'], ['drittland', 'Erlöse Leistung Drittland'], ['ausfuhr', 'Erlöse Ausfuhr'], ['bank', 'Bank'], ['kasse', 'Kasse'], ['privat', 'Privateinlage (privat ausgelegt)'], ['ford', 'Forderungen'], ['verb', 'Verbindlichkeiten (noch nicht bezahlt)'], ['pEnt', 'Privatentnahme'], ['pSteuer', 'Private Steuern (Einkommensteuer, Kirchensteuer, Soli)'], ['ustVz', 'Umsatzsteuer-Zahlung oder -Erstattung'], ['gewSt', 'Gewerbesteuer'], ['lohn', 'Lohn und Gehalt (Auszahlung)'], ['transit', 'Umbuchung zwischen eigenen Konten'], ['geld', 'Kontoführung ohne Beleg'], ['klaeren', 'Sonstige Kontobewegungen, bitte zuordnen']]) rows.push([t, n(KONTO[k][sk])]);
+  return csvText(rows);
+}
+function datevKontakte() {
+  const a = (t) => String(t || '').replace(/\s*\n\s*/g, ', ');
+  const rows = [['Art', 'Name', 'Adresse', 'Land', 'USt-IdNr.', 'E-Mail', 'Telefon', 'Rechnungen/Belege im Jahr']];
+  const zahl = (name, liste) => liste.filter((x) => x && x.toLowerCase() === String(name || '').toLowerCase()).length;
+  const kn = S.rechnungen.filter(zaehlt).map((r) => r.kunde && r.kunde.name), ln = S.belege.map((b) => b.lieferant);
+  for (const k of S.kunden.slice().sort((x, z) => (x.name || '').localeCompare(z.name || '', 'de'))) rows.push(['Kunde', k.name, a(k.adresse), k.land || 'DE', k.ustid, k.email, k.tel, String(zahl(k.name, kn))]);
+  for (const l of S.lieferanten.slice().sort((x, z) => (x.name || '').localeCompare(z.name || '', 'de'))) rows.push(['Lieferant', l.name, a(l.adresse), '', l.ustid, l.email, l.tel, String(zahl(l.name, ln))]);
   return csvText(rows);
 }
 function vDatev() {
   const y0 = new Date().getFullYear();
   openDlg(`${head('Export für den Steuerberater')}<form id="dvForm" class="dlg-body" autocomplete="off">
-    <p>Die Datei im DATEV-Format liest die Kanzlei direkt in DATEV ein, mit allen Rechnungen und Belegen als Buchungen. Dazu kommt das Jahrespaket mit Listen und allen Belegen als PDF oder Foto, alles in einer ZIP-Datei.</p>
+    <p>Die Datei im DATEV-Format liest die Kanzlei direkt in DATEV ein, mit allen Rechnungen, Belegen und Kontobewegungen ohne Beleg (Privatentnahme, Steuerzahlung, Umbuchung) als Buchungen. Dazu kommen die Liste deiner Kunden und Lieferanten und das Jahrespaket mit Listen und allen Belegen als PDF oder Foto, alles in einer ZIP-Datei.</p>
     <div class="grid2" style="margin-top:10px">
       <label>Kontenrahmen der Kanzlei<select name="skr"><option value="03"${S.steuer.skr !== '04' ? ' selected' : ''}>SKR 03</option><option value="04"${S.steuer.skr === '04' ? ' selected' : ''}>SKR 04</option></select></label>
       <label>Jahr<select name="jahr">${[y0, y0 - 1, y0 - 2].map((y) => `<option${y === y0 - (new Date().getMonth() < 3 ? 1 : 0) ? ' selected' : ''}>${y}</option>`).join('')}</select></label>
@@ -3537,7 +3666,7 @@ async function datevLos(mitPaket) {
   if (mitPaket) { closeDlg(); return paket(j, true); }
   const d = datev(j);
   download(`EXTF_Buchungsstapel_${j}.csv`, new Blob([d.csv], { type: 'text/csv' }));
-  closeDlg(); toast(`${d.n} Buchungen für ${j} gespeichert${d.hinweise.length ? `, ${d.hinweise.length} Hinweis${d.hinweise.length > 1 ? 'e' : ''} im ZIP-Export` : ''}`);
+  closeDlg(); toast(`${d.n} Buchungen für ${j} gespeichert${d.ohneZu ? `, ${d.ohneZu} Kontobewegungen ohne Zuordnung fehlen` : ''}${d.hinweise.length ? `, ${d.hinweise.length} Hinweis${d.hinweise.length > 1 ? 'e' : ''} im ZIP-Export` : ''}`);
 }
 
 /* Den Browser bitten, die Daten nicht bei Platzmangel zu löschen */
@@ -3783,6 +3912,9 @@ const ACT = {
   'st-csv': (el) => stCsv(el.dataset.k),
   'st-zm': (el) => stZm(el.dataset.k),
   'st-print': (el) => stPrint(el.dataset.k),
+  bwa: () => vBwa(),
+  'bwa-csv': () => bwaCsv(),
+  'bwa-print': () => bwaPrint(),
   'st-ics': stIcs,
   'kal-ok': kalSpeichern,
   'kal-eins': (el) => { const f = fristen().find((x) => x.key === el.dataset.k); if (!f) return; icsDatei([{ uid: f.key, datum: f.datum, t: f.t, s: f.s }], [num(S.steuer.kalVorher)], `frist-${f.key}.ics`); toast('Termin gespeichert. Datei öffnen, um ihn zu übernehmen.'); },
@@ -3830,6 +3962,7 @@ document.addEventListener('change', async (e) => {
   if (e.target.id === 'ruIst') { S.steuer.ruecklageIst = e.target.value.trim() === '' ? '' : num(e.target.value); await save(); render(); toast('Gespeichert'); return; }
   if (e.target.id === 'bankMon') { filter.bankMon = e.target.value; render(); return; }
   if (e.target.id === 'stZr') { stZr = e.target.value; render(); return; }
+  if (e.target.id === 'bwaJahr' || e.target.id === 'bwaMon') { filter[e.target.id] = e.target.value; if (e.target.id === 'bwaJahr') filter.bwaMon = ''; vBwa(); return; }
   if (e.target.closest('#stForm')) { saveSteuer(); return; }
   if (e.target.id === 'fileIn') { pendingFile = e.target.files[0] || null; zeigeDatei(pendingFile); }
   if (e.target.id === 'logoIn' && e.target.files[0]) {
