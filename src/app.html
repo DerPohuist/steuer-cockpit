@@ -233,7 +233,7 @@ function leer() {
   return {
     v: 2,
     firma: { name: '', inhaber: '', strasse: '', plz: '', ort: '', steuernr: '', ustid: '', email: '', tel: '', iban: '', bic: '', bank: '', rechtsform: '', registergericht: '', registernr: '', logo: '', kleinunternehmer: false, gruendung: '', turnus: 'monat', dauerfrist: false, zahlungsziel: 14, angebotTage: 30, basiszins: 1.27, skontoProz: '', skontoTage: '', nummern: {} },
-    angebote: [], rechnungen: [], belege: [], kunden: [], lieferanten: [], bank: [], vorlagen: [], artikel: [], lager: [], zaehler: {}, letzteSicherung: null,
+    angebote: [], rechnungen: [], belege: [], kunden: [], lieferanten: [], bank: [], vorlagen: [], artikel: [], lager: [], anlagen: [], zaehler: {}, letzteSicherung: null,
     steuer: { versteuerung: 'soll', hebesatz: 400, berater: false, svz: 0, vzEst: 0, vzGew: 0, erledigt: {}, ruecklageIst: '', kalVorher: 3, kalRe: true, skr: '03', beraterNr: '', mandantNr: '' },
     est: {}
   };
@@ -248,7 +248,7 @@ async function load() {
 }
 /* Ältere Stände: Kunden bekommen eine id, Lieferanten entstehen aus vorhandenen Belegen */
 function migriere() {
-  S.kunden = S.kunden || []; S.lieferanten = S.lieferanten || []; S.vorlagen = S.vorlagen || []; S.artikel = S.artikel || []; S.lager = S.lager || []; S.firma.nummern = S.firma.nummern || {};
+  S.kunden = S.kunden || []; S.lieferanten = S.lieferanten || []; S.vorlagen = S.vorlagen || []; S.artikel = S.artikel || []; S.lager = S.lager || []; S.anlagen = S.anlagen || []; S.firma.nummern = S.firma.nummern || {};
   for (const k of S.kunden) if (!k.id) k.id = uid();
   if ((S.v || 1) < 2) {
     for (const b of S.belege.slice().sort((x, y) => (x.datum || '').localeCompare(y.datum || ''))) merkeLieferant(b.lieferant, b.kategorie, b.rc);
@@ -530,6 +530,7 @@ function gewinn(jahr) {
   let aus = 0, bewirt = 0;
   for (const b of S.belege) {
     if (!(b.datum || '').startsWith(j)) continue;
+    if (anlageVon(b)) continue;
     const netto = r2(num(b.brutto) - num(b.vorsteuer));
     if (!num(b.brutto)) ohne.push(b);
     const k = b.kategorie || 'Ohne Kategorie';
@@ -539,9 +540,20 @@ function gewinn(jahr) {
     if (k === 'Bewirtung') bewirt += netto;
     if (netto > 800 && !['Miete', 'Versicherung', 'Fremdleistung', 'Werbung', 'Telefon und Internet', 'Wareneinkauf'].includes(k)) gross.push(b);
   }
+  // Abschreibung aus dem Anlagenverzeichnis, verteilt auf die Monate, in denen das Gerät im Jahr genutzt wird
+  let afa = 0;
+  for (const a of S.anlagen) {
+    const x = afaJahr(a, Number(j)); if (!x.afa && !x.rest) continue;
+    const m = x.von - 1, bisM = Math.round(num(a.jahre)) <= 1 ? m : x.bis - 1, n = bisM - m + 1, mk = mKat.Abschreibung = mKat.Abschreibung || Array(12).fill(0);
+    for (let i = m; i <= bisM; i++) { const t = i === bisM ? r2(x.afa - r2(x.afa / n) * (n - 1)) : r2(x.afa / n); mk[i] += t; mAus[i] += t; }
+    if (x.rest) { mk[bisM] += x.rest; mAus[bisM] += x.rest; }
+    afa += x.afa + x.rest;
+  }
+  afa = r2(afa);
+  if (afa) { kat.Abschreibung = afa; aus += afa; }
   const nichtAbz = r2(bewirt * 0.3);
   ein = r2(ein); aus = r2(aus);
-  return { bilanz, ein, aus, nichtAbz, gewinn: r2(ein - aus + nichtAbz), kat, mKat, gross, ohne, offen: r2(offen), nOffen, mEin: mEin.map(r2), mAus: mAus.map(r2) };
+  return { bilanz, ein, aus, nichtAbz, gewinn: r2(ein - aus + nichtAbz), kat, mKat, afa, gross, ohne, offen: r2(offen), nOffen, mEin: mEin.map(r2), mAus: mAus.map(r2) };
 }
 
 /* Grobe Steuerschätzung. Tarif nach § 32a EStG, Grundtabelle (ledig), ohne andere Einkünfte und Abzüge */
@@ -673,6 +685,10 @@ function vSteuern() {
     <table class="tab"><tr><th>Kunde</th><th>USt-IdNr.</th><th>Art</th><th style="text-align:right">Betrag</th></tr>${zmL.map((x) => `<tr><td>${esc(x.name)}</td><td>${x.land && x.nr ? esc(x.land + x.nr) : '<span class="pill bad">fehlt</span>'}</td><td>${x.art === 'S' ? 'Dienstleistung' : 'Lieferung'}</td><td style="text-align:right">${x.betrag.toLocaleString('de-DE')} €</td></tr>`).join('')}</table>
     <div class="btns"><button data-act="st-zm" data-k="${qy}-${qi}">Liste als Datei</button></div></div>` : ''}
 
+  <div class="card"><h2>Anlagen und Abschreibung</h2>
+    <p class="small">Geräte, Möbel und Fahrzeuge über 800 € netto setzt du nicht auf einmal ab, sondern über mehrere Jahre. Die App rechnet die Beträge je Jahr aus und nimmt sie in EÜR, BWA und DATEV-Export auf.${S.anlagen.length ? ` <b>${S.anlagen.length} Anlage${S.anlagen.length > 1 ? 'n' : ''}</b>, Abschreibung ${jahr}: ${eur(gw.afa)}.` : ''}</p>
+    <div class="btns"><button${anlageVorschlaege().length ? ' class="primary"' : ''} data-act="anlagen">${anlageVorschlaege().length ? `${anlageVorschlaege().length} Anschaffung${anlageVorschlaege().length > 1 ? 'en' : ''} eintragen` : 'Anlagenverzeichnis'}</button></div></div>
+
   <div class="card"><h2>Monatsauswertung (BWA)</h2>
     <p class="small">Wie die Auswertung vom Steuerberater: Umsatz, Ware, Kosten und Ergebnis für jeden Monat, seit Jahresanfang und im Vergleich zum Vorjahr. Zum Ansehen, Drucken oder für die Bank.</p>
     <div class="btns"><button class="primary" data-act="bwa">BWA ansehen</button></div></div>
@@ -687,7 +703,7 @@ function vSteuern() {
     <p class="small muted" style="margin-top:6px">${gw.bilanz ? 'Nach Rechnungsdatum gerechnet. Die echte Bilanz mit Abschreibungen, Rückstellungen und Kapitalkonten macht der Steuerberater.' : 'Einnahmen zählen, wenn das Geld da ist (Zuflussprinzip). Ausgaben nach Belegdatum.'} Umsatzsteuer und Vorsteuer sind herausgerechnet; in der Anlage EÜR stehen sie als eigene Zeilen und heben sich mit den Zahlungen ans Finanzamt auf.</p>
     ${gw.nOffen || gw.gross.length || gw.ohne.length ? `<ul class="checks">
       ${gw.nOffen ? `<li class="miss">${gw.nOffen} Rechnung${gw.nOffen > 1 ? 'en' : ''} über ${eur(gw.offen)} noch offen${gw.bilanz ? ', stehen als Forderung in der Bilanz' : ', zählen erst im Jahr der Zahlung'}.</li>` : ''}
-      ${gw.gross.length ? `<li class="miss">${gw.gross.length} Beleg${gw.gross.length > 1 ? 'e' : ''} über 800 € netto (${gw.gross.slice(0, 3).map((b) => esc(b.lieferant || 'ohne Name')).join(', ')}). Geräte und andere Anschaffungen werden über mehrere Jahre abgeschrieben, das prüft der Steuerberater.</li>` : ''}
+      ${gw.gross.length ? `<li class="miss">${gw.gross.length} Beleg${gw.gross.length > 1 ? 'e' : ''} über 800 € netto (${gw.gross.slice(0, 3).map((b) => esc(b.lieferant || 'ohne Name')).join(', ')}). Geräte und andere Anschaffungen werden über mehrere Jahre abgeschrieben. <a href="#" data-act="anlagen">Ins Anlagenverzeichnis</a></li>` : ''}
       ${gw.ohne.length ? `<li class="miss">${gw.ohne.length} Beleg${gw.ohne.length > 1 ? 'e' : ''} ohne Betrag fehlen in der Rechnung.</li>` : ''}</ul>` : ''}
     ${Object.keys(gw.kat).length ? `<details><summary>Ausgaben nach Kategorie</summary><table class="tab">${Object.entries(gw.kat).sort((a, b) => b[1] - a[1]).map(([k, v]) => `<tr><td>${esc(k)}</td><td style="text-align:right">${eur(v)}</td></tr>`).join('')}</table></details>` : ''}
     <div class="btns"><button data-act="paket" data-k="${jahr}">Jahrespaket ${jahr} (ZIP mit Listen und Belegen)</button><button data-act="datev">Für den Steuerberater (DATEV)</button></div>
@@ -815,7 +831,7 @@ const BWA_KOSTEN = [
   ['kfz', 'Fahrzeug und Reisen', ['Fahrzeug und Reise']],
   ['werb', 'Werbung und Bewirtung', ['Werbung', 'Bewirtung']],
   ['versand', 'Porto und Versand', ['Porto und Versand']],
-  ['anl', 'Anschaffungen (Geräte, Möbel)', ['Anschaffung (Gerät, Möbel)']],
+  ['anl', 'Anschaffungen und Abschreibung', ['Anschaffung (Gerät, Möbel)', 'Abschreibung']],
   ['buero', 'Büro, Software, Telefon', ['Büro und Software', 'Telefon und Internet']],
   ['sonst', 'Bank, Fortbildung und Sonstiges', null]
 ];
@@ -873,7 +889,7 @@ function vBwa() {
     </div>
     <div style="overflow-x:auto;margin-top:10px"><table class="tab" style="min-width:640px"><tr><th></th><th style="text-align:right">${MON_K[m]} ${j}</th><th style="text-align:right">${MON_K[m]} ${j - 1}</th><th style="text-align:right">${bis} ${j}</th><th style="text-align:right">${bis} ${j - 1}</th><th style="text-align:right">Veränd.</th><th style="text-align:right">vom Umsatz</th></tr>
       ${B.rows.map(tr).join('')}</table></div>
-    <p class="small muted" style="margin-top:8px">Alle Beträge netto. ${B.a.gw.bilanz ? 'Einnahmen nach Rechnungsdatum.' : 'Einnahmen zählen, wenn das Geld da ist, wie in der EÜR.'} Ausgaben nach Belegdatum. ${B.a.hatLager ? 'Anders als in der EÜR zählt hier die Ware erst, wenn sie das Lager verlässt. Deshalb weicht das Ergebnis um die Lagerveränderung von der EÜR ab.' : 'Die Zahlen sind dieselben wie in der EÜR und im DATEV-Export.'} Anschaffungen stehen hier voll im Monat des Kaufs, die Abschreibung über mehrere Jahre macht der Steuerberater. Gehälter, die nur über das Konto laufen, sind noch nicht dabei.</p>`
+    <p class="small muted" style="margin-top:8px">Alle Beträge netto. ${B.a.gw.bilanz ? 'Einnahmen nach Rechnungsdatum.' : 'Einnahmen zählen, wenn das Geld da ist, wie in der EÜR.'} Ausgaben nach Belegdatum. ${B.a.hatLager ? 'Anders als in der EÜR zählt hier die Ware erst, wenn sie das Lager verlässt. Deshalb weicht das Ergebnis um die Lagerveränderung von der EÜR ab.' : 'Die Zahlen sind dieselben wie in der EÜR und im DATEV-Export.'} Größere Anschaffungen aus dem Anlagenverzeichnis stehen als Abschreibung über die Jahre drin, kleinere voll im Monat des Kaufs. Gehälter, die nur über das Konto laufen, sind noch nicht dabei.</p>`
     : `<p class="muted" style="margin-top:12px">Für ${j} gibt es noch keine bezahlten Rechnungen und keine Belege.</p>`}
   </div>
   <div class="dlg-foot"><button data-act="bwa-csv">Als Tabelle (CSV)</button><button class="primary" data-act="bwa-print">Drucken oder als PDF</button></div>`);
@@ -1050,17 +1066,17 @@ function estGewerbe(E, jahr) {
   ustEin = r2(ustEin); vst = r2(vst);
   const W = estW(jahr);
   const ustFa = g.ustFa == null ? r2(Math.max(0, ustEin - vst)) : nv(g.ustFa), ustErst = g.ustErst == null ? r2(Math.max(0, vst - ustEin)) : nv(g.ustErst);
-  const anschaffung = nv(g.anschaffung), afa = nv(g.afa), kfz = nv(g.kfz);
+  const anschaffung = nv(g.anschaffung), afaM = nv(g.afa), afa = r2(afaM + (gw.afa || 0)), kfz = nv(g.kfz);
   const ho = Math.min(W.hoMax, Math.min(210, nv(g.hoTage)) * W.hoTag);
   const kat = gw.kat, k = (n) => r2(kat[n] || 0);
   const manuell = g.quelle === 'manuell';
   const ein = manuell ? 0 : gw.ein;
   const summeEin = r2(ein + (ku ? 0 : ustEin + ustErst) + kfz);
-  const summeAus = r2(gw.aus - anschaffung + afa + ho + (ku ? 0 : vst + ustFa));
+  const summeAus = r2(gw.aus - anschaffung + afaM + ho + (ku ? 0 : vst + ustFa));
   const gewinnApp = r2(summeEin - summeAus + gw.nichtAbz);
   const gewinnWert = manuell ? nv(g.manuell) : gewinnApp;
   return { rf, ku, gw, ein, ustEin, vst, ustFa, ustErst, anschaffung, afa, kfz, ho, summeEin, summeAus, gewinn: gewinnWert, manuell, waren: k('Wareneinkauf'), fremd: k('Fremdleistung'), miete: k('Miete'),
-    uebrig: r2(gw.aus - anschaffung - k('Wareneinkauf') - k('Fremdleistung') - k('Miete')), freiberuf: rf === 'freiberufler', anlage: rf === 'freiberufler' ? 'S' : 'G', mitbilanz: BILANZ.includes(rf) };
+    uebrig: r2(gw.aus - (gw.afa || 0) - anschaffung - k('Wareneinkauf') - k('Fremdleistung') - k('Miete')), freiberuf: rf === 'freiberufler', anlage: rf === 'freiberufler' ? 'S' : 'G', mitbilanz: BILANZ.includes(rf) };
 }
 
 function estRechnung(E, jahr) {
@@ -1259,7 +1275,8 @@ function estGew(E, j) {
     ${gw.ohne.length ? `<p class="small"><span class="pill bad">Fehlt</span> ${gw.ohne.length} Beleg(e) ohne Betrag. Bitte im Reiter Belege ergänzen.</p>` : ''}
     <p class="small muted">Fehlen Rechnungen oder Belege aus dem Jahr, trag sie erst nach oder wähle oben „selbst eintragen“.</p>`}</div>
   ${g.manuell ? '' : `<div class="card"><h2>Korrekturen</h2>
-    ${gw.gross.length ? `<p class="small">Belege über 800 € netto: ${gw.gross.map((b) => `${esc(b.lieferant || 'ohne Name')} (${eur(r2(num(b.brutto) - num(b.vorsteuer)))})`).join(', ')}. Sind das Geräte, Möbel oder Fahrzeuge, darfst du sie nicht auf einmal absetzen, sondern verteilst sie über die Nutzungsdauer (Abschreibung, AfA).</p>` : ''}
+    ${gw.gross.length ? `<p class="small">Belege über 800 € netto: ${gw.gross.map((b) => `${esc(b.lieferant || 'ohne Name')} (${eur(r2(num(b.brutto) - num(b.vorsteuer)))})`).join(', ')}. Sind das Geräte, Möbel oder Fahrzeuge, darfst du sie nicht auf einmal absetzen, sondern verteilst sie über die Nutzungsdauer (Abschreibung, AfA). Am einfachsten trägst du sie ins <a href="#" data-act="anlagen">Anlagenverzeichnis</a> ein, dann rechnet die App das selbst.</p>` : ''}
+    ${gw.afa ? `<p class="small"><span class="pill good">Schon drin</span> ${eur(gw.afa)} Abschreibung aus dem <a href="#" data-act="anlagen">Anlagenverzeichnis</a>. Unten nur eintragen, was dort fehlt.</p>` : ''}
     <div class="grid2">
       ${ef(E, 'gew.anschaffung', 'Davon Anschaffungen, die abgeschrieben werden (netto) €', { hint: 'werden aus den Ausgaben herausgenommen' })}
       ${ef(E, 'gew.afa', 'Abschreibung für dieses Jahr €', { hint: 'z. B. Laptop 1.500 € über 3 Jahre: 500 €. Computer und Software dürfen sofort voll abgeschrieben werden.', z: 'e.afa' })}
@@ -1526,7 +1543,8 @@ function beispielDaten() {
   const b1 = be('Telekom Deutschland GmbH', tag(-12), 59.5, 'Telefon und Internet', 'Mobilfunk und Internet');
   const b2 = be('Druckerei Schmidt', tag(-35), 357, 'Wareneinkauf', 'Folien und Druck für Autohaus Weber');
   const b3 = be('Shell Station Pforzheim', tag(-8), 89.2, 'Fahrzeug und Reise', 'Tanken Firmenwagen');
-  B.belege = [b1, b2, b3];
+  const b4 = be('Notebook-Shop Karlsruhe', tag(-20), 1785, 'Anschaffung (Gerät, Möbel)', 'Laptop für die Gestaltung');
+  B.belege = [b1, b2, b3, b4];
   const bk = (datum, betrag, gegenpartei, zweck, extra) => Object.assign({ id: 'bsp:' + uid(), datum, betrag, gegenpartei, zweck, belegId: null, rechnungId: null }, extra);
   const k1 = bk(tag(-50), summen(r1).brutto, K[0].name, 'Rechnung ' + r1.nr, { rechnungId: r1.id });
   const k2 = bk(tag(-11), -59.5, 'Telekom Deutschland GmbH', 'Kundenkonto 1234567', { belegId: b1.id });
@@ -2334,6 +2352,76 @@ async function saveArtikel() {
   const i = S.artikel.findIndex((x) => x.id === a.id);
   if (i >= 0) S.artikel[i] = a; else S.artikel.push(a);
   await save(); render(); vArtikelListe(); toast('Gespeichert');
+}
+
+/* ---------- Anlagenverzeichnis und Abschreibung (AfA) ---------- */
+// Nutzungsdauer nach amtlicher AfA-Tabelle, Computer und Software nach BMF-Schreiben 1 Jahr (Wahlrecht). Linear und monatsgenau (§ 7 Abs. 1 EStG).
+const ANLAGE_ARTEN = { computer: ['Computer, Laptop, Software, Drucker', 1, 'bga'], moebel: ['Büromöbel', 13, 'moebel'], fahrzeug: ['Auto (Pkw)', 6, 'pkw'], geraet: ['Gerät, Maschine, Werkzeug', 5, 'bga'], sonst: ['Sonstiges', 5, 'bga'] };
+const GWG_GRENZE = 800;
+const anlageVon = (b) => b && b.anlageId && S.anlagen.find((a) => a.id === b.anlageId);
+const anlageVorschlaege = () => S.belege.filter((b) => !anlageVon(b) && b.kategorie === 'Anschaffung (Gerät, Möbel)' && r2(num(b.brutto) - num(b.vorsteuer)) > GWG_GRENZE);
+// Abschreibung für Jahr y: afa, Restwert bei Abgang, Monat von/bis im Jahr, Buchwert zum Jahresanfang und -ende
+function afaJahr(a, y) {
+  const ak = r2(num(a.netto)), J = Math.max(1, Math.round(num(a.jahre) || 1)), y0 = Number((a.datum || '').slice(0, 4)), m0 = Number((a.datum || '').slice(5, 7)) || 1;
+  const leer = { afa: 0, rest: 0, von: 1, bis: 12, anfang: 0, ende: 0 };
+  if (!ak || !y0 || y < y0) return leer;
+  const ya = a.abgang ? Number(a.abgang.slice(0, 4)) : 9999, ma = a.abgang ? Number(a.abgang.slice(5, 7)) : 12;
+  const monate = (bisY, bisM) => Math.max(0, (bisY - y0) * 12 + bisM - m0 + 1);
+  const kum = (bisY) => { if (bisY < y0) return 0; if (J === 1) return ak; const n = Math.min(J * 12, bisY >= ya ? monate(ya, ma) : monate(bisY, 12)); return n >= J * 12 ? ak : r2(ak / (J * 12) * n); };
+  if (y > ya) return Object.assign({}, leer, { anfang: 0 });
+  const anfang = r2(ak - kum(y - 1)), nachAfa = r2(ak - kum(y)), afa = r2(anfang - nachAfa), rest = y === ya ? nachAfa : 0;
+  return { afa, rest, von: y === y0 ? m0 : 1, bis: y === ya ? ma : 12, anfang: y === y0 ? ak : anfang, ende: y === ya ? 0 : nachAfa };
+}
+function vAnlagen() {
+  const y0 = new Date().getFullYear(), j = Number(filter.anlJahr) || y0, V = anlageVorschlaege();
+  const L = S.anlagen.slice().sort((a, b) => (a.datum || '').localeCompare(b.datum || '')), sum = { afa: 0, ende: 0 };
+  const rows = L.map((a) => { const x = afaJahr(a, j); sum.afa += x.afa + x.rest; sum.ende += x.ende; return { a, x }; });
+  openDlg(`${head('Anlagen und Abschreibung')}<div class="dlg-body">
+    <div class="filters" role="group">${[y0, y0 - 1, y0 - 2].map((y) => `<button class="chip" data-act="anl-jahr" data-k="${y}" aria-pressed="${y === j}">${y}</button>`).join('')}</div>
+    ${V.length ? `<div class="card" style="margin-top:10px"><b>Noch nicht eingetragen</b><p class="small muted" style="margin:4px 0 6px">Diese Belege sind Anschaffungen über ${eur(GWG_GRENZE)} netto. Solange sie nicht eingetragen sind, zählen sie voll im Jahr des Kaufs.</p>
+      <ul class="list">${V.map((b) => `<li><button class="item" data-act="anl-neu" data-id="${b.id}"><div class="grow"><div class="t">${esc(b.lieferant || 'Beleg')}</div><div class="s">${dat(b.datum)}${b.notiz ? ' · ' + esc(b.notiz) : ''}</div></div><div><div class="amt">${eur(r2(num(b.brutto) - num(b.vorsteuer)))}</div><div style="text-align:right"><span class="pill warn">eintragen</span></div></div></button></li>`).join('')}</ul></div>` : ''}
+    ${rows.length ? `<div class="tiles" style="margin:10px 0 4px"><div class="tile"><div class="q">Abschreibung ${j}</div><div class="v">${eur(r2(sum.afa))}</div><div class="e">mindert den Gewinn</div></div><div class="tile"><div class="q">Restwert 31.12.${j}</div><div class="v">${eur(r2(sum.ende))}</div><div class="e">noch abzuschreiben</div></div></div>
+      <ul class="list">${rows.map(({ a, x }) => `<li><button class="item" data-act="anl-edit" data-id="${a.id}"><div class="grow"><div class="t">${esc(a.name || 'Anlage')}</div><div class="s">${dat(a.datum)} · ${eur(num(a.netto))} · ${num(a.jahre) === 1 ? 'sofort voll' : num(a.jahre) + ' Jahre'}${a.abgang ? ' · weg seit ' + dat(a.abgang) : ''}</div></div><div><div class="amt">${eur(r2(x.afa + x.rest))}</div><div class="small muted" style="text-align:right">Rest ${eur(x.ende)}</div></div></button></li>`).join('')}</ul>`
+    : !V.length ? '<p class="muted" style="margin-top:10px">Noch keine Anlagen. Kaufst du etwas über 800 € netto, lädst du den Beleg mit der Kategorie „Anschaffung“ hoch und trägst es dann hier ein.</p>' : ''}
+    <details style="margin-top:10px"><summary>So rechnet die App</summary><p class="small muted" style="margin-top:6px">Bis ${eur(GWG_GRENZE)} netto setzt du eine Anschaffung sofort ab, das braucht keinen Eintrag hier. Darüber wird der Preis gleichmäßig auf die Nutzungsdauer verteilt, im ersten Jahr nur für die Monate ab dem Kauf. Computer, Laptops und Software darfst du nach einem BMF-Schreiben im Jahr des Kaufs voll absetzen. Die Nutzungsdauer für Möbel, Autos und Geräte kommt aus der amtlichen AfA-Tabelle; die Vorschläge der App sind aus dem Gedächtnis eingetragen und nicht geprüft. Andere Wege, etwa die degressive Abschreibung oder den Sammelposten, kann die App nicht. Frag dafür die Kanzlei.</p></details>
+  </div><div class="dlg-foot">${rows.length ? '<button data-act="anl-csv">Verzeichnis als Tabelle</button>' : ''}<button class="primary" data-act="anl-neu" data-id="">+ Anlage</button></div>`);
+}
+let anlEdit = null;
+function vAnlage(id, belegId) {
+  const alt = S.anlagen.find((x) => x.id === id), b = S.belege.find((x) => x.id === belegId);
+  const a = anlEdit = alt ? JSON.parse(JSON.stringify(alt)) : { id: uid(), name: b ? [b.lieferant, b.notiz].filter(Boolean).join(', ') : '', art: 'computer', datum: b ? b.datum : heute(), netto: b ? r2(num(b.brutto) - num(b.vorsteuer)) : '', jahre: 1, belegId: b ? b.id : '', abgang: '' };
+  const bl = a.belegId && S.belege.find((x) => x.id === a.belegId);
+  openDlg(`${head(alt ? esc(a.name || 'Anlage') : 'Neue Anlage')}<form id="anlForm" class="dlg-body" autocomplete="off"><div class="grid2">
+    <label class="full">Was ist es?<input name="name" value="${esc(a.name)}" placeholder="z. B. Laptop, Schreibtisch, Firmenwagen"></label>
+    <label class="full">Art<select name="art" id="anlArt">${Object.entries(ANLAGE_ARTEN).map(([k, v]) => `<option value="${k}"${k === a.art ? ' selected' : ''}>${v[0]}</option>`).join('')}</select></label>
+    <label>Gekauft am<input type="date" name="datum" value="${esc(a.datum)}"></label>
+    <label>Preis netto €<input name="netto" inputmode="decimal" value="${a.netto === '' ? '' : esc(String(a.netto).replace('.', ','))}" placeholder="ohne Umsatzsteuer"></label>
+    <label>Nutzungsdauer in Jahren<input name="jahre" id="anlJahre" inputmode="numeric" value="${esc(String(a.jahre))}"></label>
+    <label>Verkauft oder entsorgt am (optional)<input type="date" name="abgang" value="${esc(a.abgang || '')}"></label>
+  </div>
+  <p class="small muted">${bl ? `Beleg: ${esc(bl.lieferant || 'Beleg')} vom ${dat(bl.datum)}. ` : ''}Bei 1 Jahr zählt der ganze Preis im Jahr des Kaufs. Verkaufst du das Teil später, schreibst du dafür eine Rechnung, der Restwert zählt dann als Ausgabe.</p>
+  </form><div class="dlg-foot"><button data-act="anlagen">Zurück</button>${alt ? '<button class="danger" data-act="anl-del">Löschen</button>' : ''}<button class="primary" data-act="anl-save">Speichern</button></div>`);
+}
+async function saveAnlage() {
+  const f = $('#anlForm').elements, a = anlEdit;
+  Object.assign(a, { name: f.name.value.trim(), art: f.art.value, datum: f.datum.value, netto: r2(num(f.netto.value)), jahre: Math.max(1, Math.round(num(f.jahre.value) || 1)), abgang: f.abgang.value });
+  if (!a.name || !a.datum || !a.netto) return toast('Bitte Bezeichnung, Kaufdatum und Preis eintragen.');
+  if (a.abgang && a.abgang < a.datum) return toast('Das Abgangsdatum liegt vor dem Kauf.');
+  const i = S.anlagen.findIndex((x) => x.id === a.id);
+  if (i >= 0) S.anlagen[i] = a; else S.anlagen.push(a);
+  const b = a.belegId && S.belege.find((x) => x.id === a.belegId); if (b) b.anlageId = a.id;
+  await save(); render(); vAnlagen(); toast('Gespeichert');
+}
+function anlagenCsv(j) {
+  const rows = [['Anlagenverzeichnis ' + j, S.firma.name || ''], [], ['Bezeichnung', 'Art', 'Angeschafft am', 'Anschaffungskosten netto', 'Nutzungsdauer Jahre', 'Buchwert 01.01.', 'Abschreibung', 'Restwert bei Abgang', 'Abgang am', 'Buchwert 31.12.']];
+  let s1 = 0, s2 = 0, s3 = 0;
+  for (const a of S.anlagen.slice().sort((x, y) => (x.datum || '').localeCompare(y.datum || ''))) {
+    const x = afaJahr(a, j); if (Number((a.datum || '').slice(0, 4)) > j || (a.abgang && Number(a.abgang.slice(0, 4)) < j)) continue;
+    rows.push([a.name, (ANLAGE_ARTEN[a.art] || ANLAGE_ARTEN.sonst)[0], dat(a.datum), num(a.netto), String(a.jahre), x.anfang, x.afa, x.rest, a.abgang ? dat(a.abgang) : '', x.ende]);
+    s1 += x.afa; s2 += x.rest; s3 += x.ende;
+  }
+  rows.push(['Summe', '', '', '', '', '', r2(s1), r2(s2), '', r2(s3)], [], ['Linear und monatsgenau gerechnet. Bitte in der Kanzlei prüfen.']);
+  return csvText(rows);
 }
 
 /* ---------- Lager (Warenwirtschaft) ---------- */
@@ -3689,6 +3777,7 @@ async function paket(j, mitDatev) {
   files.unshift(
     { name: `Uebersicht-${y}.csv`, data: csvText(mon) },
     { name: `BWA-${y}.csv`, data: bwaCsvJahr(j) },
+    ...(S.anlagen.length ? [{ name: `Anlagenverzeichnis-${y}.csv`, data: anlagenCsv(j) }] : []),
     ...(lagerArtikel().length ? [{ name: `Lager-${y}-12-31.csv`, data: lagerCsv(y + '-12-31') }] : []),
     { name: `Einnahmen-${y}.csv`, data: csvText(ein) },
     { name: `Ausgaben-${y}.csv`, data: csvText(aus) },
@@ -3705,7 +3794,8 @@ const KONTO = {
   bank: [1200, 1800], kasse: [1000, 1600], privat: [1890, 2180], verb: [1600, 3300], ford: [1400, 1200],
   e19: [8400, 4400], e7: [8300, 4300], ku: [8195, 4185], frei: [8100, 4100],
   'eu-leistung': [8336, 4336], 'eu-lieferung': [8125, 4125], inland13b: [8337, 4337], drittland: [8338, 4338], ausfuhr: [8120, 4120],
-  gwg: [480, 670], bga: [490, 690], bewirtNa: [4654, 6644],
+  gwg: [480, 670], bga: [490, 690], moebel: [420, 650], pkw: [320, 520], bewirtNa: [4654, 6644],
+  afa: [4830, 6220], gwgAfa: [4855, 6260], abgang: [2310, 6895],
   // Kontobewegungen ohne Beleg
   pEnt: [1800, 2100], pSteuer: [1810, 2150], transit: [1360, 1460], lohn: [1740, 3720], geld: [4970, 6855], ustVz: [1780, 3820], gewSt: [4320, 7610], klaeren: [1590, 1370]
 };
@@ -3755,14 +3845,16 @@ function datev(j) {
     if (!ist && r.typ !== 'gutschrift' && r.art !== 'abschlag') for (const a of anteile(r, false)) if ((a.datum || '').startsWith(y)) add(s.brutto * a.f, K('bank'), K('ford'), '', a.datum, r.nr, `Zahlung ${kn || 'Kunde'} ${r.nr || ''}`);
   }
   // Belege: Aufwand an Bank, Kasse, Privateinlage oder Verbindlichkeit
-  let n = 0;
+  let n = 0; const gwgSofort = [];
   for (const b of S.belege.filter((x) => (x.datum || '').startsWith(y)).sort((a, c) => a.datum.localeCompare(c.datum))) {
     const br = num(b.brutto); n++;
     if (!br) { hinweise.push(`Beleg ${b.lieferant || ''} vom ${dat(b.datum)} ohne Betrag, nicht übernommen.`); continue; }
     const gegen = K({ bar: 'kasse', privat: 'privat', offen: 'verb' }[b.zahlweg] || 'bank');
     const netto = r2(br - num(b.vorsteuer));
     let konto = KAT_KONTO[b.kategorie] ? KAT_KONTO[b.kategorie][sk] : KAT_KONTO.Sonstiges[sk];
-    if (b.kategorie === 'Anschaffung (Gerät, Möbel)') konto = K(netto <= 800 ? 'gwg' : 'bga');
+    const anl = anlageVon(b);
+    if (anl) konto = K((ANLAGE_ARTEN[anl.art] || ANLAGE_ARTEN.sonst)[2]);
+    else if (b.kategorie === 'Anschaffung (Gerät, Möbel)') { konto = K(netto <= GWG_GRENZE ? 'gwg' : 'bga'); if (netto <= GWG_GRENZE) gwgSofort.push([netto, b]); }
     if (!b.kategorie) hinweise.push(`Beleg ${b.lieferant || ''} vom ${dat(b.datum)} ohne Kategorie, auf Sonstiges gebucht.`);
     const bu = num(b.vorsteuer) && !b.rc ? (num(b.ustSatz) === 7 ? '8' : '9') : '';
     const text = `${b.lieferant || 'Beleg'}${b.rc ? ' Reverse Charge ' + (b.rc === 'eu' ? 'EU' : 'Ausland') + ', bitte prüfen' : b.kategorie ? ' ' + b.kategorie : ''}`;
@@ -3771,6 +3863,14 @@ function datev(j) {
     if (b.kategorie === 'Bewirtung') { const na = r2(br * 0.3); add(r2(br - na), konto, gegen, bu, b.datum, nr, text + ' 70 %'); add(na, K('bewirtNa'), gegen, bu, b.datum, nr, text + ' 30 % nicht abziehbar'); }
     else add(br, konto, gegen, bu, b.datum, nr, text);
   }
+  // Abschreibung zum Jahresende, Restwert am Tag des Abgangs, geringwertige Wirtschaftsgüter sofort
+  for (const a of S.anlagen) {
+    const x = afaJahr(a, Number(y)), ko = K((ANLAGE_ARTEN[a.art] || ANLAGE_ARTEN.sonst)[2]), nr = 'AFA' + y;
+    if (x.afa) add(x.afa, K('afa'), ko, '', (a.abgang && a.abgang.startsWith(y) ? a.abgang : y + '-12-31'), nr, `AfA ${a.name || 'Anlage'}`);
+    if (x.rest) add(x.rest, K('abgang'), ko, '', a.abgang, nr, `Restwert Abgang ${a.name || 'Anlage'}`);
+    if ((x.afa || x.rest) && !S.belege.some((b) => b.anlageId === a.id && (b.datum || '').slice(0, 4) <= y)) hinweise.push(`Anlage ${a.name || ''} vom ${dat(a.datum)} ohne Beleg in der App: Anschaffung bitte in der Kanzlei prüfen, die App bucht nur die Abschreibung.`);
+  }
+  for (const [netto, b] of gwgSofort) add(netto, K('gwgAfa'), K('gwg'), '', y + '-12-31', 'AFA' + y, `GWG sofort ${b.lieferant || ''}`);
   // Kontobewegungen, die keinen Beleg und keine Rechnung brauchen (Privatentnahme, Steuerzahlung, Umbuchung …)
   let ohneZu = 0, nk = 0;
   for (const b of (S.bank || []).filter((x) => (x.datum || '').startsWith(y)).sort((a, c) => a.datum.localeCompare(c.datum))) {
@@ -3795,7 +3895,7 @@ function datevKonten() {
   const sk = S.steuer.skr === '04' ? 1 : 0, n = (k) => String(k).padStart(4, '0');
   const rows = [['Was', 'Konto SKR ' + (sk ? '04' : '03')]];
   for (const [k, v] of Object.entries(KAT_KONTO)) rows.push(['Ausgaben: ' + k, n(v[sk])]);
-  for (const [k, t] of [['gwg', 'Anschaffung bis 800 € netto (GWG)'], ['bga', 'Anschaffung über 800 € netto (Betriebsausstattung)'], ['bewirtNa', 'Bewirtung, 30 % nicht abziehbar'], ['e19', 'Erlöse 19 %'], ['e7', 'Erlöse 7 %'], ['ku', 'Erlöse als Kleinunternehmer'], ['eu-leistung', 'Erlöse Dienstleistung EU (Reverse Charge)'], ['eu-lieferung', 'Erlöse Lieferung EU'], ['inland13b', 'Erlöse § 13b Inland'], ['drittland', 'Erlöse Leistung Drittland'], ['ausfuhr', 'Erlöse Ausfuhr'], ['bank', 'Bank'], ['kasse', 'Kasse'], ['privat', 'Privateinlage (privat ausgelegt)'], ['ford', 'Forderungen'], ['verb', 'Verbindlichkeiten (noch nicht bezahlt)'], ['pEnt', 'Privatentnahme'], ['pSteuer', 'Private Steuern (Einkommensteuer, Kirchensteuer, Soli)'], ['ustVz', 'Umsatzsteuer-Zahlung oder -Erstattung'], ['gewSt', 'Gewerbesteuer'], ['lohn', 'Lohn und Gehalt (Auszahlung)'], ['transit', 'Umbuchung zwischen eigenen Konten'], ['geld', 'Kontoführung ohne Beleg'], ['klaeren', 'Sonstige Kontobewegungen, bitte zuordnen']]) rows.push([t, n(KONTO[k][sk])]);
+  for (const [k, t] of [['gwg', 'Anschaffung bis 800 € netto (GWG)'], ['bga', 'Anschaffung über 800 € netto (Betriebsausstattung)'], ['bewirtNa', 'Bewirtung, 30 % nicht abziehbar'], ['moebel', 'Anlage: Büromöbel'], ['pkw', 'Anlage: Auto (Pkw)'], ['afa', 'Abschreibung'], ['gwgAfa', 'Sofortabschreibung bis 800 € (GWG)'], ['abgang', 'Restwert bei Abgang einer Anlage'], ['e19', 'Erlöse 19 %'], ['e7', 'Erlöse 7 %'], ['ku', 'Erlöse als Kleinunternehmer'], ['eu-leistung', 'Erlöse Dienstleistung EU (Reverse Charge)'], ['eu-lieferung', 'Erlöse Lieferung EU'], ['inland13b', 'Erlöse § 13b Inland'], ['drittland', 'Erlöse Leistung Drittland'], ['ausfuhr', 'Erlöse Ausfuhr'], ['bank', 'Bank'], ['kasse', 'Kasse'], ['privat', 'Privateinlage (privat ausgelegt)'], ['ford', 'Forderungen'], ['verb', 'Verbindlichkeiten (noch nicht bezahlt)'], ['pEnt', 'Privatentnahme'], ['pSteuer', 'Private Steuern (Einkommensteuer, Kirchensteuer, Soli)'], ['ustVz', 'Umsatzsteuer-Zahlung oder -Erstattung'], ['gewSt', 'Gewerbesteuer'], ['lohn', 'Lohn und Gehalt (Auszahlung)'], ['transit', 'Umbuchung zwischen eigenen Konten'], ['geld', 'Kontoführung ohne Beleg'], ['klaeren', 'Sonstige Kontobewegungen, bitte zuordnen']]) rows.push([t, n(KONTO[k][sk])]);
   return csvText(rows);
 }
 function datevKontakte() {
@@ -3996,6 +4096,13 @@ const ACT = {
   artikel: () => { if (edit && $('#edForm')) { if (!confirm('Den Entwurf verlassen? Nicht gespeicherte Änderungen gehen verloren.')) return; } vArtikelListe(); },
   'art-edit': (el) => vArtikel(el.dataset.id),
   lager: () => vLager(),
+  anlagen: () => vAnlagen(),
+  'anl-jahr': (el) => { filter.anlJahr = el.dataset.k; vAnlagen(); },
+  'anl-neu': (el) => vAnlage('', el.dataset.id),
+  'anl-edit': (el) => vAnlage(el.dataset.id),
+  'anl-save': saveAnlage,
+  'anl-del': async () => { if (!confirm(`${anlEdit.name} aus dem Verzeichnis löschen? Der Beleg bleibt.`)) return; S.anlagen = S.anlagen.filter((x) => x.id !== anlEdit.id); for (const b of S.belege) if (b.anlageId === anlEdit.id) delete b.anlageId; await save(); render(); vAnlagen(); },
+  'anl-csv': () => { const j = Number(filter.anlJahr) || new Date().getFullYear(); download(`Anlagenverzeichnis-${j}.csv`, anlagenCsv(j), 'text/csv'); },
   'lager-art': (el) => vLagerArtikel(el.dataset.id),
   'lager-ein': (el) => vWareneingang(el.dataset.id),
   'lager-ein-save': saveWareneingang,
@@ -4137,6 +4244,7 @@ document.addEventListener('change', async (e) => {
   if (e.target.id === 'ruIst') { S.steuer.ruecklageIst = e.target.value.trim() === '' ? '' : num(e.target.value); await save(); render(); toast('Gespeichert'); return; }
   if (e.target.id === 'bankMon') { filter.bankMon = e.target.value; render(); return; }
   if (e.target.id === 'stZr') { stZr = e.target.value; render(); return; }
+  if (e.target.id === 'anlArt') { const j = $('#anlJahre'); if (j) j.value = (ANLAGE_ARTEN[e.target.value] || ANLAGE_ARTEN.sonst)[1]; return; }
   if (e.target.id === 'invTag') { filter.invTag = e.target.value; vInventur(); return; }
   if (e.target.id === 'lagerTag') { filter.lagerTag = e.target.value; return; }
   if (e.target.id === 'bwaJahr' || e.target.id === 'bwaMon') { filter[e.target.id] = e.target.value; if (e.target.id === 'bwaJahr') filter.bwaMon = ''; vBwa(); return; }
