@@ -233,7 +233,7 @@ function leer() {
   return {
     v: 2,
     firma: { name: '', inhaber: '', strasse: '', plz: '', ort: '', steuernr: '', ustid: '', email: '', tel: '', iban: '', bic: '', bank: '', rechtsform: '', registergericht: '', registernr: '', logo: '', kleinunternehmer: false, gruendung: '', turnus: 'monat', dauerfrist: false, zahlungsziel: 14, angebotTage: 30, basiszins: 1.27, skontoProz: '', skontoTage: '', nummern: {} },
-    angebote: [], rechnungen: [], belege: [], kunden: [], lieferanten: [], bank: [], vorlagen: [], artikel: [], zaehler: {}, letzteSicherung: null,
+    angebote: [], rechnungen: [], belege: [], kunden: [], lieferanten: [], bank: [], vorlagen: [], artikel: [], lager: [], zaehler: {}, letzteSicherung: null,
     steuer: { versteuerung: 'soll', hebesatz: 400, berater: false, svz: 0, vzEst: 0, vzGew: 0, erledigt: {}, ruecklageIst: '', kalVorher: 3, kalRe: true, skr: '03', beraterNr: '', mandantNr: '' },
     est: {}
   };
@@ -248,7 +248,7 @@ async function load() {
 }
 /* Ältere Stände: Kunden bekommen eine id, Lieferanten entstehen aus vorhandenen Belegen */
 function migriere() {
-  S.kunden = S.kunden || []; S.lieferanten = S.lieferanten || []; S.vorlagen = S.vorlagen || []; S.artikel = S.artikel || []; S.firma.nummern = S.firma.nummern || {};
+  S.kunden = S.kunden || []; S.lieferanten = S.lieferanten || []; S.vorlagen = S.vorlagen || []; S.artikel = S.artikel || []; S.lager = S.lager || []; S.firma.nummern = S.firma.nummern || {};
   for (const k of S.kunden) if (!k.id) k.id = uid();
   if ((S.v || 1) < 2) {
     for (const b of S.belege.slice().sort((x, y) => (x.datum || '').localeCompare(y.datum || ''))) merkeLieferant(b.lieferant, b.kategorie, b.rc);
@@ -827,18 +827,23 @@ function bwaJahr(j) {
   const bekannt = new Set(BWA_WAREN.concat(...BWA_KOSTEN.filter((x) => x[2]).map((x) => x[2])));
   const rest = Object.keys(gw.mKat).filter((k) => !bekannt.has(k));
   const umsatz = gw.mEin.slice(), waren = summe(BWA_WAREN);
-  const roh = umsatz.map((u, i) => r2(u - waren[i]));
+  // Mehr Ware im Lager heißt: ein Teil des Einkaufs ist noch nicht verbraucht
+  const hatLager = lagerArtikel().length && lagerBewegungen().length;
+  const lager = hatLager ? lagerDelta(j) : Array(12).fill(0);
+  const roh = umsatz.map((u, i) => r2(u - waren[i] + lager[i]));
   const kosten = BWA_KOSTEN.map(([k, t, kats]) => ({ k, t, m: summe(kats || rest) }));
   const kSum = Array.from({ length: 12 }, (_, i) => r2(kosten.reduce((s, x) => s + x.m[i], 0)));
   const erg = roh.map((r, i) => r2(r - kSum[i]));
-  return { gw, umsatz, waren, roh, kosten, kSum, erg };
+  return { gw, umsatz, waren, lager, hatLager, roh, kosten, kSum, erg };
 }
 // Zeilen für Monat m (0–11): Monat, Vorjahresmonat, Jan bis m, Vorjahr Jan bis m
 function bwa(j, m) {
   const a = bwaJahr(j), v = bwaJahr(j - 1);
   const kum = (arr) => r2(arr.slice(0, m + 1).reduce((s, x) => s + x, 0));
   const zeile = (t, x, y, art) => ({ t, art, mon: x[m], vmon: y[m], kum: kum(x), vkum: kum(y) });
-  const rows = [zeile('Umsatz (Einnahmen netto)', a.umsatz, v.umsatz, 'summe'), zeile('minus Wareneinkauf und Fremdleistungen', a.waren, v.waren), zeile('Rohertrag', a.roh, v.roh, 'summe')];
+  const rows = [zeile('Umsatz (Einnahmen netto)', a.umsatz, v.umsatz, 'summe'), zeile('minus Wareneinkauf und Fremdleistungen', a.waren, v.waren)];
+  if (a.hatLager || v.hatLager) rows.push(zeile('plus mehr Ware im Lager (minus weniger)', a.lager, v.lager));
+  rows.push(zeile('Rohertrag', a.roh, v.roh, 'summe'));
   a.kosten.forEach((k, i) => { if (k.m.some((x) => x) || v.kosten[i].m.some((x) => x)) rows.push(zeile(k.t, k.m, v.kosten[i].m, 'kosten')); });
   rows.push(zeile('Kosten gesamt', a.kSum, v.kSum, 'summe'), zeile('Ergebnis vor Steuern', a.erg, v.erg, 'ergebnis'));
   const u = kum(a.umsatz);
@@ -853,7 +858,7 @@ function bwaStand() {
   return { j, m: Math.min(m, j === y0 ? m0 : 11) };
 }
 function vBwa() {
-  const y0 = new Date().getFullYear(), { j, m } = bwaStand(), B = bwa(j, m), E = B.rows[B.rows.length - 1], R = B.rows[2];
+  const y0 = new Date().getFullYear(), { j, m } = bwaStand(), B = bwa(j, m), E = B.rows[B.rows.length - 1], R = B.rows.find((r) => r.t === 'Rohertrag');
   const zahl = (x, fett) => `<td style="text-align:right;white-space:nowrap">${fett ? '<b>' : ''}${eur(x)}${fett ? '</b>' : ''}</td>`;
   const tr = (r) => { const f = r.art === 'summe' || r.art === 'ergebnis'; return `<tr${f ? ' style="background:var(--soft)"' : ''}><td>${f ? '<b>' + esc(r.t) + '</b>' : (r.art === 'kosten' ? '&nbsp;&nbsp;' : '') + esc(r.t)}</td>${zahl(r.mon, f)}${zahl(r.vmon)}${zahl(r.kum, f)}${zahl(r.vkum)}<td style="text-align:right;white-space:nowrap" class="small muted">${verae(r.kum, r.vkum)}</td><td style="text-align:right;white-space:nowrap" class="small muted">${pz(r.quote)}</td></tr>`; };
   const bis = (m ? `Jan bis ${MON_K[m]}` : 'Januar');
@@ -868,7 +873,7 @@ function vBwa() {
     </div>
     <div style="overflow-x:auto;margin-top:10px"><table class="tab" style="min-width:640px"><tr><th></th><th style="text-align:right">${MON_K[m]} ${j}</th><th style="text-align:right">${MON_K[m]} ${j - 1}</th><th style="text-align:right">${bis} ${j}</th><th style="text-align:right">${bis} ${j - 1}</th><th style="text-align:right">Veränd.</th><th style="text-align:right">vom Umsatz</th></tr>
       ${B.rows.map(tr).join('')}</table></div>
-    <p class="small muted" style="margin-top:8px">Alle Beträge netto. ${B.a.gw.bilanz ? 'Einnahmen nach Rechnungsdatum.' : 'Einnahmen zählen, wenn das Geld da ist, wie in der EÜR.'} Ausgaben nach Belegdatum. Die Zahlen sind dieselben wie in der EÜR und im DATEV-Export. Anschaffungen stehen hier voll im Monat des Kaufs, die Abschreibung über mehrere Jahre macht der Steuerberater. Gehälter, die nur über das Konto laufen, sind noch nicht dabei.</p>`
+    <p class="small muted" style="margin-top:8px">Alle Beträge netto. ${B.a.gw.bilanz ? 'Einnahmen nach Rechnungsdatum.' : 'Einnahmen zählen, wenn das Geld da ist, wie in der EÜR.'} Ausgaben nach Belegdatum. ${B.a.hatLager ? 'Anders als in der EÜR zählt hier die Ware erst, wenn sie das Lager verlässt. Deshalb weicht das Ergebnis um die Lagerveränderung von der EÜR ab.' : 'Die Zahlen sind dieselben wie in der EÜR und im DATEV-Export.'} Anschaffungen stehen hier voll im Monat des Kaufs, die Abschreibung über mehrere Jahre macht der Steuerberater. Gehälter, die nur über das Konto laufen, sind noch nicht dabei.</p>`
     : `<p class="muted" style="margin-top:12px">Für ${j} gibt es noch keine bezahlten Rechnungen und keine Belege.</p>`}
   </div>
   <div class="dlg-foot"><button data-act="bwa-csv">Als Tabelle (CSV)</button><button class="primary" data-act="bwa-print">Drucken oder als PDF</button></div>`);
@@ -876,7 +881,7 @@ function vBwa() {
 function bwaCsvJahr(j) {
   const a = bwaJahr(j), rows = [['BWA ' + j + (S.firma.name ? ' ' + S.firma.name : '')].concat(MONATE, ['Summe'])];
   const z = (t, arr) => rows.push([t].concat(arr, [r2(arr.reduce((s, x) => s + x, 0))]));
-  z('Umsatz (Einnahmen netto)', a.umsatz); z('Wareneinkauf und Fremdleistungen', a.waren); z('Rohertrag', a.roh);
+  z('Umsatz (Einnahmen netto)', a.umsatz); z('Wareneinkauf und Fremdleistungen', a.waren); if (a.hatLager) z('Lagerveränderung', a.lager); z('Rohertrag', a.roh);
   for (const k of a.kosten) if (k.m.some((x) => x)) z(k.t, k.m);
   z('Kosten gesamt', a.kSum); z('Ergebnis vor Steuern', a.erg);
   rows.push([], ['Alle Beträge netto. ' + (a.gw.bilanz ? 'Einnahmen nach Rechnungsdatum.' : 'Einnahmen nach Zahlungseingang (EÜR).') + ' Ausgaben nach Belegdatum.']);
@@ -1532,8 +1537,9 @@ function beispielDaten() {
   B.artikel = [
     { id: uid(), name: 'Montage vor Ort', einheit: 'Std.', preis: 65, ust: 19 },
     { id: uid(), name: 'Gestaltung und Satz', einheit: 'Std.', preis: 75, ust: 19 },
-    { id: uid(), name: 'Werbeschild Alu-Dibond 120×60 cm', einheit: 'Stk.', preis: 640, ust: 19 }
+    { id: 'bsp-schild', name: 'Werbeschild Alu-Dibond 120×60 cm', einheit: 'Stk.', preis: 640, ust: 19, lager: true, ek: 210, mindest: 3 }
   ];
+  B.lager = [{ id: uid(), artikelId: 'bsp-schild', datum: tag(-70), menge: 5, ek: 210, art: 'anfang', text: 'Ware vor dem Start' }];
   return B;
 }
 
@@ -1652,6 +1658,8 @@ function vStart() {
   if (entw.length) todos.push({ c: 'warn', t: `${entw.length} Rechnungsentwurf${entw.length > 1 ? 'e' : ''} noch nicht gestellt`, s: 'Erst nach „Rechnung stellen“ bekommt sie eine Nummer und zählt zum Umsatz.', act: 'tab', k: 'rechnungen', b: 'Ansehen' });
   const beFehlt = S.belege.filter(belegFehlt);
   if (beFehlt.length) todos.push({ c: 'warn', t: `${beFehlt.length} Beleg${beFehlt.length > 1 ? 'e' : ''} unvollständig`, s: 'Betrag oder Kategorie fehlen. Sonst fehlen Ausgaben und Vorsteuer in der Rechnung.', act: 'be-ergaenzen', b: 'Ergänzen' });
+  const knapp = lagerKnapp();
+  if (knapp.length) todos.push({ c: knapp.some((a) => (bestand()[a.id] || 0) <= 0) ? 'bad' : 'warn', t: `${knapp.length === 1 ? esc(knapp[0].name) + ' wird knapp' : knapp.length + ' Artikel werden knapp'}`, s: knapp.slice(0, 3).map((a) => `${esc(a.name)}: noch ${mengeTxt(bestand()[a.id] || 0)}`).join(', ') + '. Rechtzeitig nachbestellen.', act: 'lager', b: 'Lager' });
   const luecke = belegLuecken().filter((x) => x.fehlt && x.k < heute().slice(0, 7)).slice(0, 3);
   if (luecke.length) todos.push({ c: 'warn', t: `Belege fehlen: ${luecke.map((x) => `${MONATE[Number(x.k.slice(5, 7)) - 1]} ${x.fehlt}`).join(', ')}`, s: `${eur(luecke.reduce((a, x) => a + x.summe, 0))} Ausgaben auf dem Konto ohne Beleg. Ohne Beleg zählen sie nicht als Betriebsausgabe.`, act: 'abgleich', k: luecke[0].k, b: 'Abgleichen' });
   const hatDaten = S.rechnungen.length + S.angebote.length + S.belege.length > 0;
@@ -2100,7 +2108,7 @@ function vFirma() {
     <div class="btns"><button data-act="kontakte" data-k="kunden">Kunden (${S.kunden.length})</button><button data-act="kontakte" data-k="lieferanten">Lieferanten (${S.lieferanten.length})</button></div>
     <h2 style="margin-top:18px">Artikel und Nummern</h2>
     <p class="small muted">Leistungen und Produkte mit festem Preis, und wie deine Rechnungs- und Angebotsnummern aussehen.</p>
-    <div class="btns"><button data-act="artikel">Artikel und Leistungen (${S.artikel.length})</button><button data-act="nummern">Nummern (${esc(nrBau(nrFormat('RE'), heute(), 1))})</button></div>
+    <div class="btns"><button data-act="artikel">Artikel und Leistungen (${S.artikel.length})</button><button data-act="lager">Lager${lagerArtikel().length ? ` (${eur(lagerWert())})` : ''}</button><button data-act="nummern">Nummern (${esc(nrBau(nrFormat('RE'), heute(), 1))})</button></div>
   </div>
   <div class="card">
     <h2>Sind meine Daten sicher?</h2>
@@ -2296,7 +2304,7 @@ function vArtikelListe() {
   const list = S.artikel.slice().sort((a, b) => a.name.localeCompare(b.name, 'de'));
   openDlg(`${head('Artikel und Leistungen')}<div class="dlg-body">
     <p class="small muted" style="margin-top:0">Was du oft verkaufst, speicherst du hier einmal mit Preis. Beim Schreiben von Angeboten und Rechnungen wählst du es dann aus, statt es jedes Mal neu einzutippen.</p>
-    ${list.length ? `<ul class="list">${list.map((a) => `<li><button class="item" data-act="art-edit" data-id="${a.id}"><div class="grow"><div class="t">${esc(a.name)}</div><div class="s">je ${esc(a.einheit || 'Stk.')}${ku() ? '' : ' · ' + num(a.ust) + ' % USt'}${a.nr ? ' · Nr. ' + esc(a.nr) : ''}</div></div><div class="amt">${eur(num(a.preis))}</div></button></li>`).join('')}</ul>` : '<div class="empty">Noch keine Artikel.</div>'}
+    ${list.length ? `<ul class="list">${list.map((a) => `<li><button class="item" data-act="art-edit" data-id="${a.id}"><div class="grow"><div class="t">${esc(a.name)}</div><div class="s">je ${esc(a.einheit || 'Stk.')}${ku() ? '' : ' · ' + num(a.ust) + ' % USt'}${a.nr ? ' · Nr. ' + esc(a.nr) : ''}${a.lager ? ' · Bestand ' + mengeTxt(bestand()[a.id] || 0) : ''}</div></div><div class="amt">${eur(num(a.preis))}</div></button></li>`).join('')}</ul>` : '<div class="empty">Noch keine Artikel.</div>'}
   </div><div class="dlg-foot"><button class="primary" data-act="art-edit" data-id="">+ Artikel anlegen</button></div>`);
 }
 function vArtikel(id) {
@@ -2308,6 +2316,10 @@ function vArtikel(id) {
     <label>Einheit<input name="einheit" list="einheitenArt" value="${esc(a.einheit)}"></label>
     ${ku() ? '<input type="hidden" name="ust" value="0">' : `<label>Umsatzsteuer<select name="ust">${[19, 7, 0].map((v) => `<option value="${v}"${num(a.ust) === v ? ' selected' : ''}>${v} %</option>`).join('')}</select></label>`}
     <label>Artikelnummer (optional)<input name="nr" value="${esc(a.nr || '')}"></label>
+    <label class="check full"><input type="checkbox" name="lager"${a.lager ? ' checked' : ''}> Ware mit Lagerbestand führen</label>
+    <label>Einkaufspreis netto € je ${esc(a.einheit || 'Stk.')}<input name="ek" inputmode="decimal" value="${a.ek ? esc(String(a.ek).replace('.', ',')) : ''}" placeholder="für den Lagerwert"></label>
+    <label>Warnen ab Bestand<input name="mindest" inputmode="decimal" value="${a.mindest ? esc(String(a.mindest).replace('.', ',')) : ''}" placeholder="z. B. 5"></label>
+    ${alt && alt.lager ? `<p class="small full" style="margin:0">Bestand jetzt: <b>${mengeTxt(bestand()[a.id] || 0)} ${esc(a.einheit || 'Stk.')}</b> · <a href="#" data-act="lager-art" data-id="${a.id}">Verlauf ansehen</a></p>` : ''}
   </div><datalist id="einheitenArt"><option value="Stk."><option value="Std."><option value="Tag"><option value="pauschal"><option value="Monat"><option value="km"></datalist>
   <p class="small muted">Preisänderungen gelten nur für neue Angebote und Rechnungen. Schon geschriebene bleiben, wie sie sind.</p>
   </form><div class="dlg-foot"><button data-act="artikel">Zurück zur Liste</button>${alt ? '<button class="danger" data-act="art-del">Löschen</button>' : ''}<button class="primary" data-act="art-save">Speichern</button></div>`);
@@ -2316,11 +2328,160 @@ async function saveArtikel() {
   const f = $('#artForm'), a = artEdit;
   a.name = f.elements.name.value.trim(); a.nr = f.elements.nr.value.trim(); a.einheit = f.elements.einheit.value.trim() || 'Stk.';
   a.preis = r2(num(f.elements.preis.value)); a.ust = num(f.elements.ust.value);
+  a.lager = f.elements.lager.checked; a.ek = f.elements.ek.value.trim() ? num(f.elements.ek.value) : ''; a.mindest = f.elements.mindest.value.trim() ? num(f.elements.mindest.value) : '';
   if (!a.name) return toast('Bitte eine Bezeichnung eintragen.');
   if (S.artikel.some((x) => x.id !== a.id && x.name.toLowerCase() === a.name.toLowerCase())) return toast('Diesen Artikel gibt es schon.');
   const i = S.artikel.findIndex((x) => x.id === a.id);
   if (i >= 0) S.artikel[i] = a; else S.artikel.push(a);
   await save(); render(); vArtikelListe(); toast('Gespeichert');
+}
+
+/* ---------- Lager (Warenwirtschaft) ---------- */
+// Bestand = Wareneingänge − verkaufte Mengen aus gestellten Rechnungen (Stornos zählen zurück). Eine Inventur setzt den Bestand auf die gezählte Menge.
+const lagerArtikel = () => S.artikel.filter((a) => a.lager).sort((a, b) => a.name.localeCompare(b.name, 'de'));
+const mengeTxt = (n) => (Math.round(n * 1000) / 1000).toLocaleString('de-DE');
+function posArtikel(p) {
+  if (p.artikelId) { const a = S.artikel.find((x) => x.id === p.artikelId); if (a) return a; }
+  const t = String(p.text || '').trim().toLowerCase();
+  return t ? S.artikel.find((x) => x.name.toLowerCase() === t) : null;
+}
+function lagerBewegungen() {
+  const ids = new Set(lagerArtikel().map((a) => a.id)), L = [];
+  for (const x of S.lager) if (ids.has(x.artikelId)) L.push(x);
+  for (const r of S.rechnungen) {
+    if (!zaehlt(r) || r.extern || r.art === 'abschlag') continue;
+    for (const p of r.positionen || []) {
+      const a = posArtikel(p);
+      if (a && ids.has(a.id) && num(p.menge)) L.push({ artikelId: a.id, datum: r.leistungsdatum || r.datum, menge: -num(p.menge), art: r.typ === 'gutschrift' ? 'storno' : 'verkauf', text: `${docTitel(r)} ${r.nr || ''} ${r.kunde && r.kunde.name || ''}`.trim(), rechnungId: r.id });
+    }
+  }
+  return L.sort((a, b) => (a.datum || '').localeCompare(b.datum || '') || (a.art === 'inventur') - (b.art === 'inventur'));
+}
+// Bestand je Artikel am Ende des Tages "bis" (ohne: heute und alles)
+function bestand(bis) {
+  const B = {};
+  for (const x of lagerBewegungen()) {
+    if (bis && (x.datum || '') > bis) break;
+    B[x.artikelId] = x.art === 'inventur' ? num(x.gezaehlt) : r2((B[x.artikelId] || 0) + num(x.menge));
+  }
+  return B;
+}
+function lagerWert(bis) {
+  const B = bestand(bis);
+  return r2(lagerArtikel().reduce((s, a) => s + Math.max(0, B[a.id] || 0) * num(a.ek), 0));
+}
+// Wertänderung des Lagers je Monat eines Jahres (Menge × Einkaufspreis). Anfangsbestand und die erste Zählung eines Artikels ändern nichts, die Ware war schon da.
+function lagerDelta(j) {
+  const y = String(j), M = Array(12).fill(0), n = {}, ek = Object.fromEntries(lagerArtikel().map((a) => [a.id, num(a.ek)]));
+  for (const x of lagerBewegungen()) {
+    const alt = n[x.artikelId], neu = x.art === 'inventur' ? num(x.gezaehlt) : r2((alt || 0) + num(x.menge));
+    n[x.artikelId] = neu;
+    if (x.art === 'anfang' || (x.art === 'inventur' && alt === undefined) || !(x.datum || '').startsWith(y)) continue;
+    M[Number(x.datum.slice(5, 7)) - 1] += (neu - (alt || 0)) * ek[x.artikelId];
+  }
+  return M.map(r2);
+}
+function lagerKnapp() {
+  const B = bestand();
+  return lagerArtikel().filter((a) => a.mindest !== '' && a.mindest != null && (B[a.id] || 0) <= num(a.mindest));
+}
+const lagerPill = (a, n) => n < 0 ? '<span class="pill bad">unter 0</span>' : !n ? '<span class="pill bad">leer</span>' : a.mindest !== '' && a.mindest != null && n <= num(a.mindest) ? '<span class="pill warn">wird knapp</span>' : '';
+function vLager() {
+  const A = lagerArtikel(), B = bestand(), knapp = lagerKnapp(), wert = lagerWert(), letzteInv = S.lager.filter((x) => x.art === 'inventur').map((x) => x.datum).sort().pop();
+  openDlg(`${head('Lager')}<div class="dlg-body">
+    ${A.length ? `<div class="tiles" style="margin:0 0 8px">
+      <div class="tile"><div class="q">Wert im Lager</div><div class="v">${eur(wert)}</div><div class="e">zum Einkaufspreis</div></div>
+      <div class="tile"><div class="q">Wird knapp</div><div class="v" style="color:${knapp.length ? 'var(--bad)' : 'inherit'}">${knapp.length}</div><div class="e">von ${A.length} Artikeln</div></div>
+    </div>
+    <ul class="list">${A.map((a) => { const n = B[a.id] || 0; return `<li><button class="item" data-act="lager-art" data-id="${a.id}"><div class="grow"><div class="t">${esc(a.name)}</div><div class="s">${a.nr ? 'Nr. ' + esc(a.nr) + ' · ' : ''}${a.ek ? eur(num(a.ek)) + ' Einkauf' : 'Einkaufspreis fehlt'}${a.mindest !== '' && a.mindest != null ? ' · warnen ab ' + mengeTxt(num(a.mindest)) : ''}</div></div><div><div class="amt">${mengeTxt(n)} ${esc(a.einheit || 'Stk.')}</div><div style="text-align:right">${lagerPill(a, n)}</div></div></button></li>`; }).join('')}</ul>
+    <p class="small muted" style="margin-top:8px">Verkäufe zieht die App automatisch ab, sobald eine Rechnung gestellt ist. Stornos buchen die Ware zurück. ${letzteInv ? `Letzte Inventur am ${dat(letzteInv)}.` : 'Noch keine Inventur gemacht. Einmal im Jahr zum 31.12. ist Pflicht, wenn du bilanzierst, und sinnvoll für alle, die Ware lagern.'}</p>`
+    : `<p>Hier siehst du, wie viel Ware du noch hast, was knapp wird und was dein Lager wert ist.</p><p class="small muted">So geht es los: Unter <b>Artikel und Leistungen</b> beim Artikel „Ware mit Lagerbestand führen“ anhaken und den Einkaufspreis eintragen. Dann hier den ersten Wareneingang oder eine Inventur buchen.</p>`}
+  </div><div class="dlg-foot"><button data-act="artikel">Artikel</button>${A.length ? `<button data-act="lager-inv">Inventur</button><button data-act="lager-liste">Liste drucken oder speichern</button><button class="primary" data-act="lager-ein" data-id="">+ Wareneingang</button>` : ''}</div>`);
+}
+function vLagerArtikel(id) {
+  const a = S.artikel.find((x) => x.id === id); if (!a) return vLager();
+  const L = lagerBewegungen().filter((x) => x.artikelId === id); let n = 0;
+  const rows = L.map((x) => { n = x.art === 'inventur' ? num(x.gezaehlt) : r2(n + num(x.menge)); return { x, n }; }).reverse();
+  const art = { eingang: 'Wareneingang', anfang: 'Anfangsbestand', verkauf: 'Verkauf', storno: 'Storno', inventur: 'Inventur', korrektur: 'Korrektur' };
+  openDlg(`${head(esc(a.name))}<div class="dlg-body">
+    <p style="font-size:1.3rem;margin-top:0"><b>${mengeTxt(n)} ${esc(a.einheit || 'Stk.')}</b> ${lagerPill(a, n)}</p>
+    <p class="small muted">Wert ${eur(Math.max(0, n) * num(a.ek))}${a.ek ? `, Einkaufspreis ${eur(num(a.ek))}` : ', Einkaufspreis fehlt'}</p>
+    ${rows.length ? `<table class="tab"><tr><th>Datum</th><th>Was</th><th style="text-align:right">Menge</th><th style="text-align:right">Bestand</th><th></th></tr>${rows.slice(0, 60).map(({ x, n }) => `<tr><td>${dat(x.datum)}</td><td>${art[x.art] || ''}${x.text ? `<div class="small muted">${esc(x.text)}</div>` : ''}</td><td style="text-align:right">${x.art === 'inventur' ? 'gezählt' : (x.menge > 0 ? '+' : '') + mengeTxt(num(x.menge))}</td><td style="text-align:right">${mengeTxt(n)}</td><td>${x.id ? `<button class="del" data-act="lager-weg" data-id="${x.id}" aria-label="Eintrag löschen">✕</button>` : ''}</td></tr>`).join('')}</table>` : '<p class="muted">Noch keine Bewegungen.</p>'}
+  </div><div class="dlg-foot"><button data-act="lager">Zurück</button><button data-act="art-edit" data-id="${a.id}">Artikel bearbeiten</button><button class="primary" data-act="lager-ein" data-id="${a.id}">+ Wareneingang</button></div>`);
+}
+function vWareneingang(id) {
+  const A = lagerArtikel(); if (!A.length) return vLager();
+  const a = A.find((x) => x.id === id) || A[0];
+  const belege = S.belege.filter((b) => b.kategorie === 'Wareneinkauf').sort((x, y) => (y.datum || '').localeCompare(x.datum || '')).slice(0, 30);
+  openDlg(`${head('Wareneingang')}<form id="weForm" class="dlg-body" autocomplete="off"><div class="grid2">
+    <label class="full">Artikel<select name="art">${A.map((x) => `<option value="${x.id}"${x.id === a.id ? ' selected' : ''}>${esc(x.name)}</option>`).join('')}</select></label>
+    <label class="full">Was ist das?<select name="was"><option value="eingang">Neue Lieferung</option><option value="anfang">Anfangsbestand: Ware, die schon vorher da war</option></select></label>
+    <label>Menge<input name="menge" inputmode="decimal" placeholder="z. B. 10"></label>
+    <label>Einkaufspreis netto € je Stück<input name="ek" inputmode="decimal" value="${a.ek ? esc(String(a.ek).replace('.', ',')) : ''}"></label>
+    <label>Datum<input type="date" name="datum" value="${heute()}"></label>
+    ${belege.length ? `<label>Beleg dazu (optional)<select name="beleg"><option value="">keiner</option>${belege.map((b) => `<option value="${b.id}">${dat(b.datum)} ${esc(b.lieferant || 'Beleg')} ${eur(num(b.brutto))}</option>`).join('')}</select></label>` : ''}
+    <label class="full">Notiz (optional)<input name="text" placeholder="z. B. Lieferant, Lieferschein-Nr."></label>
+  </div><p class="small muted">Die Rechnung des Lieferanten lädst du wie immer als Beleg hoch, Kategorie Wareneinkauf. Hier geht es nur um die Menge im Lager.</p>
+  </form><div class="dlg-foot"><button data-act="lager">Zurück</button><button class="primary" data-act="lager-ein-save">Buchen</button></div>`);
+}
+async function saveWareneingang() {
+  const f = $('#weForm').elements, a = S.artikel.find((x) => x.id === f.art.value), m = num(f.menge.value);
+  if (!a) return; if (!m) return toast('Bitte eine Menge eintragen.');
+  const ek = f.ek.value.trim() ? num(f.ek.value) : '';
+  const b = f.beleg && f.beleg.value && S.belege.find((x) => x.id === f.beleg.value);
+  S.lager.push({ id: uid(), artikelId: a.id, datum: f.datum.value || heute(), menge: m, ek, art: f.was.value === 'anfang' ? 'anfang' : 'eingang', text: [f.text.value.trim(), b ? `Beleg ${b.lieferant || ''} vom ${dat(b.datum)}` : ''].filter(Boolean).join(' · '), belegId: b ? b.id : '' });
+  if (ek !== '') a.ek = ek;
+  await save(); render(); vLagerArtikel(a.id); toast(`${mengeTxt(m)} ${a.einheit || 'Stk.'} eingebucht`);
+}
+function invStichtag() { const t = heute(); return t.slice(5) <= '01-31' ? (Number(t.slice(0, 4)) - 1) + '-12-31' : t; }
+function vInventur() {
+  const A = lagerArtikel(), tag = filter.invTag || invStichtag(), B = bestand(tag);
+  openDlg(`${head('Inventur')}<form id="invForm" class="dlg-body" autocomplete="off">
+    <p class="small muted" style="margin-top:0">Zähl, was wirklich im Lager liegt, und trag es ein. Die App setzt den Bestand auf deine Zahl. Vorausgefüllt ist, was laut App da sein sollte.</p>
+    <label>Stichtag<input type="date" name="tag" id="invTag" value="${tag}"></label>
+    <table class="tab" style="margin-top:8px"><tr><th>Artikel</th><th style="text-align:right">laut App</th><th style="text-align:right">gezählt</th></tr>
+    ${A.map((a) => `<tr><td>${esc(a.name)}<div class="small muted">${esc(a.einheit || 'Stk.')}</div></td><td style="text-align:right">${mengeTxt(B[a.id] || 0)}</td><td style="text-align:right"><input name="inv_${a.id}" inputmode="decimal" value="${esc(String(B[a.id] || 0).replace('.', ','))}" style="width:90px;text-align:right"></td></tr>`).join('')}</table>
+  </form><div class="dlg-foot"><button data-act="lager">Zurück</button><button class="primary" data-act="lager-inv-save">Inventur speichern</button></div>`);
+}
+async function saveInventur() {
+  const f = $('#invForm'), tag = f.elements.tag.value || heute();
+  for (const a of lagerArtikel()) {
+    const el = f.elements['inv_' + a.id]; if (!el) continue;
+    S.lager = S.lager.filter((x) => !(x.art === 'inventur' && x.artikelId === a.id && x.datum === tag));
+    S.lager.push({ id: uid(), artikelId: a.id, datum: tag, gezaehlt: num(el.value), art: 'inventur', text: '' });
+  }
+  filter.invTag = ''; await save(); render(); vLager(); toast(`Inventur zum ${dat(tag)} gespeichert`);
+  lagerDruck(tag);
+}
+function lagerZeilen(tag) {
+  const B = bestand(tag);
+  return lagerArtikel().map((a) => { const n = B[a.id] || 0; return { a, n, wert: r2(Math.max(0, n) * num(a.ek)) }; });
+}
+function lagerCsv(tag) {
+  const Z = lagerZeilen(tag);
+  const rows = [['Lagerliste zum ' + dat(tag), S.firma.name || ''], [], ['Artikelnummer', 'Artikel', 'Menge', 'Einheit', 'Einkaufspreis netto', 'Wert netto']]
+    .concat(Z.map((z) => [z.a.nr || '', z.a.name, mengeTxt(z.n), z.a.einheit || 'Stk.', num(z.a.ek), z.wert]));
+  rows.push(['', 'Summe', '', '', '', r2(Z.reduce((s, z) => s + z.wert, 0))], [], ['Bewertet mit dem zuletzt eingetragenen Einkaufspreis. Bitte in der Kanzlei prüfen.']);
+  return csvText(rows);
+}
+function lagerDruck(tag) {
+  tag = tag || heute();
+  const Z = lagerZeilen(tag), f = S.firma, inv = S.lager.some((x) => x.art === 'inventur' && x.datum === tag);
+  $('#druck').innerHTML = `<h1>${inv ? 'Inventurliste' : 'Lagerliste'} zum ${dat(tag)}</h1><p>${esc(f.name)}${f.steuernr ? ' · Steuernummer ' + esc(f.steuernr) : ''}</p>
+    <table class="p"><tr><th>Nr.</th><th>Artikel</th><th class="r">Menge</th><th>Einheit</th><th class="r">Einkauf netto</th><th class="r">Wert netto</th></tr>
+    ${Z.map((z) => `<tr><td>${esc(z.a.nr || '')}</td><td>${esc(z.a.name)}</td><td class="r">${mengeTxt(z.n)}</td><td>${esc(z.a.einheit || 'Stk.')}</td><td class="r">${eur(num(z.a.ek))}</td><td class="r">${eur(z.wert)}</td></tr>`).join('')}
+    <tr><td></td><td><b>Summe</b></td><td></td><td></td><td></td><td class="r"><b>${eur(r2(Z.reduce((s, z) => s + z.wert, 0)))}</b></td></tr></table>
+    <p style="font-size:8.5pt">Bewertet mit dem zuletzt eingetragenen Einkaufspreis. Erstellt mit dem Steuer-Cockpit am ${dat(heute())}.</p>
+    ${inv ? '<p style="margin-top:14mm">______________________________<br>Datum, Unterschrift (gezählt von)</p>' : ''}`;
+  const alt = document.title; document.title = `Lager-${tag}`;
+  window.print();
+  setTimeout(() => { document.title = alt; }, 500);
+}
+function vLagerListe() {
+  openDlg(`${head('Lagerliste')}<div class="dlg-body">
+    <label>Stand zum<input type="date" id="lagerTag" value="${filter.lagerTag || heute()}"></label>
+    <p class="small muted">Für die Inventur zum Jahresende wählst du den 31.12. Die Liste zeigt Menge, Einkaufspreis und Wert je Artikel.</p>
+  </div><div class="dlg-foot"><button data-act="lager">Zurück</button><button data-act="lager-csv">Als Tabelle (CSV)</button><button class="primary" data-act="lager-druck">Drucken oder als PDF</button></div>`);
 }
 
 /* ---------- Dialoge ---------- */
@@ -2335,6 +2496,7 @@ function vMenu() {
     <button data-act="new-an"><span class="ic">📝</span><span><span class="t">Angebot erstellen</span><span class="s">Kunde, Positionen, Gültigkeit. Später mit einem Tipp zur Rechnung.</span></span></button>
     <button data-act="new-re"><span class="ic">🧾</span><span><span class="t">Rechnung erstellen</span><span class="s">Pflichtangaben werden geprüft, Nummer kommt automatisch. PDF und E-Rechnung.</span></span></button>
     <button data-act="new-be"><span class="ic">📷</span><span><span class="t">Beleg hochladen</span><span class="s">Foto oder PDF einer Eingangsrechnung, für Ausgaben und Vorsteuer.</span></span></button>
+    ${lagerArtikel().length ? '<button data-act="lager-ein" data-id=""><span class="ic">📦</span><span><span class="t">Wareneingang buchen</span><span class="s">Neue Ware ins Lager, Bestand und Lagerwert stimmen dann wieder.</span></span></button>' : ''}
     <button data-act="vorlagen"><span class="ic">🔁</span><span><span class="t">Wiederkehrend</span><span class="s">Miete, Abos oder monatliche Kundenrechnungen automatisch anlegen.</span></span></button>
     <button data-act="new-ext"><span class="ic">📂</span><span><span class="t">Vorhandene Rechnung hinterlegen</span><span class="s">Alte Ausgangsrechnung aus Word oder einem anderen Programm, damit dein Umsatz vollständig ist.</span></span></button>
   </div></div>`);
@@ -2363,7 +2525,7 @@ function skontoText(d) {
 }
 /* Artikel und Leistungen, die man immer wieder abrechnet */
 function artikelPosition(a) {
-  return { text: a.name, menge: 1, einheit: a.einheit || 'Stk.', preis: num(a.preis), ust: edit && (edit.ku || edit.rc) ? 0 : num(a.ust), rabatt: 0 };
+  return { text: a.name, menge: 1, einheit: a.einheit || 'Stk.', preis: num(a.preis), ust: edit && (edit.ku || edit.rc) ? 0 : num(a.ust), rabatt: 0, artikelId: a.id };
 }
 function readEditor() {
   const f = $('#edForm'); if (!f) return;
@@ -2373,7 +2535,8 @@ function readEditor() {
   edit.positionen = [...f.querySelectorAll('.pos')].map((p) => ({
     text: p.querySelector('[name=p_text]').value, menge: num(p.querySelector('[name=p_menge]').value), einheit: p.querySelector('[name=p_einheit]').value,
     preis: num(p.querySelector('[name=p_preis]').value), ust: edit.ku || edit.rc ? 0 : num(p.querySelector('[name=p_ust]').value),
-    rabatt: Math.min(100, Math.max(0, num(p.querySelector('[name=p_rabatt]').value)))
+    rabatt: Math.min(100, Math.max(0, num(p.querySelector('[name=p_rabatt]').value))),
+    artikelId: (p.querySelector('[name=p_art]') || {}).value || undefined
   }));
   if (f.elements.skontoProz) Object.assign(edit, { skontoProz: num(g('skontoProz')), skontoTage: Math.round(num(g('skontoTage'))) });
   if (edit.artSchluss || istSchluss(edit)) { const ids = [...f.querySelectorAll('[name=abz]:checked')].map((x) => x.value); edit.abzuege = S.rechnungen.filter((x) => ids.includes(x.id)).map(abzugAus); }
@@ -2394,7 +2557,7 @@ function pflichtDoc(d) {
 function posHtml(p, i) {
   const s = posNetto(p);
   return `<div class="pos" data-i="${i}">
-    <label class="text">Beschreibung<input name="p_text" list="artikel" value="${esc(p.text)}" placeholder="z. B. Webdesign Startseite"></label>
+    <label class="text">Beschreibung<input name="p_text" list="artikel" value="${esc(p.text)}" placeholder="z. B. Webdesign Startseite"><input type="hidden" name="p_art" value="${esc(p.artikelId || '')}"></label>
     <label>Menge<input name="p_menge" inputmode="decimal" value="${esc(String(p.menge).replace('.', ','))}"></label>
     <label>Einheit<input name="p_einheit" value="${esc(p.einheit)}" list="einheiten"></label>
     <label>Einzelpreis netto €<input name="p_preis" inputmode="decimal" value="${esc(p.preis ? String(p.preis).replace('.', ',') : '')}" placeholder="0,00"></label>
@@ -3526,6 +3689,7 @@ async function paket(j, mitDatev) {
   files.unshift(
     { name: `Uebersicht-${y}.csv`, data: csvText(mon) },
     { name: `BWA-${y}.csv`, data: bwaCsvJahr(j) },
+    ...(lagerArtikel().length ? [{ name: `Lager-${y}-12-31.csv`, data: lagerCsv(y + '-12-31') }] : []),
     { name: `Einnahmen-${y}.csv`, data: csvText(ein) },
     { name: `Ausgaben-${y}.csv`, data: csvText(aus) },
     ...(bank.length > 1 ? [{ name: `Bank-${y}.csv`, data: csvText(bank) }] : []),
@@ -3831,6 +3995,16 @@ const ACT = {
   kontakte: (el) => vKontakte(el.dataset.k),
   artikel: () => { if (edit && $('#edForm')) { if (!confirm('Den Entwurf verlassen? Nicht gespeicherte Änderungen gehen verloren.')) return; } vArtikelListe(); },
   'art-edit': (el) => vArtikel(el.dataset.id),
+  lager: () => vLager(),
+  'lager-art': (el) => vLagerArtikel(el.dataset.id),
+  'lager-ein': (el) => vWareneingang(el.dataset.id),
+  'lager-ein-save': saveWareneingang,
+  'lager-inv': () => vInventur(),
+  'lager-inv-save': saveInventur,
+  'lager-liste': () => vLagerListe(),
+  'lager-csv': () => { const t = ($('#lagerTag') || {}).value || heute(); download(`Lager-${t}.csv`, lagerCsv(t), 'text/csv'); },
+  'lager-druck': () => lagerDruck(($('#lagerTag') || {}).value || heute()),
+  'lager-weg': async (el) => { const x = S.lager.find((y) => y.id === el.dataset.id); if (!x || !confirm('Diesen Eintrag löschen?')) return; S.lager = S.lager.filter((y) => y !== x); await save(); render(); vLagerArtikel(x.artikelId); },
   'art-save': saveArtikel,
   'art-del': async () => { if (!confirm(`${artEdit.name} löschen? Schon geschriebene Rechnungen bleiben unverändert.`)) return; S.artikel = S.artikel.filter((x) => x.id !== artEdit.id); await save(); render(); vArtikelListe(); },
   nummern: vNummern,
@@ -3930,6 +4104,7 @@ document.addEventListener('input', (e) => {
   if (e.target.closest('#estForm') && e.target.name && e.target.tagName === 'INPUT' && e.target.type !== 'checkbox') estEingabe(e.target);
   if (e.target.name === 'p_text' && e.target.closest('#edForm')) {
     const a = S.artikel.find((x) => x.name === e.target.value), pos = e.target.closest('.pos');
+    const pa = pos.querySelector('[name=p_art]'); if (pa) pa.value = a ? a.id : '';
     if (a && !num(pos.querySelector('[name=p_preis]').value)) {
       pos.querySelector('[name=p_preis]').value = String(num(a.preis)).replace('.', ',');
       pos.querySelector('[name=p_einheit]').value = a.einheit || 'Stk.';
@@ -3962,6 +4137,8 @@ document.addEventListener('change', async (e) => {
   if (e.target.id === 'ruIst') { S.steuer.ruecklageIst = e.target.value.trim() === '' ? '' : num(e.target.value); await save(); render(); toast('Gespeichert'); return; }
   if (e.target.id === 'bankMon') { filter.bankMon = e.target.value; render(); return; }
   if (e.target.id === 'stZr') { stZr = e.target.value; render(); return; }
+  if (e.target.id === 'invTag') { filter.invTag = e.target.value; vInventur(); return; }
+  if (e.target.id === 'lagerTag') { filter.lagerTag = e.target.value; return; }
   if (e.target.id === 'bwaJahr' || e.target.id === 'bwaMon') { filter[e.target.id] = e.target.value; if (e.target.id === 'bwaJahr') filter.bwaMon = ''; vBwa(); return; }
   if (e.target.closest('#stForm')) { saveSteuer(); return; }
   if (e.target.id === 'fileIn') { pendingFile = e.target.files[0] || null; zeigeDatei(pendingFile); }
