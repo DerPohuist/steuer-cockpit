@@ -51,6 +51,12 @@ p { margin: 0 0 8px; }
 .todo .dot { flex: 0 0 auto; width: 10px; height: 10px; border-radius: 50%; margin-top: 7px; background: var(--muted); }
 .dot.bad { background: var(--bad); } .dot.warn { background: var(--warn); } .dot.good { background: var(--good); }
 .todo .grow { flex: 1; min-width: 0; }
+.kette { display: flex; flex-wrap: wrap; gap: 4px; margin: 4px 0 8px; }
+.kette span { font-size: 13px; padding: 2px 9px; border-radius: 999px; border: 1px solid var(--line); color: var(--muted); }
+.kette span.ok { background: var(--good-bg); border-color: transparent; color: var(--good); }
+.kette span.jetzt { border-color: var(--accent); color: var(--fg); font-weight: 600; }
+.kette span.nein { background: var(--bad-bg); border-color: transparent; color: var(--bad); }
+.kette span.opt { border-style: dashed; }
 .tiles { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin-bottom: 12px; }
 @media (min-width: 700px) { .tiles { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
 .tile { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 12px; }
@@ -245,7 +251,7 @@ function leer() {
   return {
     v: 2,
     firma: { name: '', inhaber: '', strasse: '', plz: '', ort: '', steuernr: '', bundesland: '', ustid: '', email: '', tel: '', iban: '', bic: '', bank: '', rechtsform: '', registergericht: '', registernr: '', logo: '', kleinunternehmer: false, gruendung: '', turnus: 'monat', dauerfrist: false, zahlungsziel: 14, angebotTage: 30, basiszins: 1.27, skontoProz: '', skontoTage: '', nummern: {} },
-    angebote: [], rechnungen: [], belege: [], kunden: [], lieferanten: [], bank: [], vorlagen: [], artikel: [], lager: [], anlagen: [], zaehler: {}, letzteSicherung: null,
+    angebote: [], rechnungen: [], belege: [], kunden: [], lieferanten: [], bank: [], vorlagen: [], artikel: [], lager: [], anlagen: [], regeln: [], abschluesse: {}, zaehler: {}, letzteSicherung: null,
     steuer: { versteuerung: 'soll', hebesatz: 400, berater: false, svz: 0, vzEst: 0, vzGew: 0, erledigt: {}, ruecklageIst: '', kalVorher: 3, kalRe: true, skr: '03', beraterNr: '', mandantNr: '' },
     est: {}, modus: ''
   };
@@ -261,7 +267,7 @@ async function load() {
 }
 /* Ältere Stände: Kunden bekommen eine id, Lieferanten entstehen aus vorhandenen Belegen */
 function migriere() {
-  S.kunden = S.kunden || []; S.lieferanten = S.lieferanten || []; S.vorlagen = S.vorlagen || []; S.artikel = S.artikel || []; S.lager = S.lager || []; S.anlagen = S.anlagen || []; S.firma.nummern = S.firma.nummern || {};
+  S.kunden = S.kunden || []; S.lieferanten = S.lieferanten || []; S.vorlagen = S.vorlagen || []; S.artikel = S.artikel || []; S.lager = S.lager || []; S.anlagen = S.anlagen || []; S.regeln = S.regeln || []; S.abschluesse = S.abschluesse || {}; S.firma.nummern = S.firma.nummern || {};
   for (const k of S.kunden) if (!k.id) k.id = uid();
   if ((S.v || 1) < 2) {
     for (const b of S.belege.slice().sort((x, y) => (x.datum || '').localeCompare(y.datum || ''))) merkeLieferant(b.lieferant, b.kategorie, b.rc);
@@ -743,6 +749,7 @@ function vSteuern() {
   <div class="status"><div class="big">${next ? `<span class="pill ${fz(next)}">${tage < 0 ? 'Überfällig' : tage <= 14 ? 'Bald fällig' : 'Nächste Frist'}</span> ${next.t}` : '<span class="pill good">Gut</span> Keine offenen Fristen'}</div>
   <p class="small muted" style="margin-top:6px">${next ? `Bis ${dat(next.datum)}${tage < 0 ? `, seit ${-tage} Tagen vorbei` : `, in ${tage} Tagen`}. ${next.s}` : 'Alle bekannten Fristen sind erledigt.'}</p></div>
 
+  ${vAbschlussKarte()}
   <div class="card"><h2>Einkommensteuererklärung ${y0 - 1} selbst machen ${hb('est')}</h2>
     <p class="small">Schritt für Schritt: Firma, Arbeitslohn, Vermietung, Kapitalerträge, Rente, Kinder, Versicherungen und mehr. Unterlagen hochladen und sammeln. Am Ende die Werte je ELSTER-Anlage mit Zeile zum Abtippen.</p>
     <div class="btns"><button class="primary" data-act="est-open">${S.est && S.est[y0 - 1] ? 'Weitermachen' : 'Starten'}</button></div></div>
@@ -2045,6 +2052,7 @@ function vStart() {
   for (const r of ueber.filter((x) => mahnStufe(x) >= 3 && tageBis(letzteMahnung(x).frist) < 0).slice(0, 3)) todos.push({ c: 'bad', t: `${esc(r.kunde.name || 'Kunde')} zahlt trotz letzter Mahnung nicht`, s: `Rechnung ${esc(r.nr)}, ${eur(summen(r).brutto)}. Mahnbescheid oder Inkasso prüfen.`, act: 'open-re', id: r.id, b: 'Öffnen' });
   if (S.firma.name) for (const f of fristen().filter((x) => !x.erledigt && tageBis(x.datum) <= 10)) todos.push({ c: tageBis(f.datum) < 0 ? 'bad' : 'warn', t: `${f.t} bis ${dat(f.datum)}`, s: f.s, act: 'tab', k: 'steuern', b: 'Ansehen' });
   for (const a of angOffen.filter((a) => a.gueltigBis && tageBis(a.gueltigBis) <= 5).slice(0, 3)) todos.push({ c: 'warn', t: `Angebot an ${esc(a.kunde.name || 'Kunde')} läuft in ${tageBis(a.gueltigBis)} Tagen ab`, s: `${esc(a.nr)}, ${eur(summen(a).netto)} netto. Nachfassen?`, act: 'open-an', id: a.id, b: 'Öffnen' });
+  for (const a of S.angebote.filter((x) => x.status === 'angenommen' && !S.rechnungen.some((r) => r.ausAngebot === x.id && r.status !== 'storniert')).slice(0, 3)) todos.push({ c: 'warn', t: `Auftrag von ${esc(a.kunde.name || 'Kunde')} abrechnen`, s: `Angebot ${esc(a.nr)} ist angenommen, ${eur(summen(a).netto)} netto. Noch keine Rechnung geschrieben.`, act: 'open-an', id: a.id, b: 'Weiter' });
   const entw = S.rechnungen.filter((r) => r.status === 'entwurf');
   if (entw.length) todos.push({ c: 'warn', t: `${entw.length} Rechnungsentwurf${entw.length > 1 ? 'e' : ''} noch nicht gestellt`, s: 'Erst nach „Rechnung stellen“ bekommt sie eine Nummer und zählt zum Umsatz.', act: 'tab', k: 'rechnungen', b: 'Ansehen' });
   const beFehlt = S.belege.filter(belegFehlt);
@@ -2053,6 +2061,10 @@ function vStart() {
   if (knapp.length) todos.push({ c: knapp.some((a) => (bestand()[a.id] || 0) <= 0) ? 'bad' : 'warn', t: `${knapp.length === 1 ? esc(knapp[0].name) + ' wird knapp' : knapp.length + ' Artikel werden knapp'}`, s: knapp.slice(0, 3).map((a) => `${esc(a.name)}: noch ${mengeTxt(bestand()[a.id] || 0)}`).join(', ') + '. Rechtzeitig nachbestellen.', act: 'lager', b: 'Lager' });
   const luecke = belegLuecken().filter((x) => x.fehlt && x.k < heute().slice(0, 7)).slice(0, 3);
   if (luecke.length) todos.push({ c: 'warn', t: `Belege fehlen: ${luecke.map((x) => `${MONATE[Number(x.k.slice(5, 7)) - 1]} ${x.fehlt}`).join(', ')}`, s: `${eur(luecke.reduce((a, x) => a + x.summe, 0))} Ausgaben auf dem Konto ohne Beleg. Ohne Beleg zählen sie nicht als Betriebsausgabe.`, act: 'abgleich', k: luecke[0].k, b: 'Abgleichen' });
+  const abK = abMonatDran();
+  if (abK) { const A = abStand(abK); todos.push({ c: 'warn', t: `Monatsabschluss ${monName(abK)}`, s: A.n ? `${A.n} von ${A.L.length} Schritten erledigt.` : 'Kontoauszug, Belege, Rechnungen, Umsatzsteuer und Sicherung in einem Rutsch durchgehen.', act: 'abschluss', k: abK, b: A.n ? 'Weitermachen' : 'Starten' }); }
+  const abJ = new Date().getFullYear() - 1;
+  if (new Date().getMonth() < 7 && abMonate(abJ).length && !abFertig('J' + abJ)) { const A = abStand('J' + abJ); todos.push({ c: 'warn', t: `Jahresabschluss ${abJ}`, s: `${A.n} von ${A.L.length} Schritten erledigt. Inventur, Anlagen und Unterlagen für die Steuererklärung.`, act: 'abschluss', k: 'J' + abJ, b: A.n ? 'Weitermachen' : 'Starten' }); }
   const hatDaten = S.rechnungen.length + S.angebote.length + S.belege.length > 0;
   if (hatDaten && (!S.letzteSicherung || tageBis(S.letzteSicherung) < -14)) todos.push({ c: 'warn', t: 'Sicherung herunterladen', s: S.letzteSicherung ? `Letzte Sicherung am ${dat(S.letzteSicherung)}.` : 'Deine Daten liegen nur in diesem Browser. Eine Sicherung schützt vor Verlust.', act: 'backup', b: 'Sichern' });
   const R = hatDaten ? ruecklage() : null;
@@ -2096,7 +2108,7 @@ function vStart() {
     </details>
   </div>`}
   <details class="card"><summary>Was kann die App schon, was kommt noch?</summary>
-    <p class="small" style="margin-top:8px"><b>Schon da:</b> Angebote und Rechnungen schreiben, als PDF drucken, als E-Rechnung (XRechnung) speichern, Angebot mit einem Tipp in eine Rechnung umwandeln, Storno per Stornorechnung, Belege und alte Rechnungen hochladen, Kontoauszüge (CSV) einlesen und Zahlungen Rechnungen zuordnen, Umsatzsteuer-Voranmeldung mit ELSTER-Kennzahlen, Zusammenfassende Meldung, EÜR bzw. Gewinn-Vorschau, Steuerschätzung, Fristen als Kalender-Datei für Handy und Outlook, Steuer-Rücklage mit Ampel, Kleinunternehmer-Wächter, Beleg-Abgleich mit dem Konto, wiederkehrende Rechnungen und Ausgaben, Diagramme zu Einnahmen und Ausgaben, Jahrespaket als ZIP, Export im DATEV-Format für den Steuerberater, Sicherung und Umzug auf ein anderes Gerät.</p>
+    <p class="small" style="margin-top:8px"><b>Schon da:</b> Angebote und Rechnungen schreiben, als PDF drucken, als E-Rechnung (XRechnung) speichern, Angebot mit einem Tipp in eine Rechnung umwandeln, Storno per Stornorechnung, Belege und alte Rechnungen hochladen, Kontoauszüge (CSV) einlesen und Zahlungen Rechnungen zuordnen, Umsatzsteuer-Voranmeldung mit ELSTER-Kennzahlen, Zusammenfassende Meldung, EÜR bzw. Gewinn-Vorschau, Steuerschätzung, Fristen als Kalender-Datei für Handy und Outlook, Steuer-Rücklage mit Ampel, Kleinunternehmer-Wächter, Beleg-Abgleich mit dem Konto, wiederkehrende Rechnungen und Ausgaben, Diagramme zu Einnahmen und Ausgaben, Jahrespaket als ZIP, Export im DATEV-Format für den Steuerberater, Sicherung und Umzug auf ein anderes Gerät. Abläufe: Monats- und Jahresabschluss Schritt für Schritt, jeder Auftrag mit Leiste vom Angebot bis zur Zahlung und dem nächsten Schritt, Belege werden beim Hochladen gleich mit der Kontozahlung verknüpft, feste Regeln für wiederkehrende Kontobewegungen.</p>
     <p class="small"><b>Kommt noch:</b> Login und Speicherung auf einem Server, direkte Qonto-Verbindung, direkte Abgabe über ELSTER, vollständige Jahreserklärungen.</p>
     <p class="small muted">Deine Daten liegen nur in diesem Browser auf diesem Gerät. Andere Geräte sehen sie nicht. Lade regelmäßig eine Sicherung herunter. Die Ablage hier ist noch keine GoBD-konforme Archivierung.</p>
   </details>`;
@@ -2358,10 +2370,13 @@ function bankImport() {
       const { buchungen, uebersprungen } = bankAusCsv(await file.text());
       const da = new Set(S.bank.map((b) => b.id));
       const neu = buchungen.filter((b) => !da.has(b.id));
-      S.bank.push(...neu); await save();
-      filter.bank = 'zuordnen'; tab = 'bank'; render();
+      S.bank.push(...neu);
+      const nRegel = regelnAnwenden(neu), nBeleg = belegeAutomatisch(neu);
+      await save();
+      const ab = dlg.open && $('#abWeiter') ? $('#abWeiter').dataset.k : '';
+      filter.bank = 'zuordnen'; tab = 'bank'; if (!ab) closeDlg(); render(); if (ab) vAbschluss(ab);
       const vorschl = neu.filter((b) => bankTreffer(b).length).length;
-      toast(`${neu.length} neue Buchung${neu.length === 1 ? '' : 'en'}${buchungen.length - neu.length ? `, ${buchungen.length - neu.length} schon vorhanden` : ''}${uebersprungen ? `, ${uebersprungen} übersprungen` : ''}${vorschl ? `. ${vorschl} ${vorschl === 1 ? 'passt' : 'passen'} zu offenen Rechnungen.` : ''}`);
+      toast(`${neu.length} neue Buchung${neu.length === 1 ? '' : 'en'}${buchungen.length - neu.length ? `, ${buchungen.length - neu.length} schon vorhanden` : ''}${uebersprungen ? `, ${uebersprungen} übersprungen` : ''}${nBeleg ? `. ${nBeleg} Beleg${nBeleg === 1 ? '' : 'e'} verknüpft` : ''}${nRegel ? `. ${nRegel} per Regel zugeordnet` : ''}${vorschl ? `. ${vorschl} ${vorschl === 1 ? 'passt' : 'passen'} zu offenen Rechnungen.` : ''}`);
     } catch (e) { toast(e.message || 'Die Datei konnte nicht gelesen werden.'); }
   };
   inp.click();
@@ -2425,6 +2440,7 @@ function vBank() {
   <p class="small muted" style="margin-top:4px">${all.length ? `${MONATE[new Date().getMonth()]}: ${eur(ein)} rein, ${eur(-aus)} raus. Letzte Buchung ${dat(all[0].datum)}.` : 'Lade den Kontoauszug als CSV hoch. Bei Qonto: Transaktionen, Exportieren, CSV.'} ${hb('bank', 'So holst du die Datei')}</p>
   <div class="btns"><button class="primary" data-act="bank-import">Kontoauszug (CSV) hochladen</button></div></div>
   ${vAbgleich()}
+  ${all.length ? `<div class="card"><h2>Feste Regeln</h2><p class="small muted">Was immer gleich ist (Finanzamt, Privatentnahme, Umbuchung, Kontoführung), ordnet die App beim Hochladen selbst zu.${(S.regeln || []).length ? ` ${S.regeln.length} Regel${S.regeln.length > 1 ? 'n' : ''} aktiv.` : ''}</p><div class="btns"><button data-act="regeln">${(S.regeln || []).length ? 'Regeln ansehen' : 'Regel anlegen'}</button></div></div>` : ''}
   ${all.length ? `<div class="card">
     ${chips('bank', [['zuordnen', 'Ohne Zuordnung'], ['ein', 'Eingänge'], ['aus', 'Ausgänge'], ['alle', 'Alle']])}
     ${list.length ? `<ul class="list">${list.map((b) => { const t = bankTreffer(b); const re = b.rechnungId && S.rechnungen.find((r) => r.id === b.rechnungId);
@@ -2449,8 +2465,238 @@ function vBuchung(id) {
       ${t.length + rest.length ? `<ul class="list">${t.map((r) => reBtn(r, true)).join('')}${rest.map((r) => reBtn(r, false)).join('')}</ul>` : '<p class="small muted">Keine offene Rechnung vorhanden. Vielleicht eine Privateinlage oder Erstattung.</p>'}</div>` : ''}
     ${b.betrag < 0 && !b.ohneBeleg ? (be ? `<p>Beleg: <a href="#" data-act="open-be" data-id="${be.id}">${esc(be.lieferant || 'Beleg')} vom ${dat(be.datum)}</a></p>` : `${bt.length ? `<div class="card"><b>Gehört einer dieser Belege dazu?</b><ul class="list">${bt.slice(0, 5).map((x) => `<li><button class="item" data-act="bk-verkn" data-id="${esc(b.id)}" data-k="${x.id}"><div class="grow"><div class="t">${esc(x.lieferant || 'Beleg')}</div><div class="s">${dat(x.datum)}${x.kategorie ? ' · ' + esc(x.kategorie) : ''}${x.dateiName ? ' · 📎' : ''}</div></div><div><div class="amt">${eur(num(x.brutto))}</div><div style="text-align:right"><span class="pill good">passt</span></div></div></button></li>`).join('')}</ul></div>` : '<p class="small muted">Zu dieser Ausgabe gehört noch kein Beleg.</p>'}<div class="btns"><button class="primary" data-act="bk-beleg" data-id="${esc(b.id)}">Beleg dazu hochladen</button></div>`) : ''}
     ${!re && !be ? `<div class="card" style="margin-top:14px">${b.ohneBeleg ? `<p><span class="pill grey">${b.betrag > 0 ? 'Keine Rechnung nötig' : 'Kein Beleg nötig'}</span> ${esc(b.ohneBeleg)}</p><div class="btns"><button data-act="bk-ohne" data-id="${esc(b.id)}" data-k="">Doch ${b.betrag > 0 ? 'eine Rechnung' : 'einen Beleg'} zuordnen</button></div>`
-      : `<label>${b.betrag > 0 ? 'Gehört zu keiner Rechnung, weil' : 'Braucht keinen Beleg, weil'}<select id="ohneGrund"><option value="">Bitte wählen</option>${(b.betrag > 0 ? OHNE_EIN : OHNE_AUS).map((g) => `<option>${g}</option>`).join('')}</select></label><div class="btns"><button data-act="bk-ohne" data-id="${esc(b.id)}" data-k="x">So markieren</button></div>`}</div>` : ''}
+      : `<label>${b.betrag > 0 ? 'Gehört zu keiner Rechnung, weil' : 'Braucht keinen Beleg, weil'}<select id="ohneGrund"><option value="">Bitte wählen</option>${(b.betrag > 0 ? OHNE_EIN : OHNE_AUS).map((g) => `<option>${g}</option>`).join('')}</select></label>${b.gegenpartei ? `<label class="check" style="margin-top:8px"><input type="checkbox" id="ohneRegel"> Immer so bei „${esc(b.gegenpartei)}“ (feste Regel)</label>` : ''}<div class="btns"><button data-act="bk-ohne" data-id="${esc(b.id)}" data-k="x">So markieren</button></div>`}</div>` : ''}
   </div>`);
+}
+
+/* ---------- Arbeitsabläufe: Monats- und Jahresabschluss, Auftrag bis Zahlung, feste Konto-Regeln ---------- */
+/* S.abschluesse: { '2026-10': { haken: { bank: '2026-11-03' }, am: '2026-11-04' }, 'J2025': { … } }
+   Abschließen ist ein Haken für den Nutzer, es sperrt keine Daten. */
+const abD = (k) => (S.abschluesse || {})[k] || { haken: {} };
+function abDaten(k) { S.abschluesse = S.abschluesse || {}; const d = S.abschluesse[k] = S.abschluesse[k] || {}; d.haken = d.haken || {}; return d; }
+const abFertig = (k) => !!abD(k).am;
+const monEnde = (k) => iso(new Date(Number(k.slice(0, 4)), Number(k.slice(5, 7)), 0));
+const monPlus = (k, n) => { const m = Number(k.slice(0, 4)) * 12 + Number(k.slice(5, 7)) - 1 + n; return `${Math.floor(m / 12)}-${String((m % 12) + 1).padStart(2, '0')}`; };
+/* Erstes Datum, ab dem es Geschäftsdaten gibt. Davor gibt es nichts abzuschließen. */
+function abStart() {
+  const d = [].concat(S.rechnungen.filter(zaehlt).map((r) => r.datum), S.belege.map((b) => b.datum), S.bank.map((b) => b.datum)).filter(Boolean).sort();
+  return d[0] || '';
+}
+/* Abgeschlossene Monate eines Jahres, für die es Daten gibt */
+function abMonate(y) {
+  const st = abStart(), jetzt = heute().slice(0, 7), out = [];
+  if (!st) return out;
+  for (let m = 1; m <= 12; m++) { const k = `${y}-${String(m).padStart(2, '0')}`; if (k < jetzt && monEnde(k) >= st) out.push(k); }
+  return out;
+}
+/* Welcher Monat ist dran: der älteste offene der letzten drei Monate */
+function abMonatDran() {
+  const st = abStart(); if (!st) return null;
+  const vor = monPlus(heute().slice(0, 7), -1);
+  for (let n = -2; n <= 0; n++) { const k = monPlus(vor, n); if (monEnde(k) >= st && !abFertig(k)) return k; }
+  return null;
+}
+/* Voranmeldungs-Zeitraum, der mit diesem Monat endet (bei Quartal nur im letzten Monat) */
+function abUstKey(k) {
+  if (ku()) return '';
+  if (S.firma.turnus !== 'quartal') return k;
+  const m = Number(k.slice(5, 7)); return m % 3 ? '' : `${k.slice(0, 4)}-Q${m / 3}`;
+}
+function abMonatSchritte(k) {
+  const von = k + '-01', bis = monEnde(k), drin = (d) => d && d >= von && d <= bis, L = [];
+  const bank = S.bank.filter((b) => drin(b.datum)), letzte = S.bank.map((b) => b.datum).sort().pop();
+  L.push({ id: 'bank', t: 'Kontoauszug einlesen', ok: !!letzte && letzte >= plusTage(bis, -4), manuell: true,
+    s: letzte ? `Letzte Buchung auf dem Konto vom ${dat(letzte)}. ${letzte >= plusTage(bis, -4) ? 'Der Monat ist drin.' : `Lade den Auszug bis ${dat(bis)} hoch. Gab es danach keine Buchungen mehr, hak es ab.`}` : 'Lade den Kontoauszug als CSV hoch (bei Qonto: Transaktionen, Exportieren). Ohne Geschäftskonto einfach abhaken.',
+    act: 'bank-import', b: 'Hochladen' });
+  const ein = bank.filter((b) => b.betrag > 0 && bankOffen(b));
+  L.push({ id: 'ein', t: 'Zahlungseingänge zuordnen', ok: !ein.length,
+    s: ein.length ? `${ein.length} Eingang${ein.length > 1 ? 'e' : ''} ohne Rechnung, zusammen ${eur(ein.reduce((a, b) => a + b.betrag, 0))}. Zu welcher Rechnung gehört das Geld?` : bank.some((b) => b.betrag > 0) ? 'Alle Eingänge sind einer Rechnung zugeordnet oder brauchen keine.' : 'Keine Eingänge in diesem Monat.',
+    act: 'ab-bank', b: 'Zuordnen' });
+  const fehlt = bank.filter(fehltBeleg);
+  L.push({ id: 'belege', t: 'Belege zu allen Ausgaben', ok: !fehlt.length,
+    s: fehlt.length ? `Zu ${fehlt.length} Ausgabe${fehlt.length > 1 ? 'n' : ''} (${eur(-fehlt.reduce((a, b) => a + b.betrag, 0))}) fehlt der Beleg. Hochladen oder markieren, dass keiner nötig ist.` : 'Zu jeder Ausgabe auf dem Konto ist ein Beleg da.',
+    act: 'abgleich', k, b: 'Abgleichen' });
+  const unv = S.belege.filter((b) => drin(b.datum) && belegFehlt(b));
+  L.push({ id: 'vollst', t: 'Belege vollständig', ok: !unv.length,
+    s: unv.length ? `${unv.length} Beleg${unv.length > 1 ? 'en fehlen' : ' fehlt'} Betrag oder Kategorie.` : 'Alle Belege haben Betrag und Kategorie.', act: 'be-ergaenzen', b: 'Ergänzen' });
+  const entw = S.rechnungen.filter((r) => r.status === 'entwurf' && !r.extern);
+  L.push({ id: 'entw', t: 'Rechnungen gestellt', ok: !entw.length,
+    s: entw.length ? `${entw.length} Entwurf${entw.length > 1 ? 'e liegen' : ' liegt'} noch. Erst gestellte Rechnungen zählen zum Umsatz.` : 'Keine Entwürfe offen.', act: 'tab', k: 'rechnungen', b: 'Ansehen' });
+  const mahn = S.rechnungen.filter(mahnenFaellig);
+  L.push({ id: 'mahn', t: 'Säumige Kunden erinnern', ok: !mahn.length,
+    s: mahn.length ? `${mahn.length} Rechnung${mahn.length > 1 ? 'en sind' : ' ist'} überfällig, der nächste Mahnschritt ist dran.` : 'Niemand ist mit einer Zahlung im Verzug.', act: 'mahnen', id2: mahn.length ? mahn[0].id : '', b: 'Erinnern' });
+  const uk = abUstKey(k);
+  if (uk) {
+    const z = zrAus(uk), u = ustva(z), erl = S.steuer.erledigt['ustva-' + uk];
+    L.push({ id: 'ust', t: `Umsatzsteuer-Voranmeldung ${z.name}`, ok: !!erl, ust: uk,
+      s: erl ? (typeof erl === 'string' ? `Abgegeben am ${dat(erl)}.` : 'Als abgegeben markiert.') : `${u.zahl >= 0 ? `${eur(u.zahl)} zahlen` : `${eur(-u.zahl)} Erstattung`}, bis ${dat(z.frist)}. Erst wenn die Punkte darüber erledigt sind, stimmt die Zahl. In ELSTER eintragen, dann hier abhaken.`,
+      act: 'ab-ust', k: uk, b: 'Werte ansehen' });
+  }
+  const R = ruecklage();
+  L.push({ id: 'rueck', t: 'Geld für Steuern zurücklegen', ok: R.c === 'good' || R.soll <= 0, manuell: true,
+    s: `Zurücklegen solltest du ${eur(R.soll)}${R.ist != null && R.ist !== '' ? `, da sind ${eur(R.ist)}` : ''}. Den Stand des Rücklagen-Kontos trägst du in der Übersicht ein.`, act: 'ab-rueck', b: 'Eintragen' });
+  L.push({ id: 'sich', t: 'Sicherung herunterladen', ok: !!S.letzteSicherung && S.letzteSicherung > bis,
+    s: S.letzteSicherung ? `Letzte Sicherung am ${dat(S.letzteSicherung)}.` : 'Noch nie gesichert. Deine Daten liegen nur in diesem Browser.', act: 'backup', b: 'Sichern' });
+  return L;
+}
+function abJahrSchritte(y) {
+  const L = [], von = y + '-01-01', bis = y + '-12-31', drin = (d) => d && d >= von && d <= bis, D = abD('J' + y);
+  const mon = abMonate(y), offenM = mon.filter((k) => !abFertig(k));
+  if (mon.length) L.push({ id: 'monate', t: 'Alle Monate abgeschlossen', ok: !offenM.length,
+    s: offenM.length ? `${mon.length - offenM.length} von ${mon.length} Monaten fertig. Offen: ${offenM.slice(0, 4).map((k) => MONATE[Number(k.slice(5, 7)) - 1]).join(', ')}${offenM.length > 4 ? ' …' : ''}.` : `Alle ${mon.length} Monate sind durch.`,
+    act: 'abschluss', k: offenM[0] || '', b: 'Weitermachen' });
+  const offen = S.rechnungen.filter((r) => r.typ !== 'gutschrift' && drin(r.datum) && ['offen', 'ueberfaellig'].includes(reStatus(r).k));
+  L.push({ id: 'offen', t: 'Offene Rechnungen prüfen', ok: !offen.length, manuell: true,
+    s: offen.length ? `${offen.length} Rechnung${offen.length > 1 ? 'en' : ''} aus ${y} noch nicht bezahlt (${eur(offen.reduce((a, r) => a + offenBetrag(r), 0))}). Ist das Geld doch da, eintragen. Sonst mahnen oder mit dem Steuerberater klären, ob du sie abschreibst.` : `Alle Rechnungen aus ${y} sind bezahlt.`,
+    act: 'tab', k: 'rechnungen', b: 'Ansehen' });
+  if (lagerArtikel().length) {
+    const inv = S.lager.some((x) => x.art === 'inventur' && x.datum === bis);
+    L.push({ id: 'inv', t: `Inventur zum 31.12.${y}`, ok: inv, s: inv ? 'Gezählt und eingetragen.' : 'Ware im Lager zählen und eintragen. Der Lagerwert gehört in die Jahresrechnung.', act: 'ab-inv', k: bis, b: 'Inventur' });
+  }
+  const V = anlageVorschlaege().filter((b) => drin(b.datum));
+  if (V.length || S.anlagen.length) L.push({ id: 'anl', t: 'Anschaffungen ins Anlagenverzeichnis', ok: !V.length,
+    s: V.length ? `${V.length} Anschaffung${V.length > 1 ? 'en' : ''} über 800 € netto ${V.length > 1 ? 'fehlen' : 'fehlt'} noch. Sie werden über mehrere Jahre abgeschrieben.` : `Abschreibung ${y}: ${eur(gewinn(y).afa)}.`, act: 'ab-anl', k: String(y), b: 'Anlagen' });
+  if (!ku()) {
+    const keys = []; if (S.firma.turnus === 'quartal') for (let q = 1; q <= 4; q++) keys.push(`${y}-Q${q}`); else for (let m = 1; m <= 12; m++) keys.push(`${y}-${String(m).padStart(2, '0')}`);
+    const st = abStart(), fehlt = keys.filter((k) => zrAus(k).bis >= st && zrAus(k).bis < heute() && !S.steuer.erledigt['ustva-' + k]);
+    L.push({ id: 'ust', t: 'Alle Umsatzsteuer-Voranmeldungen abgegeben', ok: !fehlt.length,
+      s: fehlt.length ? `Noch nicht als abgegeben markiert: ${fehlt.map((k) => zrAus(k).name).join(', ')}.` : 'Alle Voranmeldungen sind abgegeben. Die Werte für die Jahreserklärung stehen im Reiter Steuern.', act: 'ab-ust', k: fehlt[0] || '', b: 'Ansehen' });
+  } else {
+    const u = kuUmsatz(y);
+    L.push({ id: 'ku', t: 'Kleinunternehmer-Grenze prüfen', ok: u.summe <= KU_VORJAHR, manuell: true, c: u.summe > KU_VORJAHR ? 'bad' : 'warn',
+      s: u.summe > KU_VORJAHR ? `Umsatz ${y}: ${eur(u.summe)}, über ${eur(KU_VORJAHR)}. Ab ${y + 1} musst du Umsatzsteuer berechnen. Im Januar im Reiter Firma den Haken bei Kleinunternehmer herausnehmen.` : `Umsatz ${y}: ${eur(u.summe)}, unter ${eur(KU_VORJAHR)}. Du bleibst ${y + 1} Kleinunternehmer.`, act: 'tab', k: 'firma', b: 'Firma' });
+  }
+  L.push({ id: 'gewinn', t: 'Gewinn und Steuern ansehen', ok: false, manuell: true,
+    s: `Gewinn ${y} laut App: ${eur(gewinn(y).gewinn)}. Passt das ungefähr zu deinem Gefühl? Wenn nicht, fehlen meist Belege oder Rechnungen.`, act: 'ab-gewinn', k: String(y), b: 'Ansehen' });
+  L.push({ id: 'paket', t: `Unterlagen ${y} für den Steuerberater`, ok: !!D.haken.paket,
+    s: D.haken.paket ? `Heruntergeladen am ${dat(D.haken.paket)}.` : `Jahrespaket als ZIP mit allen Listen und Belegen${S.steuer.berater ? ' und dem DATEV-Export' : ''}. Auch ohne Steuerberater gut fürs Archiv.`, act: 'ab-paket', k: String(y), b: 'Herunterladen' });
+  if (!privat()) L.push({ id: 'est', t: `Einkommensteuererklärung ${y}`, ok: false, manuell: true,
+    s: S.steuer.berater ? 'Macht dein Steuerberater, sobald er das Paket hat. Hak es ab, wenn es erledigt ist.' : 'Mit dem Assistenten im Reiter Steuern Schritt für Schritt. Hak es ab, wenn sie abgegeben ist.', act: 'est-open', b: 'Starten' });
+  L.push({ id: 'sich', t: 'Sicherung herunterladen', ok: !!S.letzteSicherung && S.letzteSicherung > bis,
+    s: S.letzteSicherung ? `Letzte Sicherung am ${dat(S.letzteSicherung)}.` : 'Noch nie gesichert.', act: 'backup', b: 'Sichern' });
+  return L;
+}
+const abOk = (k, x) => x.ok || !!abD(k).haken[x.id];
+function abStand(k) { const L = k[0] === 'J' ? abJahrSchritte(Number(k.slice(1))) : abMonatSchritte(k); return { L, n: L.filter((x) => abOk(k, x)).length }; }
+function vAbschluss(k) {
+  const jahr = k[0] === 'J', y = jahr ? Number(k.slice(1)) : 0, D = abD(k), { L, n } = abStand(k);
+  const auswahl = jahr ? [1, 2, 3].map((d) => new Date().getFullYear() - d).filter((j) => abMonate(j).length || j === y).map((j) => ['J' + j, String(j)])
+    : [0, -1, -2, -3, -4, -5].map((d) => monPlus(monPlus(heute().slice(0, 7), -1), d)).filter((m) => monEnde(m) >= (abStart() || '9')).map((m) => [m, MON_K[Number(m.slice(5, 7)) - 1] + ' ' + m.slice(2, 4)]);
+  const li = L.map((x) => { const ok = abOk(k, x), hk = !x.ok && D.haken[x.id];
+    return `<li><span class="dot ${ok ? 'good' : x.c || 'warn'}"></span><div class="grow"><div><b>${x.t}</b>${ok ? ' <span class="pill good">erledigt</span>' : ''}</div><div class="small muted">${x.s}</div></div><div class="btns" style="margin:0;flex-direction:column;align-items:stretch">${!ok && x.act ? `<button data-act="${x.act}" data-k="${esc(x.k || '')}" data-id="${esc(x.id2 || '')}">${x.b}</button>` : ''}${x.ust && !x.ok ? `<button class="chip" data-act="st-done" data-k="ustva-${x.ust}" data-ab="${k}">Abgegeben</button>` : ''}${x.manuell && !x.ok ? `<button class="chip" data-act="ab-haken" data-k="${k}" data-id="${x.id}">${hk ? 'Doch offen' : 'Erledigt'}</button>` : ''}</div></li>`; }).join('');
+  openDlg(`${head(jahr ? `Jahresabschluss ${y}` : `Monatsabschluss ${monName(k)}`)}<div class="dlg-body">
+    ${auswahl.length > 1 ? `<div class="filters" role="group">${auswahl.map(([v, t]) => `<button class="chip" data-act="abschluss" data-k="${v}" aria-pressed="${v === k}">${t}${abFertig(v) ? ' ✓' : ''}</button>`).join('')}</div>` : ''}
+    <p style="margin-top:10px">${D.am ? `<span class="pill good">Fertig</span> Abgeschlossen am ${dat(D.am)}.` : `<span class="pill ${n === L.length ? 'good' : 'warn'}">${n} von ${L.length}</span> ${n === L.length ? `Alles erledigt. Schließ ${jahr ? 'das Jahr' : 'den Monat'} ab.` : 'Geh die Punkte von oben nach unten durch. Jeder Knopf führt direkt an die richtige Stelle.'}`}</p>
+    <div class="bar"><i class="${n === L.length ? '' : 'warn'}" style="width:${Math.round(n / L.length * 100)}%"></i></div>
+    <ul class="todo" style="margin-top:10px">${li}</ul><span id="abWeiter" data-k="${k}" hidden></span>
+    <p class="small muted" style="margin-top:10px">Die meisten Punkte hakt die App selbst ab, sobald sie erledigt sind. Wenn du über einen Knopf weggehst, kommst du über „Das musst du tun“ in der Übersicht oder den Reiter Steuern wieder hierher. Abschließen ist dein Zeichen, dass ${jahr ? 'das Jahr' : 'der Monat'} durch ist. Ändern kannst du danach trotzdem noch alles.</p>
+  </div><div class="dlg-foot">${D.am ? `<button data-act="ab-auf" data-k="${k}">Wieder öffnen</button>` : `<button class="primary" data-act="ab-fertig" data-k="${k}">${jahr ? 'Jahr' : 'Monat'} abschließen</button>`}</div>`);
+}
+/* Karte im Reiter Steuern */
+function vAbschlussKarte() {
+  const st = abStart(); if (!st) return '';
+  const m = abMonatDran() || monPlus(heute().slice(0, 7), -1), y = new Date().getFullYear() - 1, M = abStand(m), J = abMonate(y).length ? abStand('J' + y) : null;
+  return `<div class="card"><h2>Monats- und Jahresabschluss</h2>
+    <p class="small">Einmal im Monat alles in einem Rutsch: Kontoauszug, Belege, Rechnungen, Umsatzsteuer, Rücklage und Sicherung. Einmal im Jahr dazu Inventur, Anlagen und die Unterlagen für den Steuerberater.</p>
+    <ul class="todo"><li><span class="dot ${abFertig(m) ? 'good' : 'warn'}"></span><div class="grow"><b>${monName(m)}</b><div class="small muted">${abFertig(m) ? 'Abgeschlossen' : `${M.n} von ${M.L.length} Schritten erledigt`}</div></div><button${abFertig(m) ? '' : ' class="primary"'} data-act="abschluss" data-k="${m}">${abFertig(m) ? 'Ansehen' : M.n ? 'Weitermachen' : 'Starten'}</button></li>
+    ${J ? `<li><span class="dot ${abFertig('J' + y) ? 'good' : 'warn'}"></span><div class="grow"><b>Jahr ${y}</b><div class="small muted">${abFertig('J' + y) ? 'Abgeschlossen' : `${J.n} von ${J.L.length} Schritten erledigt`}</div></div><button data-act="abschluss" data-k="J${y}">${abFertig('J' + y) ? 'Ansehen' : J.n ? 'Weitermachen' : 'Starten'}</button></li>` : ''}</ul></div>`;
+}
+
+/* ---------- Auftrag vom Angebot bis zum Geld ---------- */
+/* Zu einem Angebot oder einer Rechnung die ganze Kette: Angebot, Zusage, Bestätigung, Lieferschein, Rechnung, verschickt, bezahlt */
+function kette(a, r) {
+  if (!a && r && r.ausAngebot) a = S.angebote.find((x) => x.id === r.ausAngebot) || null;
+  if (a && !r) r = S.rechnungen.find((x) => x.ausAngebot === a.id && x.typ !== 'gutschrift' && x.status !== 'storniert') || null;
+  const stR = r ? reStatus(r) : null, zu = a && ['angenommen', 'abgerechnet'].includes(a.status) || !!r;
+  const S1 = [];
+  if (a) {
+    S1.push({ t: 'Angebot', ok: true });
+    S1.push({ t: a.status === 'abgelehnt' ? 'Abgelehnt' : 'Zusage', ok: zu, nein: a.status === 'abgelehnt' });
+    S1.push({ t: 'Bestätigung', ok: !!a.ab, opt: true });
+  }
+  S1.push({ t: 'Lieferschein', ok: !!((a && a.ls) || (r && r.ls)), opt: true });
+  S1.push({ t: 'Rechnung', ok: !!r && zaehlt(r) });
+  S1.push({ t: 'Verschickt', ok: !!(r && (r.versendetAm || r.verschicktAnders)), opt: true });
+  S1.push({ t: 'Bezahlt', ok: !!stR && stR.k === 'bezahlt' });
+  let n = null;
+  if (a && a.status === 'abgelehnt') n = { t: 'Der Kunde hat abgelehnt. Hier geht es nicht weiter.' };
+  else if (a && !zu && anStatus(a).k === 'abgelaufen') n = { t: 'Das Angebot ist abgelaufen. Nachfragen, ob der Kunde noch will.', act: 'an-status', k: 'angenommen', id: a.id, b: 'Kunde hat zugesagt' };
+  else if (a && !zu && !a.versendetAm && !a.verschicktAnders) n = { t: 'Angebot an den Kunden schicken. Danach wartest du auf die Zusage.', act: 'mail', k: 'an', id: a.id, b: 'Per E-Mail schicken', b2: { act: 'schon-weg', k: 'an', id: a.id, b: 'Schon anders verschickt' } };
+  else if (a && !zu) n = { t: 'Warten auf die Antwort des Kunden. Sagt er zu, tipp hier.', act: 'an-status', k: 'angenommen', id: a.id, b: 'Kunde hat zugesagt' };
+  else if (a && !r) n = { t: `Auftrag ausführen und abrechnen.${a.ab ? '' : ' Wenn der Kunde es schriftlich braucht, vorher eine Auftragsbestätigung schicken.'}`, act: 'an-to-re', id: a.id, b: anAbschlaege(a).length ? 'Schlussrechnung schreiben' : 'Rechnung schreiben', b2: a.ab ? null : { act: 'abls', k: 'ab', dt: 'an', id: a.id, b: 'Auftragsbestätigung' } };
+  else if (r && r.status === 'entwurf') n = { t: 'Die Rechnung ist noch ein Entwurf. Prüfen und stellen, dann bekommt sie ihre Nummer.', act: 'open-re', id: r.id, b: 'Rechnung fertig machen' };
+  else if (r && stR.k === 'bezahlt') n = { t: 'Erledigt. Das Geld ist da.' };
+  else if (r && mahnenFaellig(r)) n = { t: `Der Kunde ist mit ${eur(offenBetrag(r))} im Verzug.`, act: 'mahnen', id: r.id, b: MAHN[mahnStufe(r) + 1].b };
+  else if (r && !r.versendetAm && !r.verschicktAnders && ['offen', 'ueberfaellig'].includes(stR.k)) n = { t: 'Rechnung an den Kunden schicken.', act: 'mail', k: 're', id: r.id, b: 'Per E-Mail schicken', b2: { act: 'schon-weg', k: 're', id: r.id, b: 'Schon anders verschickt' } };
+  else if (r && ['offen', 'ueberfaellig'].includes(stR.k)) n = { t: `Warten auf das Geld${r.faellig ? `, fällig ${dat(r.faellig)}` : ''}. Kommt es aufs Konto, ordnet die App es beim Kontoauszug zu. Du kannst es auch unten selbst eintragen.` };
+  return { a, r, S: S1, n };
+}
+function vKette(a, r) {
+  const K = kette(a, r);
+  if (!K.a && K.r && (K.r.typ === 'gutschrift' || K.r.extern || K.r.status === 'storniert')) return '';
+  const jetzt = K.S.findIndex((x) => !x.ok && !x.opt);
+  const btn = (x, p) => x ? `<button${p ? ' class="primary"' : ''} data-act="${x.act}" data-k="${x.k || ''}" data-t="${x.dt || ''}" data-id="${x.id}">${x.b}</button>` : '';
+  return `<div class="kette" aria-label="Ablauf des Auftrags">${K.S.map((x, i) => `<span class="${x.nein ? 'nein' : x.ok ? 'ok' : i === jetzt ? 'jetzt' : ''}${x.opt && !x.ok ? ' opt' : ''}">${x.ok ? '✓ ' : ''}${x.t}</span>`).join('')}</div>
+    ${K.n ? `<div class="card" style="background:var(--soft);border:0;margin:6px 0 12px"><b>Nächster Schritt:</b> ${K.n.t}${K.n.act ? `<div class="btns">${btn(K.n, true)}${btn(K.n.b2, false)}</div>` : ''}${K.a && K.r && K.a !== a ? `<p class="small" style="margin:6px 0 0">Aus <a href="#" data-act="open-an" data-id="${K.a.id}">Angebot ${esc(K.a.nr)}</a>.</p>` : ''}${K.a && K.r && K.r !== r ? `<p class="small" style="margin:6px 0 0">Dazu: <a href="#" data-act="open-re" data-id="${K.r.id}">${esc(docTitel(K.r))} ${esc(K.r.nr || '(Entwurf)')}</a>.</p>` : ''}</div>` : ''}`;
+}
+
+/* ---------- Beleg rein in einem Rutsch ---------- */
+/* Genau eine Ausgabe auf dem Konto mit gleichem Betrag in der Nähe des Datums: dann gehört sie dazu */
+function kontoFuerBeleg(b) {
+  const br = num(b.brutto); if (!br || ['bar', 'privat'].includes(b.zahlweg)) return null;
+  const t = (S.bank || []).filter((x) => num(x.betrag) < 0 && !x.belegId && !x.ohneBeleg && Math.abs(-num(x.betrag) - br) < 0.005 && Math.abs((Date.parse(x.datum) || 0) - (Date.parse(b.datum) || 0)) < 45 * 864e5);
+  return t.length === 1 ? t[0] : null;
+}
+/* Neue Kontobewegungen: Belege mit eindeutig passendem Betrag gleich verknüpfen */
+function belegeAutomatisch(liste) {
+  let n = 0;
+  for (const b of liste) { if (!fehltBeleg(b)) continue; const t = belegTreffer(b); if (t.length === 1 && !S.bank.some((y) => y !== b && y.belegId === t[0].id)) { b.belegId = t[0].id; t[0].buchungId = b.id; if (t[0].zahlweg === 'offen') t[0].zahlweg = 'konto'; n++; } }
+  return n;
+}
+function vBelegWeiter(b, bk) {
+  const ware = b.kategorie === 'Wareneinkauf' && lagerArtikel().length && !S.lager.some((x) => x.belegId === b.id);
+  const anl = anlageVorschlaege().some((x) => x.id === b.id);
+  openDlg(`${head('Beleg gespeichert')}<div class="dlg-body">
+    <ul class="checks"><li class="ok">${esc(b.lieferant || 'Beleg')} vom ${dat(b.datum)}, ${eur(num(b.brutto))}${b.kategorie ? ', ' + esc(b.kategorie) : ''}</li>
+    ${b.buchungId ? `<li class="ok">${bk ? 'Gleich verknüpft mit' : 'Gehört zu'} der Zahlung ${(() => { const x = S.bank.find((y) => y.id === b.buchungId); return x ? `vom ${dat(x.datum)} an ${esc(x.gegenpartei || 'Empfänger')}` : 'auf dem Konto'; })()}</li>` : ['bar', 'privat'].includes(b.zahlweg) ? `<li class="ok">${b.zahlweg === 'bar' ? 'Bar bezahlt' : 'Privat ausgelegt'}, kein Kontoabgleich nötig</li>` : '<li>Noch keine passende Zahlung auf dem Konto. Kommt der Kontoauszug, verknüpft die App den Beleg selbst, wenn der Betrag eindeutig passt.</li>'}</ul>
+    ${ware ? `<div class="card" style="margin-top:12px"><b>Ist das Ware fürs Lager?</b><p class="small muted" style="margin:4px 0 0">Dann buch die Menge gleich ein, sonst stimmt der Bestand nicht.</p><div class="btns"><button class="primary" data-act="lager-ein-be" data-id="${b.id}">Ware einbuchen</button></div></div>` : ''}
+    ${anl ? `<div class="card" style="margin-top:12px"><b>Das ist eine Anschaffung über 800 € netto.</b><p class="small muted" style="margin:4px 0 0">Sie wird über mehrere Jahre abgeschrieben und gehört ins Anlagenverzeichnis. Bis dahin zählt sie nicht als Ausgabe.</p><div class="btns"><button class="primary" data-act="anl-neu" data-id="${b.id}">Ins Anlagenverzeichnis</button></div></div>` : ''}
+  </div><div class="dlg-foot"><button data-act="new-be">Nächsten Beleg</button><button data-act="close">Fertig</button></div>`);
+}
+
+/* ---------- Feste Regeln für das Konto ---------- */
+/* S.regeln: [{ id, wort, aktion: 'ohne' | 'lieferant', grund, lieferant, kategorie }]
+   „ohne“: Buchung braucht keinen Beleg bzw. gehört zu keiner Rechnung. „lieferant“: Beleg dazu bekommt Lieferant und Kategorie. */
+function regelPasst(r, b) {
+  if (!r.wort || !(`${b.gegenpartei || ''} ${b.zweck || ''}`.toLowerCase().includes(r.wort.toLowerCase()))) return false;
+  if (r.aktion === 'ohne') return OHNE_AUS.includes(r.grund) ? b.betrag < 0 : OHNE_EIN.includes(r.grund) ? b.betrag > 0 : false;
+  return b.betrag < 0;
+}
+const regelFuer = (b, aktion) => (S.regeln || []).find((r) => (!aktion || r.aktion === aktion) && regelPasst(r, b)) || null;
+/* Nur Buchungen ohne Zuordnung; was der Nutzer schon zugeordnet hat, bleibt */
+function regelnAnwenden(liste) {
+  let n = 0;
+  for (const b of liste) { if (!bankOffen(b) || b.rechnungId || b.belegId) continue; const r = regelFuer(b, 'ohne'); if (r && !(b.betrag > 0 && bankTreffer(b).length)) { b.ohneBeleg = r.grund; b.regel = r.id; n++; } }
+  return n;
+}
+function vRegeln() {
+  const R = S.regeln || [], offen = S.bank.filter((b) => bankOffen(b) && regelFuer(b, 'ohne')).length;
+  openDlg(`${head('Feste Regeln für das Konto')}<form id="rgForm" class="dlg-body" autocomplete="off">
+    <p class="small muted" style="margin-top:0">Was immer gleich ist, ordnet die App selbst zu, sobald du den Kontoauszug hochlädst. Zum Beispiel: „Finanzamt“ braucht keinen Beleg, „Privat“ ist eine Privatentnahme, „PAYPAL *ADOBE“ ist Adobe mit Büro und Software.</p>
+    ${R.length ? `<ul class="list">${R.map((r) => { const n = S.bank.filter((b) => b.regel === r.id).length; return `<li style="display:flex;justify-content:space-between;align-items:center;gap:8px;padding:8px 0"><span>Wenn „<b>${esc(r.wort)}</b>“ drinsteht: ${r.aktion === 'ohne' ? esc(r.grund) : `Beleg von ${esc(r.lieferant || r.wort)}${r.kategorie ? ', ' + esc(r.kategorie) : ''}`}${n ? `<br><span class="small muted">${n} Buchung${n > 1 ? 'en' : ''} so zugeordnet</span>` : ''}</span><button type="button" class="del" data-act="regel-del" data-id="${r.id}" aria-label="Regel löschen">✕</button></li>`; }).join('')}</ul>` : '<p class="muted">Noch keine Regeln.</p>'}
+    ${offen ? `<div class="btns"><button type="button" class="primary" data-act="regel-los">Auf ${offen} offene Buchung${offen > 1 ? 'en' : ''} anwenden</button></div>` : ''}
+    <h3>Neue Regel</h3>
+    <div class="grid2">
+      <label class="full">Wenn im Namen oder Verwendungszweck steht<input name="wort" placeholder="z. B. Finanzamt"></label>
+      <label class="full">Dann<select name="was">
+        <optgroup label="Ausgabe braucht keinen Beleg, weil">${OHNE_AUS.map((g) => `<option value="o:${esc(g)}">${esc(g)}</option>`).join('')}</optgroup>
+        <optgroup label="Eingang gehört zu keiner Rechnung, weil">${OHNE_EIN.map((g) => `<option value="o:${esc(g)}">${esc(g)}</option>`).join('')}</optgroup>
+        <optgroup label="Ausgabe mit Beleg"><option value="l:">Lieferant und Kategorie für den Beleg vorschlagen</option></optgroup></select></label>
+      <label>Lieferant (nur beim Vorschlag)<input name="lieferant" list="lieferantenListe2"></label>
+      <datalist id="lieferantenListe2">${S.lieferanten.map((l) => `<option value="${esc(l.name)}">`).join('')}</datalist>
+      <label>Kategorie (nur beim Vorschlag)<select name="kategorie"><option value="">Bitte wählen</option>${KATEGORIEN.map((k) => `<option>${k}</option>`).join('')}</select></label>
+    </div>
+  </form><div class="dlg-foot"><button data-act="tab" data-k="bank">Zurück</button><button class="primary" data-act="regel-save">Regel speichern</button></div>`);
 }
 
 /* ---------- Firma ---------- */
@@ -2885,17 +3131,18 @@ function vLagerArtikel(id) {
     ${rows.length ? `<table class="tab"><tr><th>Datum</th><th>Was</th><th style="text-align:right">Menge</th><th style="text-align:right">Bestand</th><th></th></tr>${rows.slice(0, 60).map(({ x, n }) => `<tr><td>${dat(x.datum)}</td><td>${art[x.art] || ''}${x.text ? `<div class="small muted">${esc(x.text)}</div>` : ''}</td><td style="text-align:right">${x.art === 'inventur' ? 'gezählt' : (x.menge > 0 ? '+' : '') + mengeTxt(num(x.menge))}</td><td style="text-align:right">${mengeTxt(n)}</td><td>${x.id ? `<button class="del" data-act="lager-weg" data-id="${x.id}" aria-label="Eintrag löschen">✕</button>` : ''}</td></tr>`).join('')}</table>` : '<p class="muted">Noch keine Bewegungen.</p>'}
   </div><div class="dlg-foot"><button data-act="lager">Zurück</button><button data-act="art-edit" data-id="${a.id}">Artikel bearbeiten</button><button class="primary" data-act="lager-ein" data-id="${a.id}">+ Wareneingang</button></div>`);
 }
-function vWareneingang(id) {
+function vWareneingang(id, belegId) {
   const A = lagerArtikel(); if (!A.length) return vLager();
-  const a = A.find((x) => x.id === id) || A[0];
+  const a = A.find((x) => x.id === id) || A[0], vb = S.belege.find((b) => b.id === belegId);
   const belege = S.belege.filter((b) => b.kategorie === 'Wareneinkauf').sort((x, y) => (y.datum || '').localeCompare(x.datum || '')).slice(0, 30);
+  if (vb && !belege.includes(vb)) belege.unshift(vb);
   openDlg(`${head('Wareneingang')}<form id="weForm" class="dlg-body" autocomplete="off"><div class="grid2">
     <label class="full">Artikel<select name="art">${A.map((x) => `<option value="${x.id}"${x.id === a.id ? ' selected' : ''}>${esc(x.name)}</option>`).join('')}</select></label>
     <label class="full">Was ist das?<select name="was"><option value="eingang">Neue Lieferung</option><option value="anfang">Anfangsbestand: Ware, die schon vorher da war</option></select></label>
     <label>Menge<input name="menge" inputmode="decimal" placeholder="z. B. 10"></label>
     <label>Einkaufspreis netto € je Stück<input name="ek" inputmode="decimal" value="${a.ek ? esc(String(a.ek).replace('.', ',')) : ''}"></label>
-    <label>Datum<input type="date" name="datum" value="${heute()}"></label>
-    ${belege.length ? `<label>Beleg dazu (optional)<select name="beleg"><option value="">keiner</option>${belege.map((b) => `<option value="${b.id}">${dat(b.datum)} ${esc(b.lieferant || 'Beleg')} ${eur(num(b.brutto))}</option>`).join('')}</select></label>` : ''}
+    <label>Datum<input type="date" name="datum" value="${vb ? esc(vb.datum) : heute()}"></label>
+    ${belege.length ? `<label>Beleg dazu (optional)<select name="beleg"><option value="">keiner</option>${belege.map((b) => `<option value="${b.id}"${vb === b ? ' selected' : ''}>${dat(b.datum)} ${esc(b.lieferant || 'Beleg')} ${eur(num(b.brutto))}</option>`).join('')}</select></label>` : ''}
     <label class="full">Notiz (optional)<input name="text" placeholder="z. B. Lieferant, Lieferschein-Nr."></label>
   </div><p class="small muted">Die Rechnung des Lieferanten lädst du wie immer als Beleg hoch, Kategorie Wareneinkauf. Hier geht es nur um die Menge im Lager.</p>
   </form><div class="dlg-foot"><button data-act="lager">Zurück</button><button class="primary" data-act="lager-ein-save">Buchen</button></div>`);
@@ -3448,6 +3695,7 @@ function vDetailAn(id) {
   const st = anStatus(a);
   openDlg(`${head('Angebot ' + esc(a.nr))}<div class="dlg-body">
     <p><span class="pill ${st.c}">${st.t}</span></p>
+    ${vKette(a, null)}
     ${kopfDaten(a)}
     ${anAbschlaege(a).length ? `<p class="small">Abschläge: ${anAbschlaege(a).map((x) => `<a href="#" data-act="open-re" data-id="${x.id}">${esc(x.nr || 'Entwurf')}</a> ${eur(summen(x).brutto)}${x.status === 'bezahlt' ? ' (bezahlt)' : ''}`).join(', ')}</p>` : ''}
     <p class="small muted">Vom ${dat(a.datum)}, gültig bis ${dat(a.gueltigBis)}${a.versendetAm ? `, per E-Mail verschickt am ${dat(a.versendetAm)}` : ''}${a.ab ? `. Auftragsbestätigung ${esc(a.ab.nr)} vom ${dat(a.ab.datum)}` : ''}${a.ls ? `. Lieferschein ${esc(a.ls.nr)}` : ''}</p>
@@ -3475,6 +3723,7 @@ function vDetailRe(id) {
   const korr = S.rechnungen.filter((g) => g.typ === 'gutschrift' && g.teil && g.stornoVon === r.id && zaehlt(g));
   openDlg(`${head((r.extern ? 'Rechnung ' : docTitel(r) + ' ') + esc(r.nr))}<div class="dlg-body">
     <p><span class="pill ${st.c}">${st.t}</span>${r.extern ? ' <span class="pill grey">Hinterlegt</span>' : ''}</p>
+    ${vKette(null, r)}
     ${kopfDaten(r)}
     <p class="small muted">Rechnungsdatum ${dat(r.datum)}${r.leistungsdatum ? ', Leistung ' + dat(r.leistungsdatum) : ''}${r.faellig && r.typ !== 'gutschrift' ? ', zahlbar bis ' + dat(r.faellig) : ''}${r.bezahltAm ? ', bezahlt am ' + dat(r.bezahltAm) : ''}${r.versendetAm ? ', per E-Mail verschickt am ' + dat(r.versendetAm) : ''}${r.ls ? `. Lieferschein ${esc(r.ls.nr)}` : ''}</p>
     ${hatSkonto(r) && ['offen', 'ueberfaellig'].includes(st.k) ? `<p class="small">${tageBis(plusTage(r.datum, num(r.skontoTage))) >= 0 ? `Skonto: ${String(r.skontoProz).replace('.', ',')} % bis ${dat(plusTage(r.datum, num(r.skontoTage)))}, dann ${eur(r2(summen(r).brutto * (1 - num(r.skontoProz) / 100)))}.` : 'Die Skonto-Frist ist abgelaufen.'}</p>` : ''}
@@ -3910,9 +4159,13 @@ async function saveBeleg() {
   const i = S.belege.findIndex((x) => x.id === b.id);
   if (i >= 0) S.belege[i] = b; else S.belege.push(b);
   b.hochgeladen = b.hochgeladen || heute();
+  const bk = neu && !b.buchungId ? kontoFuerBeleg(b) : null;
+  if (bk) { b.buchungId = bk.id; if (b.zahlweg === 'offen') b.zahlweg = 'konto'; }
   for (const x of S.bank || []) { if (x.belegId === b.id && x.id !== b.buchungId) x.belegId = null; if (b.buchungId && x.id === b.buchungId) x.belegId = b.id; }
   merkeLieferant(b.lieferant, b.kategorie, b.rc);
-  await save(); closeDlg(); tab = 'belege'; render(); toast(neu ? 'Beleg gespeichert' : 'Gespeichert');
+  await save(); tab = 'belege'; render();
+  if (neu && ((b.kategorie === 'Wareneinkauf' && lagerArtikel().length) || anlageVorschlaege().some((x) => x.id === b.id))) return vBelegWeiter(b, bk);
+  closeDlg(); toast(neu ? (bk ? `Beleg gespeichert und mit der Zahlung vom ${dat(bk.datum)} verknüpft` : 'Beleg gespeichert') : 'Gespeichert');
 }
 function zeigeDatei(file) {
   const pv = $('#filePrev'); if (!pv) return;
@@ -4899,7 +5152,7 @@ const ACT = {
     const r = S.rechnungen.find((x) => x.id === el.dataset.id); if (!r) return;
     const g = JSON.parse(JSON.stringify(r));
     Object.assign(g, { id: uid(), typ: 'gutschrift', teil: true, nr: '', datum: heute(), status: 'entwurf', stornoVon: r.id, hinweis: '', ausAngebot: null, art: '', abzuege: null, artSchluss: false, skontoProz: 0, skontoTage: 0, neu: true });
-    for (const k of ['bezahltAm', 'stornoId', 'zahlungen', 'mahnungen', 'versendetAm', 'ls', 'gestelltAm', 'vorlage']) delete g[k];
+    for (const k of ['bezahltAm', 'stornoId', 'zahlungen', 'mahnungen', 'versendetAm', 'verschicktAnders', 'ls', 'gestelltAm', 'vorlage']) delete g[k];
     g.positionen = g.positionen.map((p) => Object.assign(p, { menge: -Math.abs(num(p.menge)) }));
     edit = g; vEditor();
   },
@@ -4975,7 +5228,7 @@ const ACT = {
   'del-be': async (el) => { if (!confirm('Beleg löschen?')) return; const b = S.belege.find((x) => x.id === el.dataset.id); if (b.dateiId) await idbDel('datei:' + b.dateiId); for (const x of S.bank || []) if (x.belegId === b.id) x.belegId = null; S.belege = S.belege.filter((x) => x.id !== b.id); await save(); closeDlg(); render(); },
   'bk-beleg': (el) => {
     const x = S.bank.find((y) => y.id === el.dataset.id); if (!x) return;
-    const l = S.lieferanten.find((y) => (x.gegenpartei || '').toLowerCase().includes(y.name.toLowerCase()));
+    const rg = regelFuer(x, 'lieferant'), l = rg ? Object.assign({}, S.lieferanten.find((y) => y.name.toLowerCase() === (rg.lieferant || '').toLowerCase()) || {}, { name: rg.lieferant || rg.wort, kategorie: rg.kategorie }) : S.lieferanten.find((y) => (x.gegenpartei || '').toLowerCase().includes(y.name.toLowerCase()));
     vBeleg({ id: uid(), datum: x.datum, lieferant: l ? l.name : x.gegenpartei || '', brutto: -num(x.betrag), ustSatz: 19, vorsteuer: '', kategorie: (l && l.kategorie) || '', rc: (l && l.rc) || '', notiz: x.zweck || '', zahlweg: 'konto', buchungId: x.id });
     edit._neu = true; calcVst();
   },
@@ -5045,8 +5298,12 @@ const ACT = {
   },
   'bk-ohne': async (el) => {
     const b = S.bank.find((x) => x.id === el.dataset.id); if (!b) return;
-    if (el.dataset.k) { const g = ($('#ohneGrund') || {}).value; if (!g) return toast('Bitte einen Grund wählen.'); b.ohneBeleg = g; } else delete b.ohneBeleg;
-    await save(); vBuchung(b.id); render(); toast(b.ohneBeleg ? 'Markiert' : 'Wieder offen');
+    let nR = -1;
+    if (el.dataset.k) {
+      const g = ($('#ohneGrund') || {}).value; if (!g) return toast('Bitte einen Grund wählen.'); b.ohneBeleg = g;
+      if (($('#ohneRegel') || {}).checked && b.gegenpartei) { S.regeln = (S.regeln || []).concat({ id: uid(), wort: b.gegenpartei.trim(), aktion: 'ohne', grund: g, lieferant: '', kategorie: '' }); b.regel = S.regeln[S.regeln.length - 1].id; nR = regelnAnwenden(S.bank); }
+    } else { delete b.ohneBeleg; delete b.regel; }
+    await save(); vBuchung(b.id); render(); toast(!b.ohneBeleg ? 'Wieder offen' : nR >= 0 ? `Markiert und als Regel gemerkt${nR ? `, ${nR} weitere Buchung${nR > 1 ? 'en' : ''} gleich mit` : ''}` : 'Markiert');
   },
   'open-bk': (el) => vBuchung(el.dataset.id),
   'bk-zu': async (el) => {
@@ -5076,7 +5333,35 @@ const ACT = {
   'restore-ok': sicherungEinspielen,
   'vorher-zurueck': vorherZurueck,
   'vorher-weg': vorherWeg,
-  paket: (el) => paket(el.dataset.k),
+  paket: async (el) => { await paket(el.dataset.k); const y = Number(el.dataset.k); if (y < new Date().getFullYear()) { abDaten('J' + y).haken.paket = heute(); await save(); } },
+  abschluss: (el) => vAbschluss(el.dataset.k || abMonatDran() || monPlus(heute().slice(0, 7), -1)),
+  'ab-haken': async (el) => { const D = abDaten(el.dataset.k), i = el.dataset.id; if (D.haken[i]) delete D.haken[i]; else D.haken[i] = heute(); await save(); render(); vAbschluss(el.dataset.k); },
+  'ab-fertig': async (el) => {
+    const k = el.dataset.k, { L, n } = abStand(k);
+    if (n < L.length && !confirm(`Noch ${L.length - n} Punkt${L.length - n > 1 ? 'e' : ''} offen. Trotzdem abschließen?`)) return;
+    abDaten(k).am = heute(); await save(); render(); vAbschluss(k); toast(k[0] === 'J' ? `Jahr ${k.slice(1)} abgeschlossen` : `${monName(k)} abgeschlossen`);
+  },
+  'ab-auf': async (el) => { delete abDaten(el.dataset.k).am; await save(); render(); vAbschluss(el.dataset.k); },
+  'ab-bank': () => { filter.bank = 'zuordnen'; tab = 'bank'; closeDlg(); render(); window.scrollTo(0, 0); },
+  'ab-ust': (el) => { if (el.dataset.k) stZr = el.dataset.k; tab = 'steuern'; closeDlg(); render(); window.scrollTo(0, 0); },
+  'ab-rueck': () => { tab = 'start'; closeDlg(); render(); const i = $('#ruIst'); if (i) { i.scrollIntoView({ block: 'center' }); i.focus(); } },
+  'ab-inv': (el) => { filter.invTag = el.dataset.k; vInventur(); },
+  'ab-anl': (el) => { filter.anlJahr = el.dataset.k; vAnlagen(); },
+  'ab-gewinn': (el) => { stJahr = Number(el.dataset.k); tab = 'steuern'; closeDlg(); render(); window.scrollTo(0, 0); },
+  'ab-paket': async (el) => { const y = el.dataset.k; await paket(y, !!S.steuer.berater); abDaten('J' + y).haken.paket = heute(); await save(); render(); vAbschluss('J' + y); },
+  'schon-weg': async (el) => { const an = el.dataset.k === 'an', d = (an ? S.angebote : S.rechnungen).find((x) => x.id === el.dataset.id); if (!d) return; d.verschicktAnders = heute(); await save(); render(); an ? vDetailAn(d.id) : vDetailRe(d.id); },
+  'lager-ein-be': (el) => vWareneingang('', el.dataset.id),
+  regeln: vRegeln,
+  'regel-save': async () => {
+    const f = $('#rgForm'), wort = f.elements.wort.value.trim(), was = f.elements.was.value;
+    if (wort.length < 3) return toast('Bitte mindestens 3 Buchstaben eintragen, sonst passt die Regel auf zu viel.');
+    const r = { id: uid(), wort, aktion: was.startsWith('o:') ? 'ohne' : 'lieferant', grund: was.startsWith('o:') ? was.slice(2) : '', lieferant: f.elements.lieferant.value.trim(), kategorie: f.elements.kategorie.value };
+    if (r.aktion === 'lieferant' && !r.kategorie) return toast('Bitte eine Kategorie wählen.');
+    S.regeln = (S.regeln || []).concat(r);
+    const n = regelnAnwenden(S.bank); await save(); render(); vRegeln(); toast(n ? `Regel gespeichert, ${n} Buchung${n > 1 ? 'en' : ''} zugeordnet` : 'Regel gespeichert');
+  },
+  'regel-del': async (el) => { if (!confirm('Regel löschen? Schon zugeordnete Buchungen bleiben so.')) return; S.regeln = (S.regeln || []).filter((r) => r.id !== el.dataset.id); await save(); render(); vRegeln(); },
+  'regel-los': async () => { const n = regelnAnwenden(S.bank); await save(); render(); vRegeln(); toast(`${n} Buchung${n === 1 ? '' : 'en'} zugeordnet`); },
   'speicher-fest': async () => { const ok = await speicherFest(); render(); toast(ok ? 'Der Browser behält die Daten jetzt dauerhaft.' : 'Der Browser hat abgelehnt. Lege die App auf den Home-Bildschirm und sichere regelmäßig.'); },
   modus: async (el) => { S.modus = el.dataset.k; await save(); tab = 'start'; closeDlg(); render(); window.scrollTo(0, 0); toast(privat() ? 'Nur private Steuererklärung' : 'Mit Firma'); },
   'est-open': () => { tab = 'est'; closeDlg(); render(); window.scrollTo(0, 0); },
@@ -5089,7 +5374,7 @@ const ACT = {
   'est-print': estPrint,
   'est-csv': estCsv,
   'st-jahr': (el) => { stJahr = Number(el.dataset.k); render(); },
-  'st-done': async (el) => { const k = el.dataset.k; if (S.steuer.erledigt[k]) delete S.steuer.erledigt[k]; else S.steuer.erledigt[k] = heute(); await save(); render(); toast(S.steuer.erledigt[k] ? 'Als erledigt markiert' : 'Wieder offen'); },
+  'st-done': async (el) => { const k = el.dataset.k; if (S.steuer.erledigt[k]) delete S.steuer.erledigt[k]; else S.steuer.erledigt[k] = heute(); await save(); render(); if (el.dataset.ab) vAbschluss(el.dataset.ab); toast(S.steuer.erledigt[k] ? 'Als erledigt markiert' : 'Wieder offen'); },
   'st-copy': async (el) => { try { await navigator.clipboard.writeText(el.dataset.k); toast(`${el.dataset.k} kopiert`); } catch (err) { toast('Kopieren geht hier nicht, bitte abtippen.'); } },
   'st-csv': (el) => stCsv(el.dataset.k),
   'st-xml': (el) => stXml(el.dataset.k),
