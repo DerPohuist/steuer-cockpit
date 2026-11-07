@@ -244,10 +244,11 @@ function leer() {
     firma: { name: '', inhaber: '', strasse: '', plz: '', ort: '', steuernr: '', ustid: '', email: '', tel: '', iban: '', bic: '', bank: '', rechtsform: '', registergericht: '', registernr: '', logo: '', kleinunternehmer: false, gruendung: '', turnus: 'monat', dauerfrist: false, zahlungsziel: 14, angebotTage: 30, basiszins: 1.27, skontoProz: '', skontoTage: '', nummern: {} },
     angebote: [], rechnungen: [], belege: [], kunden: [], lieferanten: [], bank: [], vorlagen: [], artikel: [], lager: [], anlagen: [], zaehler: {}, letzteSicherung: null,
     steuer: { versteuerung: 'soll', hebesatz: 400, berater: false, svz: 0, vzEst: 0, vzGew: 0, erledigt: {}, ruecklageIst: '', kalVorher: 3, kalRe: true, skr: '03', beraterNr: '', mandantNr: '' },
-    est: {}
+    est: {}, modus: ''
   };
 }
 let S = leer();
+const privat = () => S.modus === 'privat';
 let tab = 'start', filter = {};
 
 async function load() {
@@ -935,15 +936,29 @@ function bwaPrint() {
 /* ---------- Einkommensteuererklärung Schritt für Schritt ---------- */
 /* Werte je Jahr. Quellen: EStG in der Fassung für das jeweilige Jahr, BMF-Vordruckmuster. Alles Ausfüllhilfe, keine Steuerberatung. */
 const EST_WERTE = {
-  2025: { kfb: 9600, kindergeld: 255, spb: 1000, anPausch: 1230, saPausch: 36, km1: 0.30, km21: 0.38, hoTag: 6, hoMax: 1260, avHoechst: 29344, sonstAN: 1900, sonstSelbst: 2800, kibe: 0.8, kibeMax: 4800, alleinerz: 4260, alleinerzKind: 240 },
-  2026: { kfb: 9756, kindergeld: 259, spb: 1000, anPausch: 1230, saPausch: 36, km1: 0.38, km21: 0.38, hoTag: 6, hoMax: 1260, avHoechst: 30826, sonstAN: 1900, sonstSelbst: 2800, kibe: 0.8, kibeMax: 4800, alleinerz: 4260, alleinerzKind: 240 }
+  2025: { kfb: 9600, kindergeld: 255, spb: 1000, anPausch: 1230, saPausch: 36, km1: 0.30, km21: 0.38, hoTag: 6, hoMax: 1260, avHoechst: 29344, sonstAN: 1900, sonstSelbst: 2800, kibe: 0.8, kibeMax: 4800, alleinerz: 4260, alleinerzKind: 240, vma: [14, 28], uhMax: 12096, avGrund: 175, avMax: 2100, realsplit: 13805 },
+  2026: { kfb: 9756, kindergeld: 259, spb: 1000, anPausch: 1230, saPausch: 36, km1: 0.38, km21: 0.38, hoTag: 6, hoMax: 1260, avHoechst: 30826, sonstAN: 1900, sonstSelbst: 2800, kibe: 0.8, kibeMax: 4800, alleinerz: 4260, alleinerzKind: 240, vma: [14, 28], uhMax: 12348, avGrund: 175, avMax: 2100, realsplit: 13805 }
 };
 const estW = (j) => EST_WERTE[Math.min(Math.max(j, 2025), 2026)];
 /* Zeilen der Formulare. Stand Formular 2025; für spätere Jahre kann sich die Zeile verschieben, das Feld heißt aber gleich. */
 /* [Anlage, Zeile, Bezeichnung, Kennzahl, geprüft]. Stand Formular 2025, abgeglichen mit den BMF-Vordrucken 2025. Bei 0 ist die Zeile nicht sicher belegt. */
 const ZEILEN = {
   'n.brutto': ['N', 5, 'Bruttoarbeitslohn', 110, 1], 'n.lst': ['N', 6, 'Lohnsteuer', 140, 1], 'n.soli': ['N', 7, 'Solidaritätszuschlag', 150, 1], 'n.kist': ['N', 8, 'Kirchensteuer Arbeitnehmer', 142, 1],
-  'n.fahrt': ['N', '27–30', 'Erste Tätigkeitsstätte: Adresse, aufgesucht an Tagen, einfache Entfernung', '', 1], 'n.ho': ['N', '58/59', 'Homeoffice-Pauschale: Anzahl der Tage', '', 0],
+  'n.fahrt': ['N', '27–30', 'Erste Tätigkeitsstätte: Adresse, aufgesucht an Tagen, einfache Entfernung', '', 1], 'n.ho': ['N', '58/59', 'Homeoffice-Tagespauschale: Anzahl der Tage (Zeile 58 ohne Fahrt zur Arbeit, Zeile 59 mit Fahrt)', '335/336', 1],
+  'n.stkl': ['N', 4, 'Steuerklasse laut Lohnsteuerbescheinigung', 168, 1], 'n.kug': ['N', 20, 'Kurzarbeitergeld, Zuschuss zum Mutterschaftsgeld (Lohnsteuerbescheinigung Nr. 15)', 119, 0],
+  'n.abf': ['N', 17, 'Entschädigung (Abfindung) oder Arbeitslohn für mehrere Jahre (Lohnsteuerbescheinigung Nr. 10)', 165, 0], 'n.abfSt': ['N', '', 'Steuer auf die Abfindung (Lohnsteuerbescheinigung Nr. 11 bis 13), in ELSTER beim Feld der Abfindung angeben', '', 0],
+  'n.agFrei': ['N', 51, 'Arbeitgeberleistungen für den Arbeitsweg, steuerfrei (Nr. 17), z. B. Jobticket', 290, 1], 'n.agPausch': ['N', 51, 'Arbeitgeberleistungen für den Arbeitsweg, pauschal besteuert (Nr. 18)', 295, 1],
+  'n.gew': ['N', 53, 'Beiträge zu Berufsverbänden (Gewerkschaft)', 310, 1], 'n.az': ['N', 57, 'Häusliches Arbeitszimmer (Jahrespauschale)', 325, 1],
+  'n.reise': ['N', '66–69', 'Reisekosten: Fahrt, Übernachtung, Nebenkosten (Gesamtsumme)', 410, 1], 'n.reiseErst': ['N', 71, 'Reisekosten vom Arbeitgeber steuerfrei ersetzt (Nr. 20)', 420, 1],
+  'n.vma8': ['N', 72, 'Verpflegung: Tage mit mehr als 8 Stunden unterwegs', 470, 1], 'n.vmaAnAb': ['N', 73, 'Verpflegung: An- und Abreisetage', 471, 1], 'n.vma24': ['N', 74, 'Verpflegung: Tage mit 24 Stunden unterwegs', 472, 1], 'n.vmaKuerz': ['N', 75, 'Kürzung wegen gestellter Mahlzeiten', 473, 1],
+  'dhh.miete': ['N-Doppelte Haushaltsführung', '', 'Kosten der Unterkunft am Arbeitsort', '', 0], 'dhh.fahrten': ['N-Doppelte Haushaltsführung', '', 'Familienheimfahrten: Anzahl und einfache Entfernung', '', 0], 'dhh.sonst': ['N-Doppelte Haushaltsführung', '', 'Weitere Kosten (Verpflegung erste 3 Monate, Umzug)', '', 0], 'dhh.erst': ['N-Doppelte Haushaltsführung', '', 'Vom Arbeitgeber steuerfrei ersetzt (Nr. 21)', '', 0],
+  'le.betrag': ['ESt 1 A', '', 'Einkommensersatzleistungen (Elterngeld, Krankengeld, Arbeitslosengeld, Mutterschaftsgeld)', '', 0],
+  'so.leistung': ['SO', 18, 'Leistungen: Summe der Einnahmen', 164, 1], 'so.leistungWk': ['SO', 19, 'Werbungskosten zu den Leistungen', 176, 1], 'so.krypto': ['SO', 45, 'Veräußerung von Kryptowerten', 108, 1],
+  'so.verkauf': ['SO', 58, 'Gewinn/Verlust aus privaten Verkäufen (Krypto, Gold, andere Wirtschaftsgüter)', 114, 1], 'so.grund': ['SO', 43, 'Gewinn/Verlust aus dem Verkauf von Grundstücken und Wohnungen', 110, 1],
+  'so.leistungP': ['SO', 18, 'Leistungen: Summe der Einnahmen (Partner)', 165, 1], 'so.leistungWkP': ['SO', 19, 'Werbungskosten zu den Leistungen (Partner)', 177, 1], 'so.verkaufP': ['SO', 58, 'Gewinn/Verlust aus privaten Verkäufen (Partner)', 115, 1], 'so.grundP': ['SO', 43, 'Gewinn/Verlust aus Grundstücksverkäufen (Partner)', 111, 1],
+  'av.beitrag': ['AV', '', 'Altersvorsorgebeiträge (Riester) laut Bescheinigung des Anbieters, mit Anbieter- und Vertragsnummer', '', 0],
+  'u.person': ['Unterhalt', 19, 'Unterstützte Person: Name, Identifikationsnummer', '', 1], 'u.zeit': ['Unterhalt', 13, 'Unterstützungszeitraum', '', 1], 'u.betrag': ['Unterhalt', 15, 'Höhe der Unterhaltszahlungen (ohne Bargeld)', '', 1], 'u.kv': ['Unterhalt', 41, 'Darin übernommene Basis-Kranken- und Pflegeversicherung', '', 1], 'u.eink': ['Unterhalt', '31–40', 'Eigene Einkünfte und Bezüge der unterstützten Person', '', 1],
+  'sa.realsplit': ['Sonderausgaben', '', 'Unterhalt an geschiedenen oder dauernd getrennt lebenden Ehepartner (mit Anlage U)', '', 0],
   'n.am': ['N', 56, 'Arbeitsmittel', 320, 1], 'n.fb': ['N', 60, 'Fortbildungskosten', 330, 1], 'n.sonst': ['N', 64, 'Weitere Werbungskosten', 380, 1],
   'g.gewinn': ['G', '4–6', 'Gewinn aus Gewerbebetrieb (Einzelunternehmen)', 10, 0], 'g.mess': ['G', 51, 'Gewerbesteuer-Messbetrag (§ 35 EStG)', 64, 1], 'g.gezahlt': ['G', 52, 'Tatsächlich zu zahlende Gewerbesteuer', 66, 1],
   's.gewinn': ['S', 4, 'Gewinn aus freiberuflicher Tätigkeit', 100, 1],
@@ -973,9 +988,12 @@ const BEREICHE = [
   ['gewerbe', 'Selbständig oder Gewerbe', 'Einkünfte aus deiner Firma. Die Zahlen kommen aus den Rechnungen und Belegen in dieser App.'],
   ['n', 'Angestellt (Lohn oder Gehalt)', 'Auch Minijob mit Lohnsteuerkarte, Teilzeit, Nebenjob.'],
   ['v', 'Vermietung', 'Wohnung, Haus oder Zimmer vermietet.'],
+  ['le', 'Elterngeld, Krankengeld, Arbeitslosengeld', 'Auch Mutterschaftsgeld, Insolvenzgeld oder Übergangsgeld.'],
   ['kap', 'Zinsen, Dividenden, ETFs', 'Kapitalerträge bei Bank oder Broker.'],
+  ['so', 'Krypto, Gold, private Verkäufe', 'Etwas kurz nach dem Kauf mit Gewinn verkauft, oder gelegentliche Nebeneinnahmen.'],
   ['r', 'Rente', 'Gesetzliche oder andere Rente.'],
   ['kind', 'Kinder', 'Kinder, für die du Kindergeld bekommst.'],
+  ['u', 'Unterhalt', 'Du unterstützt Eltern oder ein Kind ohne Kindergeld, oder zahlst Unterhalt an einen Ex-Partner.'],
   ['agb', 'Krankheit, Behinderung, Pflege', 'Hohe Krankheitskosten, Behindertenausweis, Pflege eines Angehörigen.'],
   ['hh', 'Haushaltshilfe, Handwerker', 'Reinigungskraft, Gärtner, Reparaturen in der Wohnung, Nebenkostenabrechnung.']
 ];
@@ -986,28 +1004,37 @@ const UNTERLAGEN = {
   v: ['Mietverträge und Mieteinnahmen', 'Nebenkostenabrechnung', 'Darlehen: Zinsbescheinigung der Bank', 'Grundsteuerbescheid, Versicherungen', 'Rechnungen für Reparaturen', 'Kaufvertrag (für die Abschreibung)'],
   kap: ['Jahressteuerbescheinigung jeder Bank und jedes Brokers', 'Erträgnisaufstellung ausländischer Broker'],
   r: ['Rentenbezugsmitteilung oder Rentenbescheid', 'Mitteilung über die Rentenanpassung'],
+  le: ['Bescheinigung der Elterngeldstelle', 'Bescheinigung der Krankenkasse über das Krankengeld', 'Bescheid oder Bescheinigung der Agentur für Arbeit'],
+  so: ['Kauf- und Verkaufsbelege mit Datum', 'Bericht aus einem Krypto-Steuer-Programm oder Liste aller Käufe und Verkäufe der Börse'],
+  u: ['Überweisungsbelege der Unterhaltszahlungen', 'Angaben zu Einkommen und Vermögen der unterstützten Person', 'Zustimmung des Ex-Partners (Anlage U)'],
   kind: ['Steuer-Identifikationsnummer der Kinder', 'Rechnungen der Kita oder Tagesmutter (bezahlt per Überweisung)', 'Schulgeld-Bescheinigung'],
-  vorsorge: ['Bescheinigung der Krankenkasse über die Beiträge', 'Beitragsbescheinigung Rürup oder Rentenversicherung', 'Beitragsrechnungen Haftpflicht, Unfall, Risikoleben'],
+  vorsorge: ['Bescheinigung der Krankenkasse über die Beiträge', 'Beitragsbescheinigung Rürup oder Rentenversicherung', 'Beitragsrechnungen Haftpflicht, Unfall, Risikoleben', 'Riester: Bescheinigung des Anbieters über die Beiträge'],
   sonder: ['Spendenquittungen (bis 300 € reicht der Kontoauszug)', 'Kirchensteuer-Zahlungen außerhalb des Lohns', 'Rechnungen eigener Ausbildung'],
   agb: ['Behindertenausweis oder Bescheid', 'Rechnungen für Medikamente, Brille, Zahnarzt mit Zuzahlungen', 'Nachweis Pflegegrad bei Pflege eines Angehörigen'],
   hh: ['Nebenkostenabrechnung (haushaltsnahe Anteile)', 'Handwerkerrechnungen, per Überweisung bezahlt', 'Minijob-Zentrale: Bescheinigung über die Haushaltshilfe']
 };
 
 function estLeer() {
-  return { schritt: 'start', person: { veranlagung: 'einzel', kirche: false, kiSatz: 9, kirchePartner: false, alleinerz: false }, bereiche: { gewerbe: !!S.firma.rechtsform },
+  return { schritt: 'start', person: { veranlagung: 'einzel', kirche: false, kiSatz: 9, kirchePartner: false, alleinerz: false }, bereiche: { gewerbe: !!S.firma.rechtsform && !privat(), n: privat() },
     gew: { quelle: 'app', manuell: null, anschaffung: null, afa: null, kfz: null, hoTage: null, mess: null, gewGezahlt: null, ustFa: null, ustErst: null },
     n: [], v: [], kap: { guenstiger: false, mit: null, spb: null, ohne: null, kest: null, soli: null, kist: null }, r: [], kinder: [],
     vor: { kvPriv: null, pvPriv: null, kvFrei: null, pvFrei: null, rvEigen: null, sonst: null, selbstZahler: true, partnerKvPriv: null },
     sa: { kistG: null, kistE: null, spenden: null, parteien: null, ausbildung: null }, agb: { gdb: 0, gdbP: 0, pflegegrad: 0, krank: null }, hh: { minijob: null, dienst: null, handwerk: null },
-    vz: { est: null }, dok: [] };
+    vz: { est: null }, dok: [], le: { ich: null, partner: null }, so: {}, u: [], av: [] };
 }
+/* Ältere Stände um neue Felder ergänzen */
+function estFelder(E) {
+  E.le = E.le || { ich: null, partner: null }; E.so = E.so || {}; E.u = E.u || []; E.av = E.av || [];
+  return E;
+}
+const gewAn = (E) => !!E.bereiche.gewerbe && !privat();
 let estJahr = 0;
 const estAktJahr = () => estJahr || new Date().getFullYear() - 1;
 function estDaten() {
   S.est = S.est || {};
   const j = estAktJahr();
   if (!S.est[j]) S.est[j] = estLeer();
-  return S.est[j];
+  return estFelder(S.est[j]);
 }
 const zus = (E) => E.person.veranlagung === 'zusammen';
 const nv = (v) => (v == null || v === '' ? 0 : num(v));
@@ -1016,12 +1043,15 @@ function setzePfad(o, p, v) { const ks = p.split('.'); let a = o; for (const k o
 
 function estSchritte(E) {
   const b = E.bereiche, L = [['start', 'Jahr und Person'], ['bereiche', 'Was trifft zu?']];
-  if (b.gewerbe) L.push(['gewerbe', 'Firma']);
+  if (gewAn(E)) L.push(['gewerbe', 'Firma']);
   if (b.n) L.push(['n', 'Arbeitslohn']);
+  if (b.le) L.push(['le', 'Elterngeld und Co.']);
   if (b.v) L.push(['v', 'Vermietung']);
   if (b.kap) L.push(['kap', 'Kapitalerträge']);
+  if (b.so) L.push(['so', 'Private Verkäufe']);
   if (b.r) L.push(['r', 'Rente']);
   if (b.kind) L.push(['kind', 'Kinder']);
+  if (b.u) L.push(['u', 'Unterhalt']);
   L.push(['vorsorge', 'Versicherungen']);
   L.push(['sonder', 'Kirche, Spenden']);
   if (b.agb) L.push(['agb', 'Krankheit, Pflege']);
@@ -1091,31 +1121,79 @@ function estGewerbe(E, jahr) {
 }
 
 function estRechnung(E, jahr) {
+  estFelder(E);
   const W = estW(jahr), Z = zus(E), out = { zeilen: [], hinweise: [] };
   const H = (t) => out.hinweise.push(t);
+  const gfb = EST_TARIF[Math.min(Math.max(jahr, 2025), 2026)].g[0];
+  const kmSatz = (km) => Math.min(km, 20) * W.km1 + Math.max(0, km - 20) * W.km21;
   let gde = 0; const eink = {};
   // Firma
   let gew = null;
-  if (E.bereiche.gewerbe) { gew = estGewerbe(E, jahr); eink.gewerbe = gew.gewinn; }
-  // Arbeitslohn je Person
+  if (gewAn(E)) { gew = estGewerbe(E, jahr); eink.gewerbe = gew.gewinn; }
+  // Arbeitslohn: Werbungskosten je Arbeitgeber, Pauschbetrag je Person
   let lst = 0, soliGez = 0, kistGez = 0, hoRest = W.hoMax - (gew ? gew.ho : 0);
-  const nList = [];
+  const nList = [], pers = {};
   if (E.bereiche.n) for (const n of E.n) {
     const km = nv(n.km), tage = nv(n.tage);
-    const fahrt = r2(tage * (Math.min(km, 20) * W.km1 + Math.max(0, km - 20) * W.km21));
-    const ho = Math.max(0, Math.min(hoRest, Math.min(210, nv(n.hoTage)) * W.hoTag)); hoRest -= ho;
-    const wk = r2(fahrt + ho + nv(n.am) + nv(n.fb) + nv(n.sonst));
-    const abz = Math.max(W.anPausch, wk);
-    const e = r2(Math.max(0, nv(n.brutto) - abz));
-    nList.push({ n, fahrt, ho, wk, abz, e });
-    eink.n = r2((eink.n || 0) + e);
-    lst += nv(n.lst); soliGez += nv(n.soli); kistGez += nv(n.kist);
-    if (fahrt > 4500) H('Die Entfernungspauschale ist ohne eigenes Auto auf 4.500 € im Jahr begrenzt.');
+    const fahrtBrutto = r2(tage * kmSatz(km));
+    const agF = r2(nv(n.agFrei) + nv(n.agPausch));
+    const fahrt = r2(Math.max(0, fahrtBrutto - agF));
+    const azMon = n.azMonate == null ? 12 : Math.min(12, nv(n.azMonate));
+    const az = n.az ? r2(W.hoMax * azMon / 12) : 0;
+    const ho = n.az ? 0 : Math.max(0, Math.min(hoRest, Math.min(210, nv(n.hoTage)) * W.hoTag)); hoRest -= ho;
+    const vma = r2(Math.max(0, (nv(n.vma8) + nv(n.vmaAnAb)) * W.vma[0] + nv(n.vma24) * W.vma[1] - nv(n.vmaKuerz)));
+    const reiseSumme = r2(nv(n.reiseFahrt) + nv(n.reiseUebern) + nv(n.reiseNeben));
+    const reise = r2(Math.max(0, reiseSumme + vma - nv(n.reiseErst)));
+    const dhhMon = n.dhhMonate == null ? 12 : Math.min(12, nv(n.dhhMonate));
+    const dhhFahrt = r2(nv(n.dhhFahrten) * kmSatz(nv(n.dhhKm)));
+    const dhhMiete = Math.min(nv(n.dhhMiete), 1000 * dhhMon);
+    const dhh = r2(Math.max(0, dhhMiete + dhhFahrt + nv(n.dhhSonst) - nv(n.dhhErst)));
+    const wk = r2(fahrt + ho + az + nv(n.am) + nv(n.fb) + nv(n.gew) + nv(n.sonst) + reise + dhh);
+    const wer = Z && n.wer === 'partner' ? 'partner' : 'ich';
+    nList.push({ n, wer, fahrt, fahrtBrutto, agF, ho, az, vma, reiseSumme, reise, dhh, dhhFahrt, wk });
+    const p = pers[wer] = pers[wer] || { brutto: 0, wk: 0, abf: 0, kug: 0 };
+    p.brutto += nv(n.brutto); p.wk += wk; p.abf += nv(n.abf); p.kug += nv(n.kug);
+    lst += nv(n.lst) + nv(n.abfLst); soliGez += nv(n.soli) + nv(n.abfSoli); kistGez += nv(n.kist) + nv(n.abfKist);
+    if (fahrtBrutto > 4500) H('Die Entfernungspauschale ist ohne eigenes Auto auf 4.500 € im Jahr begrenzt.');
+    if (nv(n.dhhMiete) > dhhMiete) H('Für die Wohnung am Arbeitsort zählen höchstens 1.000 € im Monat.');
   }
+  let abfSum = 0;
+  for (const w in pers) {
+    const p = pers[w];
+    p.pauschal = p.wk <= W.anPausch;
+    p.abz = p.pauschal ? Math.min(W.anPausch, p.brutto + p.abf) : p.wk;
+    p.e = r2(p.brutto + p.abf - p.abz);
+    eink.n = r2((eink.n || 0) + p.e); abfSum += p.abf;
+  }
+  abfSum = r2(abfSum);
+  // Lohnersatz (Progressionsvorbehalt): steuerfrei, erhöht aber den Steuersatz. Nicht genutzter Arbeitnehmer-Pauschbetrag wird abgezogen.
+  const le = { ich: E.bereiche.le ? nv(E.le.ich) : 0, partner: E.bereiche.le && Z ? nv(E.le.partner) : 0 };
+  let pv = 0, leSum = 0;
+  for (const w of ['ich', 'partner']) {
+    const p = pers[w], summe = le[w] + (p ? p.kug : 0);
+    if (!summe) continue;
+    leSum += summe;
+    const rest = !p ? W.anPausch : p.pauschal ? Math.max(0, W.anPausch - p.brutto - p.abf) : 0;
+    pv += Math.max(0, summe - rest);
+  }
+  pv = r2(pv); leSum = r2(leSum);
   // Vermietung
   if (E.bereiche.v) for (const v of E.v) eink.v = r2((eink.v || 0) + nv(v.miete) + nv(v.umlagen) - nv(v.afa) - nv(v.zinsen) - nv(v.erhaltung) - nv(v.nebenkosten) - nv(v.verwaltung) - nv(v.sonst));
   // Rente
   if (E.bereiche.r) for (const r of E.r) eink.r = r2((eink.r || 0) + Math.max(0, nv(r.betrag) * rentenAnteil(r.beginn) - 102));
+  // Private Verkäufe und Leistungen (Freigrenzen je Person)
+  if (E.bereiche.so) {
+    let so = 0;
+    for (const x of Z ? ['', 'P'] : ['']) {
+      const v = r2(nv(E.so['verkauf' + x]) + nv(E.so['grund' + x]));
+      if (v >= 1000) so += v;
+      else if (v < 0) H('Verluste aus privaten Verkäufen mindern nur Gewinne aus solchen Verkäufen (auch im Vorjahr oder später). Trag sie trotzdem ein, das Finanzamt merkt sie vor.');
+      else if (v > 0) H(`Gewinn aus privaten Verkäufen${x ? ' (Partner)' : ''} unter 1.000 €: bleibt steuerfrei, trotzdem in der Anlage SO angeben.`);
+      const l = r2(nv(E.so['leistung' + x]) - nv(E.so['leistungWk' + x]));
+      if (l >= 256) so += l;
+    }
+    if (so) eink.so = r2(so);
+  }
   // Kapital
   const kap = E.kap, spbMax = W.spb * (Z ? 2 : 1);
   let kapTarif = 0, kapAbgeltung = 0, kestAnr = 0;
@@ -1136,9 +1214,11 @@ function estRechnung(E, jahr) {
   const kistNetto = Math.max(0, nv(E.sa.kistG) + kistGez - nv(E.sa.kistE));
   const spenden = Math.min(nv(E.sa.spenden), gdeN * 0.2);
   const ausb = Math.min(nv(E.sa.ausbildung), 6000);
+  const realsplit = E.bereiche.u ? Math.min(nv(E.sa.realsplit), W.realsplit) : 0;
+  if (E.bereiche.u && nv(E.sa.realsplit) > W.realsplit) H(`Unterhalt an den Ex-Partner zählt höchstens mit ${W.realsplit.toLocaleString('de-DE')} € (plus übernommene Kranken- und Pflegeversicherung).`);
   let kibe = 0;
   if (E.bereiche.kind) for (const k of E.kinder) kibe += Math.min(W.kibeMax, nv(k.betreuung) * W.kibe) * (Z || E.person.alleinerz ? 1 : 0.5);
-  const sa = r2(Math.max(W.saPausch * (Z ? 2 : 1), kistNetto + spenden + ausb) + kibe);
+  const sa = r2(Math.max(W.saPausch * (Z ? 2 : 1), kistNetto + spenden + ausb + realsplit) + kibe);
   // Vorsorge
   let rvAN = 0, kvAN = 0, pvAN = 0, avAN = 0;
   for (const x of nList) { rvAN += nv(x.n.rvAN); kvAN += nv(x.n.kvAN); pvAN += nv(x.n.pvAN); avAN += nv(x.n.avAN); }
@@ -1154,12 +1234,34 @@ function estRechnung(E, jahr) {
   const zb = zumutbar(gdeN, nKinder, Z);
   const krank = Math.max(0, nv(E.agb.krank) - zb);
   const agb = r2(E.bereiche.agb ? gdbP + pflege + krank : 0);
-  const einkommen = r2(Math.max(0, gdeN - sa - vorsorge - agb));
-  // Tarif
-  const tarif = (zve) => Z ? 2 * estTarifJahr(zve / 2, jahr) : estTarifJahr(zve, jahr);
+  // Unterhalt an bedürftige Personen (§ 33a EStG): höchstens Grundfreibetrag plus übernommene Basis-Krankenversicherung, eigene Einkünfte über 624 € mindern
+  let uh = 0;
+  if (E.bereiche.u) for (const u of E.u) {
+    const mon = u.monate == null ? 12 : Math.min(12, nv(u.monate));
+    const max = (W.uhMax + nv(u.kv)) * mon / 12, anr = Math.max(0, nv(u.eink) - 624 * mon / 12);
+    uh += Math.max(0, Math.min(nv(u.betrag), max - anr));
+  }
+  uh = r2(uh);
+  const einkommen = r2(Math.max(0, gdeN - sa - vorsorge - agb - uh));
+  // Tarif, mit Progressionsvorbehalt und Fünftelregelung für Abfindungen
+  const T = (x) => Z ? 2 * estTarifJahr(x / 2, jahr) : estTarifJahr(x, jahr);
+  const satzT = (x) => { if (!pv) return T(x); const b = x + pv; return x <= 0 || b <= 0 ? 0 : Math.floor(x * T(b) / b); };
+  const tarif = (zve) => {
+    if (!abfSum) return satzT(zve);
+    const a = Math.min(abfSum, Math.max(0, zve)), rest = Math.max(0, zve - a);
+    return Math.floor(satzT(rest) + 5 * (satzT(rest + a / 5) - satzT(rest)));
+  };
+  // Riester: Abzug als Sonderausgabe, wenn das mehr bringt als die Zulage
+  const avP = {};
+  for (const x of E.av) { const w = Z && x.wer === 'partner' ? 'partner' : 'ich'; const q = avP[w] = avP[w] || { b: 0, z: 0 }; q.b += nv(x.beitrag); q.z += x.zulage == null ? W.avGrund : nv(x.zulage); }
+  let avAbz = 0, avZul = 0;
+  for (const w in avP) { avAbz += Math.min(W.avMax, avP[w].b + avP[w].z); avZul += avP[w].z; }
+  avAbz = r2(avAbz); avZul = r2(avZul);
+  const avBesser = avAbz > 0 && tarif(einkommen) - tarif(Math.max(0, einkommen - avAbz)) > avZul;
+  const zveBasis = avBesser ? r2(Math.max(0, einkommen - avAbz)) : einkommen;
   const kfb = nKinder * W.kfb * (Z || E.person.alleinerz ? 1 : 0.5);
   const kg = E.bereiche.kind ? E.kinder.reduce((a, k) => a + W.kindergeld * (k.monate == null ? 12 : nv(k.monate)), 0) * (Z || E.person.alleinerz ? 1 : 0.5) : 0;
-  const estOhne = tarif(einkommen), estMit = tarif(Math.max(0, einkommen - kfb));
+  const estOhne = tarif(zveBasis), estMit = tarif(Math.max(0, zveBasis - kfb));
   const freibetragBesser = kfb && estOhne - estMit > kg;
   let est = freibetragBesser ? estMit : estOhne;
   // Ermäßigungen
@@ -1174,17 +1276,45 @@ function estRechnung(E, jahr) {
   const partei = Math.min(nv(E.sa.parteien) * 0.5, Z ? 1650 : 825);
   est = Math.max(0, Math.floor(est - erm35 - hh - partei));
   if (freibetragBesser) est += kg;
+  if (avBesser) est += avZul;
   // Soli und Kirchensteuer rechnen immer mit Kinderfreibeträgen (§ 51a EStG)
-  const basisZ = Math.max(0, Math.floor(estMit - erm35 - hh - partei));
+  const basisZ = Math.max(0, Math.floor(estMit - erm35 - hh - partei)) + (avBesser ? avZul : 0);
   const soliGrenze = estTarif(0, jahr).soliGrenze * (Z ? 2 : 1);
   const soli = basisZ > soliGrenze ? r2(Math.min(basisZ * 0.055, (basisZ - soliGrenze) * 0.119)) : 0;
   const kiQuote = (E.person.kirche ? 1 : 0) + (Z && E.person.kirchePartner ? 1 : 0);
   const kist = r2(basisZ * (nv(E.person.kiSatz) || 9) / 100 * (Z ? kiQuote / 2 : kiQuote));
   const fest = r2(est + soli + kist + kapAbgeltung);
   const vz = E.vz.est == null ? num(S.steuer.vzEst) * 4 : nv(E.vz.est);
-  const gezahlt = r2(lst + soliGez + kistGez + kestAnr + (E.bereiche.gewerbe ? vz : 0));
-  Object.assign(out, { eink, gde, entl, sa, kibe, vorsorge, alt, sonstige, agb, zb, einkommen, kfb, kg, freibetragBesser, est, erm35, hh, partei, soli, kist, kapAbgeltung, fest, gezahlt, vz, lst, soliGez, kistGez, kestAnr, saldo: r2(fest - gezahlt), gew, nList });
+  const gezahlt = r2(lst + soliGez + kistGez + kestAnr + (gew ? vz : 0));
+  if (pv) H(`Elterngeld, Krankengeld und Co. (${eur(leSum)}) sind steuerfrei, erhöhen aber den Steuersatz auf dein übriges Einkommen. Das ist in der Rechnung schon drin.`);
+  if (abfSum) H(`Für die Abfindung (${eur(abfSum)}) ist die Fünftelregelung eingerechnet. Sie kann die Steuer deutlich senken, wenn das Einkommen im Jahr sonst niedriger ist.`);
+  if (avAbz) H(avBesser ? `Riester: Der Abzug als Sonderausgabe (${eur(avAbz)}) bringt mehr als die Zulage. Das Finanzamt erstattet die Differenz.` : 'Riester: Die Zulage ist für dich günstiger als der Abzug. Die Anlage AV schadet trotzdem nicht.');
+  Object.assign(out, { eink, gde, entl, sa, kibe, realsplit, vorsorge, alt, sonstige, agb, uh, zb, einkommen, avAbz, avZul, avBesser, zveBasis, kfb, kg, freibetragBesser, est, erm35, hh, partei, soli, kist, kapAbgeltung, fest, gezahlt, vz, lst, soliGez, kistGez, kestAnr, saldo: r2(fest - gezahlt), gew, nList, pers, pv, leSum, le, abfSum, gfb });
   return out;
+}
+
+/* Muss die Erklärung abgegeben werden? Vereinfachte Prüfung nach § 46 EStG und § 25 EStG mit § 56 EStDV */
+function estPflicht(E, jahr, R) {
+  const g = [], Z = zus(E);
+  const hatLohn = E.bereiche.n && E.n.some((n) => nv(n.brutto) || nv(n.abf));
+  if (R.gew) g.push('Du hast Einkünfte aus deiner Firma.');
+  const neben = r2(Object.entries(R.eink).filter(([k]) => k !== 'n' && k !== 'gewerbe').reduce((a, [, v]) => a + Math.max(0, v), 0));
+  if (hatLohn && neben > 410) g.push(`Neben dem Lohn hast du andere Einkünfte über 410 € (${eur(neben)}).`);
+  if (!hatLohn && !R.gew && R.gde > R.gfb * (Z ? 2 : 1)) g.push('Deine Einkünfte liegen über dem Grundfreibetrag, und es wurde keine Lohnsteuer abgezogen (z. B. bei Rente oder Vermietung).');
+  if (R.leSum > 410) g.push(`Du hast Elterngeld, Krankengeld, Arbeitslosengeld oder Kurzarbeitergeld über 410 € bekommen (${eur(R.leSum)}).`);
+  if (E.bereiche.n && E.n.some((n) => nv(n.stkl) === 6)) g.push('Du hattest zwei Arbeitgeber gleichzeitig (Steuerklasse 6).');
+  if (Z && E.bereiche.n && E.n.some((n) => [3, 5, 45].includes(nv(n.stkl)))) g.push('Ihr hattet die Steuerklassen 3 und 5 oder 4 mit Faktor.');
+  if (E.bereiche.n && E.person.lstFreibetrag) g.push('Beim Lohnsteuerabzug war ein Freibetrag eingetragen.');
+  if (R.abfSum) g.push('Du hast eine Abfindung oder Lohn für mehrere Jahre bekommen.');
+  if (R.kapAbgeltung) g.push('Du hast Kapitalerträge, auf die keine Steuer abgezogen wurde (z. B. ausländischer Broker).');
+  if (E.bereiche.u && nv(E.sa.realsplit)) g.push('Du ziehst Unterhalt an den Ex-Partner ab (dann musst du die Erklärung abgeben).');
+  return { pflicht: g.length > 0, gruende: g, frist: g.length ? jahresFrist(jahr) : `${jahr + 4}-12-31` };
+}
+function vPflicht(E, j, R) {
+  const P = estPflicht(E, j, R);
+  return P.pflicht
+    ? `<div class="card"><h2>Musst du abgeben? Ja</h2><p>Abgabe bis <b>${dat(P.frist)}</b>${S.steuer.berater ? ' (mit Steuerberater)' : ''}${P.frist < heute() ? '. Die Frist ist vorbei, gib so bald wie möglich ab' : ''}. Der Grund:</p><ul class="checks">${P.gruende.map((t) => `<li class="miss">${t}</li>`).join('')}</ul><p class="small muted">Wer zu spät abgibt, muss mit einem Verspätungszuschlag rechnen. Mit Steuerberater oder Lohnsteuerhilfeverein gilt eine längere Frist.</p></div>`
+    : `<div class="card"><h2>Musst du abgeben? Nein, freiwillig</h2><p>Nach deinen Angaben musst du nicht. Freiwillig abgeben darfst du vier Jahre lang, für ${j} also bis <b>${dat(P.frist)}</b>.${R.saldo < 0 ? ` Es lohnt sich: geschätzt bekommst du <b>${eur(-R.saldo)}</b> zurück.` : ''}</p><p class="small muted">Gibst du freiwillig ab und es kommt eine Nachzahlung heraus, kannst du den Antrag innerhalb eines Monats nach dem Bescheid zurücknehmen.</p></div>`;
 }
 
 /* ----- Übersicht pro Anlage ----- */
@@ -1195,7 +1325,9 @@ function estAnlagen(E, jahr) {
   add('ESt 1 A', 'Hauptvordruck', [
     row('', 0, { t: 'Veranlagung', text: zus(E) ? 'Zusammenveranlagung' : 'Einzelveranlagung', zeigen: true }),
     row('', 0, { t: 'Religion', text: E.person.kirche ? 'Kirchensteuerpflichtig' : 'Keine Kirchensteuer', zeigen: true }),
-    E.person.alleinerz && !zus(E) ? row('', 0, { t: 'Entlastungsbetrag für Alleinerziehende (Anlage Kind)', text: 'beantragen', zeigen: true }) : null
+    E.person.alleinerz && !zus(E) ? row('', 0, { t: 'Entlastungsbetrag für Alleinerziehende (Anlage Kind)', text: 'beantragen', zeigen: true }) : null,
+    row('le.betrag', R.le.ich, { t: 'Einkommensersatzleistungen' + (zus(E) ? ' (du)' : '') + ': Elterngeld, Krankengeld, Arbeitslosengeld, Mutterschaftsgeld' }),
+    row('le.betrag', R.le.partner, { t: 'Einkommensersatzleistungen (Partner)' })
   ], 'Persönliche Daten, Steuer-ID, Adresse und Bankverbindung trägst du im Hauptvordruck ein. ELSTER übernimmt vieles aus dem Vorjahr.');
   const g = R.gew;
   if (g) {
@@ -1211,25 +1343,43 @@ function estAnlagen(E, jahr) {
     else A.push({ anlage: 'Bilanz', titel: 'Gewinn per Bilanz', rows: [], hinweis: 'Mit Bilanz (e.K.) macht der Steuerberater die E-Bilanz. Hier steht nur der Gewinn zur Schätzung.' });
     add(g.anlage, g.freiberuf ? 'Freiberufliche Einkünfte' : 'Einkünfte aus Gewerbebetrieb', [row(g.anlage.toLowerCase() + '.gewinn', g.gewinn, { zeigen: true }), g.freiberuf ? null : row('g.mess', nv(E.gew.mess)), g.freiberuf ? null : row('g.gezahlt', nv(E.gew.gewGezahlt))]);
   }
+  const STKL = { 1: '1', 2: '2', 3: '3', 4: '4', 45: '4 mit Faktor', 5: '5', 6: '6' };
+  const anz = (key, v, einheit) => v ? row(key, 0, { text: `${v} ${einheit}`, zeigen: true }) : null;
   for (const [i, x] of R.nList.entries()) {
-    const n = x.n, wer = zus(E) ? (n.wer === 'partner' ? ' (Partner)' : ' (du)') : '';
-    add('N', `Arbeitslohn${wer}${R.nList.length > 1 && !zus(E) ? ' ' + (i + 1) : ''}`, [row('n.brutto', nv(n.brutto)), row('n.lst', nv(n.lst)), row('n.soli', nv(n.soli)), row('n.kist', nv(n.kist)),
+    const n = x.n, wer = zus(E) ? (n.wer === 'partner' ? ' (Partner)' : ' (du)') : '', P = R.pers[x.wer];
+    const abfSt = r2(nv(n.abfLst) + nv(n.abfSoli) + nv(n.abfKist));
+    add('N', `Arbeitslohn${wer}${R.nList.length > 1 && !zus(E) ? ' ' + (i + 1) : ''}`, [n.stkl ? row('n.stkl', 0, { text: STKL[nv(n.stkl)] || '', zeigen: true }) : null,
+      row('n.brutto', nv(n.brutto)), row('n.lst', nv(n.lst)), row('n.soli', nv(n.soli)), row('n.kist', nv(n.kist)),
+      row('n.abf', nv(n.abf)), row('n.abfSt', abfSt), row('n.kug', nv(n.kug)),
       nv(n.tage) ? row('n.fahrt', 0, { text: `${nv(n.tage)} Tage, ${nv(n.km)} km`, zeigen: true }) : null,
-      nv(n.hoTage) ? row('n.ho', 0, { text: `${nv(n.hoTage)} Tage`, zeigen: true }) : null,
-      row('n.am', nv(n.am)), row('n.fb', nv(n.fb)), row('n.sonst', nv(n.sonst))],
-      x.wk < 1230 ? `Deine Werbungskosten (${eur(x.wk)}) liegen unter dem Pauschbetrag von 1.230 €. Das Finanzamt zieht automatisch den Pauschbetrag ab.` : '');
+      row('n.agFrei', nv(n.agFrei)), row('n.agPausch', nv(n.agPausch)),
+      row('n.gew', nv(n.gew)), row('n.am', nv(n.am)), row('n.az', x.az),
+      !n.az && nv(n.hoTage) ? row('n.ho', 0, { text: `${nv(n.hoTage)} Tage`, zeigen: true }) : null,
+      row('n.fb', nv(n.fb)), row('n.sonst', nv(n.sonst)),
+      row('n.reise', x.reiseSumme), anz('n.vma8', nv(n.vma8), 'Tage'), anz('n.vmaAnAb', nv(n.vmaAnAb), 'Tage'), anz('n.vma24', nv(n.vma24), 'Tage'), row('n.vmaKuerz', nv(n.vmaKuerz)), row('n.reiseErst', nv(n.reiseErst))],
+      P && P.pauschal && (!R.nList.some((y, k) => k < i && y.wer === x.wer)) ? `Deine Werbungskosten (${eur(P.wk)}) liegen unter dem Pauschbetrag von 1.230 €. Das Finanzamt zieht automatisch den Pauschbetrag ab.` : '');
+    if (x.dhh || nv(n.dhhMiete)) add('N-Doppelte Haushaltsführung', `Zweite Wohnung am Arbeitsort${wer}`, [row('dhh.miete', nv(n.dhhMiete)), nv(n.dhhFahrten) ? row('dhh.fahrten', 0, { text: `${nv(n.dhhFahrten)} Fahrten, ${nv(n.dhhKm)} km`, zeigen: true }) : null, row('dhh.sonst', nv(n.dhhSonst)), row('dhh.erst', nv(n.dhhErst))],
+      'Eigene Anlage in ELSTER: „Anlage N-Doppelte Haushaltsführung“. Dort fragt ELSTER noch nach dem Grund, dem Beginn und der Wohnung. Die Felder nach Bezeichnung suchen.');
     add('Vorsorgeaufwand', `Aus der Lohnsteuerbescheinigung${wer}`, [row('vor.rvAN', nv(n.rvAN)), row('vor.kvAN', nv(n.kvAN)), row('vor.pvAN', nv(n.pvAN)), row('vor.av', nv(n.avAN))]);
   }
   for (const [i, v] of (E.bereiche.v ? E.v : []).entries()) add('V', `Vermietung: ${esc(v.name || 'Objekt ' + (i + 1))}`, [row('v.miete', nv(v.miete)), row('v.umlagen', nv(v.umlagen)), row('v.afa', nv(v.afa)), row('v.zinsen', nv(v.zinsen)), row('v.erhaltung', nv(v.erhaltung)), row('v.nebenkosten', nv(v.nebenkosten)), row('v.verwaltung', nv(v.verwaltung)), row('v.sonst', nv(v.sonst))], 'Für jedes Objekt eine eigene Anlage V.');
   if (E.bereiche.kap) { const k = E.kap; add('KAP', 'Kapitalerträge', [k.guenstiger ? row('kap.guenstiger', 0, { text: 'Ja (1)', zeigen: true }) : null, row('kap.mit', nv(k.mit)), row('kap.spb', nv(k.spb)), row('kap.ohne', nv(k.ohne)), row('kap.kest', nv(k.kest)), row('kap.soli', nv(k.soli)), row('kap.kist', nv(k.kist))]); }
+  if (E.bereiche.so) {
+    const so = E.so, Z = zus(E);
+    add('SO', 'Sonstige Einkünfte', [row('so.leistung', nv(so.leistung)), row('so.leistungWk', nv(so.leistungWk)), so.krypto ? row('so.krypto', 0, { text: 'Ja (1)', zeigen: true }) : null, row('so.grund', nv(so.grund)), row('so.verkauf', nv(so.verkauf)),
+      Z ? row('so.leistungP', nv(so.leistungP)) : null, Z ? row('so.leistungWkP', nv(so.leistungWkP)) : null, Z ? row('so.grundP', nv(so.grundP)) : null, Z ? row('so.verkaufP', nv(so.verkaufP)) : null],
+      'Die einzelnen Verkäufe (was, wann gekauft, wann verkauft, Preise) fragt ELSTER in den Zeilen davor ab, bei Krypto in den Zeilen 45 bis 51. Gewinne unter 1.000 € je Person bleiben steuerfrei.');
+  }
   for (const r of E.bereiche.r ? E.r : []) add('R', `Rente${zus(E) ? (r.wer === 'partner' ? ' (Partner)' : ' (du)') : ''}`, [row('r.betrag', nv(r.betrag)), r.beginn ? row('r.beginn', 0, { text: dat(r.beginn), zeigen: true }) : null]);
   const v = E.vor;
   add('Vorsorgeaufwand', 'Eigene Versicherungen', [row('vor.rvEigen', nv(v.rvEigen)), row('vor.kvFrei', nv(v.kvFrei)), row('vor.pvFrei', nv(v.pvFrei)), row('vor.kvPriv', nv(v.kvPriv)), row('vor.pvPriv', nv(v.pvPriv)), row('vor.sonst', nv(v.sonst))]);
-  add('Sonderausgaben', 'Sonderausgaben', [row('sa.kistG', nv(E.sa.kistG)), row('sa.kistE', nv(E.sa.kistE)), row('sa.spenden', nv(E.sa.spenden)), row('sa.parteien', nv(E.sa.parteien)), row('sa.ausbildung', nv(E.sa.ausbildung))]);
+  for (const a of E.av) add('AV', `Riester-Vertrag${zus(E) ? (a.wer === 'partner' ? ' (Partner)' : ' (du)') : ''}`, [row('av.beitrag', nv(a.beitrag))], 'In ELSTER die „Anlage AV“ öffnen. Anbieternummer, Vertragsnummer und Beiträge stehen auf der Bescheinigung des Anbieters. Das Finanzamt prüft selbst, ob die Zulage oder der Abzug günstiger ist.');
+  if (E.bereiche.u) for (const u of E.u) add('Unterhalt', `Unterhalt an ${esc(u.name || 'unterstützte Person')}`, [row('u.person', 0, { text: u.name || 'fehlt', zeigen: true }), row('u.zeit', 0, { text: `${u.monate == null ? 12 : nv(u.monate)} Monate`, zeigen: true }), row('u.betrag', nv(u.betrag)), row('u.kv', nv(u.kv)), row('u.eink', nv(u.eink))], 'Für jede unterstützte Person eine eigene Anlage Unterhalt. ELSTER fragt noch nach Verwandtschaft, Haushalt und Vermögen der Person.');
+  add('Sonderausgaben', 'Sonderausgaben', [row('sa.realsplit', E.bereiche.u ? nv(E.sa.realsplit) : 0), row('sa.kistG', nv(E.sa.kistG)), row('sa.kistE', nv(E.sa.kistE)), row('sa.spenden', nv(E.sa.spenden)), row('sa.parteien', nv(E.sa.parteien)), row('sa.ausbildung', nv(E.sa.ausbildung))]);
   for (const k of E.bereiche.kind ? E.kinder : []) add('Kind', `Kind: ${esc(k.name || 'ohne Namen')}`, [row('kind.id', 0, { text: [k.name, k.geburt ? dat(k.geburt) : ''].filter(Boolean).map(esc).join(', ') || 'fehlt', zeigen: true }), row('kind.betreuung', nv(k.betreuung))], 'Für jedes Kind eine eigene Anlage Kind.');
   if (E.bereiche.agb) add('Außergewöhnliche Belastungen', 'Außergewöhnliche Belastungen', [nv(E.agb.gdb) ? row('agb.gdb', 0, { text: nv(E.agb.gdb) === 999 ? 'Merkzeichen H oder Bl' : String(nv(E.agb.gdb)), zeigen: true }) : null, nv(E.agb.pflegegrad) ? row('agb.pflege', 0, { text: 'Pflegegrad ' + nv(E.agb.pflegegrad), zeigen: true }) : null, row('agb.krank', nv(E.agb.krank))]);
   if (E.bereiche.hh) add('Haushaltsnahe Aufwendungen', 'Haushalt und Handwerker', [row('hh.minijob', nv(E.hh.minijob)), row('hh.dienst', nv(E.hh.dienst)), row('hh.handwerk', nv(E.hh.handwerk))]);
-  const ORDNUNG = ['ESt 1 A', 'Bilanz', 'EÜR', 'G', 'S', 'N', 'V', 'KAP', 'R', 'Vorsorgeaufwand', 'Sonderausgaben', 'Kind', 'Außergewöhnliche Belastungen', 'Haushaltsnahe Aufwendungen'];
+  const ORDNUNG = ['ESt 1 A', 'Bilanz', 'EÜR', 'G', 'S', 'N', 'N-Doppelte Haushaltsführung', 'V', 'KAP', 'SO', 'R', 'Vorsorgeaufwand', 'AV', 'Sonderausgaben', 'Kind', 'Unterhalt', 'Außergewöhnliche Belastungen', 'Haushaltsnahe Aufwendungen'];
   A.forEach((a, i) => { a.i = i; });
   A.sort((x, y) => ORDNUNG.indexOf(x.anlage) - ORDNUNG.indexOf(y.anlage) || x.i - y.i);
   return { R, A };
@@ -1245,8 +1395,8 @@ function vEst() {
   const E = estDaten(), j = estAktJahr(), L = estSchritte(E);
   let i = L.findIndex((x) => x[0] === E.schritt); if (i < 0) { i = 0; E.schritt = 'start'; }
   const [key, titel] = L[i];
-  const body = { start: estStart, bereiche: estBereiche, gewerbe: estGew, n: estN, v: estV, kap: estKap, r: estR, kind: estKind, vorsorge: estVor, sonder: estSonder, agb: estAgb, hh: estHh, unterlagen: estUnterlagen, ergebnis: estErgebnis }[key](E, j);
-  return `<p style="margin:0 0 4px"><button class="chip" data-act="tab" data-k="steuern">← Steuern</button></p>
+  const body = { start: estStart, bereiche: estBereiche, gewerbe: estGew, n: estN, le: estLe, so: estSo, u: estU, v: estV, kap: estKap, r: estR, kind: estKind, vorsorge: estVor, sonder: estSonder, agb: estAgb, hh: estHh, unterlagen: estUnterlagen, ergebnis: estErgebnis }[key](E, j);
+  return `<p style="margin:0 0 4px"><button class="chip" data-act="tab" data-k="${privat() ? 'start' : 'steuern'}">← ${privat() ? 'Übersicht' : 'Steuern'}</button></p>
   <h1>Steuererklärung ${j}</h1>
   <div class="wiz"><div class="step">Schritt ${i + 1} von ${L.length}: ${titel}</div></div>
   <div style="height:6px;background:var(--line);border-radius:3px;margin-bottom:12px"><div style="height:6px;width:${Math.round((i + 1) / L.length * 100)}%;background:var(--accent);border-radius:3px"></div></div>
@@ -1272,9 +1422,9 @@ function estStart(E, j) {
 }
 function estBereiche(E) {
   return `<div class="card"><h2>Was trifft ${zus(E) ? 'auf euch' : 'auf dich'} im Jahr zu?</h2><p class="small muted">Nur das Angehakte wird abgefragt. Versicherungen, Kirchensteuer und Spenden kommen immer.</p>
-    <div style="display:grid;gap:4px;margin-top:8px">${BEREICHE.map(([k, t, s]) => `<label class="check" style="align-items:flex-start;padding:6px 0"><input type="checkbox" name="bereiche.${k}" data-t="bool"${E.bereiche[k] ? ' checked' : ''} style="margin-top:4px"><span><b>${t}</b><br><span class="small muted">${s}</span></span></label>`).join('')}</div></div>
-  <div class="card"><h3 style="margin-top:0">Gewerblich und privat</h3><p class="small">Die Firma ist nur ein Teil deiner Steuererklärung. Ihr Gewinn (aus der EÜR) kommt in die Anlage ${S.firma.rechtsform === 'freiberufler' ? 'S' : 'G'}, alles Private in die anderen Anlagen. Am Ende rechnet das Finanzamt alles zusammen.</p>
-  ${['gbr', 'ohg', 'ug', 'gmbh'].includes(S.firma.rechtsform) ? `<p class="small"><span class="pill warn">Hinweis</span> Bei ${esc(RECHTSFORMEN[S.firma.rechtsform].label)} gibt die Firma eigene Erklärungen ab, das macht in der Regel der Steuerberater. Hier geht es nur um deine private Erklärung${['gbr', 'ohg'].includes(S.firma.rechtsform) ? ' mit deinem Gewinnanteil' : ''}.</p>` : ''}</div>`;
+    <div style="display:grid;gap:4px;margin-top:8px">${BEREICHE.filter(([k]) => k !== 'gewerbe' || !privat()).map(([k, t, s]) => `<label class="check" style="align-items:flex-start;padding:6px 0"><input type="checkbox" name="bereiche.${k}" data-t="bool"${E.bereiche[k] ? ' checked' : ''} style="margin-top:4px"><span><b>${t}</b><br><span class="small muted">${s}</span></span></label>`).join('')}</div></div>
+  ${privat() ? '' : `<div class="card"><h3 style="margin-top:0">Gewerblich und privat</h3><p class="small">Die Firma ist nur ein Teil deiner Steuererklärung. Ihr Gewinn (aus der EÜR) kommt in die Anlage ${S.firma.rechtsform === 'freiberufler' ? 'S' : 'G'}, alles Private in die anderen Anlagen. Am Ende rechnet das Finanzamt alles zusammen.</p>
+  ${['gbr', 'ohg', 'ug', 'gmbh'].includes(S.firma.rechtsform) ? `<p class="small"><span class="pill warn">Hinweis</span> Bei ${esc(RECHTSFORMEN[S.firma.rechtsform].label)} gibt die Firma eigene Erklärungen ab, das macht in der Regel der Steuerberater. Hier geht es nur um deine private Erklärung${['gbr', 'ohg'].includes(S.firma.rechtsform) ? ' mit deinem Gewinnanteil' : ''}.</p>` : ''}</div>`}`;
 }
 function estGew(E, j) {
   const g = estGewerbe(E, j), gw = g.gw;
@@ -1315,6 +1465,7 @@ function estN(E, j) {
   const W = estW(j);
   return `<p class="small muted">Alle Zahlen stehen auf der Lohnsteuerbescheinigung, die dir der Arbeitgeber Anfang des Jahres gibt. Hattest du mehrere Arbeitgeber, leg für jeden einen Eintrag an.</p>
   ${estListe(E, 'n', (x, i) => `Arbeitgeber ${i + 1}`, 'Weiteren Arbeitgeber hinzufügen', (p) => `${werSel(E, p)}
+    ${esel(E, p + '.stkl', 'Steuerklasse (steht oben auf der Bescheinigung)', [[1, '1'], [2, '2 (alleinerziehend)'], [3, '3'], [4, '4'], [45, '4 mit Faktor'], [5, '5'], [6, '6 (Zweitjob)']])}
     ${ef(E, p + '.brutto', 'Bruttoarbeitslohn € (Bescheinigung Nr. 3)', { z: 'n.brutto' })}
     ${ef(E, p + '.lst', 'Lohnsteuer € (Nr. 4)', { z: 'n.lst' })}
     ${ef(E, p + '.soli', 'Solidaritätszuschlag € (Nr. 5)', { z: 'n.soli' })}
@@ -1323,15 +1474,93 @@ function estN(E, j) {
     ${ef(E, p + '.kvAN', 'Krankenversicherung Arbeitnehmer € (Nr. 25)', { z: 'vor.kvAN' })}
     ${ef(E, p + '.pvAN', 'Pflegeversicherung Arbeitnehmer € (Nr. 26)', { z: 'vor.pvAN' })}
     ${ef(E, p + '.avAN', 'Arbeitslosenversicherung € (Nr. 27)', { z: 'vor.av' })}
+    ${ef(E, p + '.kug', 'Kurzarbeitergeld, Zuschuss zum Mutterschaftsgeld € (Nr. 15)', { hint: 'steuerfrei, erhöht aber den Steuersatz', z: 'n.kug' })}
     <h3 class="full">Werbungskosten</h3>
-    ${ef(E, p + '.tage', 'Tage ins Büro gefahren', { t: 'int', z: 'n.fahrt' })}
+    ${ef(E, p + '.tage', 'Tage zur Arbeit gefahren', { t: 'int', z: 'n.fahrt' })}
     ${ef(E, p + '.km', 'Einfache Entfernung km', { t: 'int', hint: j >= 2026 ? '0,38 € je km' : 'bis 20 km 0,30 €, ab dem 21. km 0,38 €' })}
-    ${ef(E, p + '.hoTage', 'Tage im Homeoffice', { t: 'int', hint: `${W.hoTag} € je Tag, höchstens ${W.hoMax.toLocaleString('de-DE')} €`, z: 'n.ho' })}
+    ${ef(E, p + '.agFrei', 'Jobticket oder Fahrtzuschuss, steuerfrei € (Nr. 17)', { hint: 'wird vom Arbeitsweg abgezogen', z: 'n.agFrei' })}
+    ${ef(E, p + '.agPausch', 'Fahrtzuschuss, pauschal versteuert € (Nr. 18)', { hint: 'wird vom Arbeitsweg abgezogen', z: 'n.agPausch' })}
+    ${ef(E, p + '.hoTage', 'Tage im Homeoffice', { t: 'int', hint: `${W.hoTag} € je Tag, höchstens ${W.hoMax.toLocaleString('de-DE')} €, nicht zusätzlich zum Arbeitszimmer`, z: 'n.ho' })}
     ${ef(E, p + '.am', 'Arbeitsmittel € (Laptop, Fachbücher, Kleidung)', { z: 'n.am' })}
     ${ef(E, p + '.fb', 'Fortbildung €', { z: 'n.fb' })}
-    ${ef(E, p + '.sonst', 'Weitere € (Kontoführung 16 €, Bewerbung, Umzug)', { z: 'n.sonst' })}`)}
-  <p class="small muted">Liegen deine Werbungskosten unter ${W.anPausch.toLocaleString('de-DE')} €, zieht das Finanzamt automatisch diesen Pauschbetrag ab.</p>
+    ${ef(E, p + '.gew', 'Gewerkschaft, Berufsverband €', { z: 'n.gew' })}
+    ${ef(E, p + '.sonst', 'Weitere € (Kontoführung 16 €, Bewerbung, Umzug)', { z: 'n.sonst' })}
+    ${estMehrN(E, p, j)}`)}
+  ${echk(E, 'person.lstFreibetrag', 'Beim Lohnsteuerabzug war ein Freibetrag eingetragen (zum Beispiel für einen weiten Arbeitsweg)')}
+  <p class="small muted">Liegen deine Werbungskosten unter ${W.anPausch.toLocaleString('de-DE')} €, zieht das Finanzamt automatisch diesen Pauschbetrag ab. Er gilt einmal je Person, auch bei mehreren Arbeitgebern.</p>
   ${estDoks(E, 'n')}`;
+}
+/* Seltenere Werbungskosten, eingeklappt */
+function estMehrN(E, p, j) {
+  const W = estW(j), x = pfad(E, p) || {};
+  const felder = ['reiseFahrt', 'reiseUebern', 'reiseNeben', 'vma8', 'vmaAnAb', 'vma24', 'vmaKuerz', 'reiseErst', 'dhhMiete', 'dhhFahrten', 'dhhKm', 'dhhSonst', 'dhhErst', 'abf', 'abfLst'];
+  const offen = x.az || felder.some((k) => nv(x[k]));
+  return `<details class="full"${offen ? ' open' : ''}><summary>Mehr: Dienstreisen, zweite Wohnung, Arbeitszimmer, Abfindung</summary>
+    <div class="grid2" style="margin-top:8px">
+    <h3 class="full">Dienstreisen und Auswärtstermine</h3>
+    ${ef(E, p + '.reiseFahrt', 'Fahrtkosten €', { hint: 'mit dem eigenen Auto 0,30 € je gefahrenem km, sonst Ticketpreis' })}
+    ${ef(E, p + '.reiseUebern', 'Übernachtung € (ohne Frühstück)' )}
+    ${ef(E, p + '.reiseNeben', 'Nebenkosten € (Parken, Maut, Gepäck)')}
+    ${ef(E, p + '.vma8', 'Tage mit mehr als 8 Stunden unterwegs', { t: 'int', hint: `${W.vma[0]} € je Tag`, z: 'n.vma8' })}
+    ${ef(E, p + '.vmaAnAb', 'An- und Abreisetage bei Reisen mit Übernachtung', { t: 'int', hint: `${W.vma[0]} € je Tag`, z: 'n.vmaAnAb' })}
+    ${ef(E, p + '.vma24', 'Volle Tage (24 Stunden) unterwegs', { t: 'int', hint: `${W.vma[1]} € je Tag`, z: 'n.vma24' })}
+    ${ef(E, p + '.vmaKuerz', 'Kürzung für gestellte Mahlzeiten €', { hint: 'Frühstück 20 %, Mittag- und Abendessen je 40 % von 28 €', z: 'n.vmaKuerz' })}
+    ${ef(E, p + '.reiseErst', 'Vom Arbeitgeber steuerfrei erstattet € (Nr. 20)', { z: 'n.reiseErst' })}
+    <h3 class="full">Zweite Wohnung am Arbeitsort</h3>
+    <p class="small muted full" style="margin:0">Nur wenn deine eigentliche Wohnung (mit eigenem Hausstand) woanders ist und du wegen der Arbeit eine zweite Wohnung hast.</p>
+    ${ef(E, p + '.dhhMiete', 'Miete und Nebenkosten der Zweitwohnung im Jahr €', { hint: 'höchstens 1.000 € im Monat', z: 'dhh.miete' })}
+    ${ef(E, p + '.dhhMonate', 'Monate mit Zweitwohnung', { t: 'int', ph: '12' })}
+    ${ef(E, p + '.dhhFahrten', 'Heimfahrten (eine je Woche zählt)', { t: 'int', z: 'dhh.fahrten' })}
+    ${ef(E, p + '.dhhKm', 'Einfache Entfernung nach Hause km', { t: 'int' })}
+    ${ef(E, p + '.dhhSonst', 'Weitere Kosten € (Verpflegung erste 3 Monate, Umzug, Möbel)', { z: 'dhh.sonst' })}
+    ${ef(E, p + '.dhhErst', 'Vom Arbeitgeber steuerfrei erstattet € (Nr. 21)', { z: 'dhh.erst' })}
+    <h3 class="full">Arbeitszimmer</h3>
+    ${echk(E, p + '.az', `Ich habe ein eigenes, abgeschlossenes Arbeitszimmer, und dort ist der Mittelpunkt meiner ganzen Arbeit (${W.hoMax.toLocaleString('de-DE')} € im Jahr statt Homeoffice-Pauschale)`)}
+    ${ef(E, p + '.azMonate', 'Monate mit Arbeitszimmer', { t: 'int', ph: '12', z: 'n.az' })}
+    <h3 class="full">Abfindung</h3>
+    ${ef(E, p + '.abf', 'Abfindung oder Lohn für mehrere Jahre € (Nr. 10)', { hint: 'wird mit der Fünftelregelung gerechnet', z: 'n.abf' })}
+    ${ef(E, p + '.abfLst', 'Lohnsteuer darauf € (Nr. 11)')}
+    ${ef(E, p + '.abfSoli', 'Solidaritätszuschlag darauf € (Nr. 12)')}
+    ${ef(E, p + '.abfKist', 'Kirchensteuer darauf € (Nr. 13)')}
+    </div></details>`;
+}
+function estLe(E) {
+  return `<div class="card"><h2>Elterngeld, Krankengeld, Arbeitslosengeld</h2>
+    <p class="small muted">Diese Leistungen sind steuerfrei, machen aber den Steuersatz auf dein übriges Einkommen höher. Deshalb gehören sie in die Erklärung, und ab 410 € im Jahr musst du sie abgeben. Die Stellen melden die Beträge ans Finanzamt, eintragen musst du sie trotzdem. Kurzarbeitergeld steht auf der Lohnsteuerbescheinigung, das trägst du beim Arbeitslohn ein.</p>
+    <div class="grid2">
+      ${ef(E, 'le.ich', `Summe im Jahr${zus(E) ? ' (du)' : ''} €`, { hint: 'Elterngeld, Krankengeld, Arbeitslosengeld I, Mutterschaftsgeld, Insolvenzgeld, Übergangsgeld' })}
+      ${zus(E) ? ef(E, 'le.partner', 'Summe im Jahr (Partner) €') : ''}
+    </div>
+    <p class="small muted">In ELSTER im Hauptvordruck unter „Einkommensersatzleistungen“. Bürgergeld und Kindergeld gehören nicht dazu.</p></div>
+  ${estDoks(E, 'le')}`;
+}
+function estSo(E) {
+  const Z = zus(E), f = (x, wer) => `${Z ? `<h3 class="full">${wer}</h3>` : ''}
+      ${ef(E, 'so.verkauf' + x, 'Gewinn aus Verkäufen von Krypto, Gold, Kunst, Sammlerstücken €', { hint: 'nur wenn zwischen Kauf und Verkauf weniger als 1 Jahr lag; Verlust mit Minus', z: 'so.verkauf' + x })}
+      ${ef(E, 'so.grund' + x, 'Gewinn aus Verkauf einer Wohnung oder eines Grundstücks €', { hint: 'nur innerhalb von 10 Jahren nach dem Kauf und nicht selbst bewohnt', z: 'so.grund' + x })}
+      ${ef(E, 'so.leistung' + x, 'Gelegentliche Nebeneinnahmen €', { hint: 'z. B. Vermittlung, Vermietung von Auto oder Wohnmobil an Privatleute', z: 'so.leistung' + x })}
+      ${ef(E, 'so.leistungWk' + x, 'Kosten dazu €', { z: 'so.leistungWk' + x })}`;
+  return `<div class="card"><h2>Private Verkäufe und Nebeneinnahmen</h2>
+    <p class="small muted">Gewinn ist Verkaufspreis minus Kaufpreis minus Gebühren. Alltagsgegenstände wie Auto, Handy oder Möbel zählen nicht. Gewinne unter 1.000 € je Person und Jahr bleiben steuerfrei, Nebeneinnahmen unter 256 €.</p>
+    <div class="grid2">${f('', 'Du')}${Z ? f('P', 'Partner') : ''}
+      ${echk(E, 'so.krypto', 'Es waren Kryptowerte dabei (Bitcoin, Ether und Co.)')}
+    </div>
+    <p class="small muted">Bei vielen Krypto-Geschäften hilft ein Krypto-Steuer-Programm, das die Gewinne aus den Börsen-Daten ausrechnet. Den Bericht kannst du unten hochladen.</p></div>
+  ${estDoks(E, 'so')}`;
+}
+function estU(E, j) {
+  const W = estW(j);
+  return `<p class="small muted">Unterstützt du jemanden, der kaum eigenes Geld hat und für den niemand Kindergeld bekommt (zum Beispiel Eltern, ein Kind nach der Ausbildung, ein Partner ohne Trauschein), zählt das bis ${W.uhMax.toLocaleString('de-DE')} € im Jahr. Eigene Einkünfte der Person über 624 € mindern den Betrag.</p>
+  ${estListe(E, 'u', (x, i) => esc(x.name || `Person ${i + 1}`), 'Weitere Person hinzufügen', (p) => `
+    ${ef(E, p + '.name', 'Name der Person', { t: 'text', z: 'u.person' })}
+    ${ef(E, p + '.monate', 'Monate unterstützt', { t: 'int', ph: '12', z: 'u.zeit' })}
+    ${ef(E, p + '.betrag', 'Gezahlt im Jahr € (per Überweisung)', { z: 'u.betrag' })}
+    ${ef(E, p + '.kv', 'Davon Kranken- und Pflegeversicherung der Person €', { hint: 'erhöht den Höchstbetrag', z: 'u.kv' })}
+    ${ef(E, p + '.eink', 'Eigene Einkünfte und Bezüge der Person im Jahr €', { hint: 'Lohn nach Abzug der Kosten, Rente, Zinsen, BAföG-Zuschuss', z: 'u.eink' })}`)}
+  <div class="card"><h2>Unterhalt an den Ex-Partner</h2>
+    <p class="small muted">Unterhalt an geschiedene oder dauernd getrennt lebende Ehepartner kannst du bis ${W.realsplit.toLocaleString('de-DE')} € abziehen. Der Ex-Partner muss mit der Anlage U zustimmen und versteuert den Betrag dann selbst. Dann musst du die Erklärung abgeben.</p>
+    <div class="grid2">${ef(E, 'sa.realsplit', 'Gezahlter Unterhalt im Jahr €', { z: 'sa.realsplit' })}</div></div>
+  ${estDoks(E, 'u')}`;
 }
 function estV(E) {
   if (!E.v.length) E.v.push({ name: '' });
@@ -1392,6 +1621,11 @@ function estVor(E, j) {
     ${echk(E, 'vor.selbstZahler', 'Ich zahle meine Krankenversicherung komplett selbst (kein Zuschuss vom Arbeitgeber)')}
   </div>
   <p class="small muted">Kranken- und Pflegeversicherung (Basis) zählen immer voll. Andere Versicherungen nur, solange zusammen ${W.sonstSelbst.toLocaleString('de-DE')} € (Selbstzahler) bzw. ${W.sonstAN.toLocaleString('de-DE')} € nicht überschritten sind, und das ist mit der Krankenversicherung meist schon erreicht. Altersvorsorge bis ${W.avHoechst.toLocaleString('de-DE')} € je Person.</p></div>
+  <h2>Riester-Rente</h2>
+  <p class="small muted">Beiträge plus Zulage zählen bis ${W.avMax.toLocaleString('de-DE')} € je Person. Das Finanzamt prüft, ob das mehr bringt als die Zulage, und erstattet dann die Differenz.</p>
+  ${estListe(E, 'av', (x, i) => `Riester-Vertrag ${i + 1}`, 'Riester-Vertrag hinzufügen', (p) => `${werSel(E, p)}
+    ${ef(E, p + '.beitrag', 'Eigene Beiträge im Jahr €', { hint: 'laut Bescheinigung des Anbieters', z: 'av.beitrag' })}
+    ${ef(E, p + '.zulage', 'Zulagen €', { ph: String(W.avGrund), hint: `Grundzulage ${W.avGrund} €, je Kind 300 € (vor 2008 geboren 185 €)` })}`)}
   ${estDoks(E, 'vorsorge')}`;
 }
 function estSonder(E) {
@@ -1420,7 +1654,7 @@ function estHh(E) {
   </div></div>${estDoks(E, 'hh')}`;
 }
 function estUnterlagen(E) {
-  const bs = ['person'].concat(BEREICHE.map((b) => b[0]).filter((k) => E.bereiche[k]), ['vorsorge', 'sonder']);
+  const bs = ['person'].concat(BEREICHE.map((b) => b[0]).filter((k) => E.bereiche[k] && (k !== 'gewerbe' || gewAn(E))), ['vorsorge', 'sonder']);
   const name = { person: 'Allgemein', vorsorge: 'Versicherungen', sonder: 'Kirche, Spenden' };
   for (const b of BEREICHE) name[b[0]] = b[1];
   return `<p class="small muted">Alles an einem Ort: Diese Unterlagen brauchst du. Was schon hochgeladen ist, steht darunter.</p>
@@ -1431,16 +1665,20 @@ function estErgebnis(E, j) {
   const s = R.saldo;
   const ungeprueft = A.some((a) => a.rows.some((x) => x.z && !GEPRUEFT[x.key]));
   return `<div class="status"><div class="big">${s > 0 ? `<span class="pill warn">Nachzahlung</span> etwa ${eur(s)}` : `<span class="pill good">Erstattung</span> etwa ${eur(-s)}`}</div>
-    <p class="small muted" style="margin-top:6px">Grobe Schätzung. Das Finanzamt rechnet genauer, z. B. mit Rentenfreibetrag, Altersentlastung, Verlustvorträgen und Progressionsvorbehalt (Elterngeld, Kurzarbeit).</p></div>
+    <p class="small muted" style="margin-top:6px">Grobe Schätzung. Das Finanzamt rechnet genauer, z. B. mit Rentenfreibetrag, Altersentlastung und Verlustvorträgen.</p></div>
+  ${vPflicht(E, j, R)}
   <div class="card"><h2>So rechnet die App</h2><table class="tab">
-    ${Object.entries(R.eink).map(([k, v]) => `<tr><td>${{ gewerbe: 'Einkünfte aus der Firma', n: 'Einkünfte aus Arbeitslohn (nach Werbungskosten)', v: 'Einkünfte aus Vermietung', r: 'Rente, steuerpflichtiger Teil', kap: 'Kapitalerträge (Günstigerprüfung)' }[k]}</td><td style="text-align:right">${eur(v)}</td></tr>`).join('')}
+    ${Object.entries(R.eink).map(([k, v]) => `<tr><td>${{ gewerbe: 'Einkünfte aus der Firma', n: 'Einkünfte aus Arbeitslohn (nach Werbungskosten)', v: 'Einkünfte aus Vermietung', r: 'Rente, steuerpflichtiger Teil', kap: 'Kapitalerträge (Günstigerprüfung)', so: 'Private Verkäufe und Nebeneinnahmen' }[k]}</td><td style="text-align:right">${eur(v)}</td></tr>`).join('')}
     ${R.entl ? `<tr><td>minus Entlastungsbetrag Alleinerziehende</td><td style="text-align:right">− ${eur(R.entl)}</td></tr>` : ''}
     <tr><td>minus Sonderausgaben${R.kibe ? ' (mit Kinderbetreuung)' : ''}</td><td style="text-align:right">− ${eur(R.sa)}</td></tr>
     <tr><td>minus Versicherungen und Altersvorsorge</td><td style="text-align:right">− ${eur(R.vorsorge)}</td></tr>
     ${R.agb ? `<tr><td>minus außergewöhnliche Belastungen</td><td style="text-align:right">− ${eur(R.agb)}</td></tr>` : ''}
+    ${R.uh ? `<tr><td>minus Unterhalt an unterstützte Personen</td><td style="text-align:right">− ${eur(R.uh)}</td></tr>` : ''}
+    ${R.avBesser ? `<tr><td>minus Riester-Beiträge und Zulage</td><td style="text-align:right">− ${eur(R.avAbz)}</td></tr>` : ''}
     ${R.freibetragBesser ? `<tr><td>minus Kinderfreibeträge (günstiger als Kindergeld)</td><td style="text-align:right">− ${eur(R.kfb)}</td></tr>` : ''}
-    <tr><td><b>Zu versteuerndes Einkommen</b></td><td style="text-align:right"><b>${eur(Math.max(0, R.einkommen - (R.freibetragBesser ? R.kfb : 0)))}</b></td></tr>
-    <tr><td>Einkommensteuer${zus(E) ? ' (Splittingtarif)' : ''}${R.erm35 ? `, nach Anrechnung Gewerbesteuer ${eur(R.erm35)}` : ''}${R.hh ? `, nach Abzug Haushalt/Handwerker ${eur(R.hh)}` : ''}${R.freibetragBesser ? ', plus Kindergeld' : ''}</td><td style="text-align:right">${eur(R.est)}</td></tr>
+    <tr><td><b>Zu versteuerndes Einkommen</b></td><td style="text-align:right"><b>${eur(Math.max(0, R.zveBasis - (R.freibetragBesser ? R.kfb : 0)))}</b></td></tr>
+    ${R.pv ? `<tr><td class="small muted">Für den Steuersatz mitgerechnet: Elterngeld und Co.</td><td style="text-align:right" class="small muted">${eur(R.pv)}</td></tr>` : ''}
+    <tr><td>Einkommensteuer${zus(E) ? ' (Splittingtarif)' : ''}${R.abfSum ? ', mit Fünftelregelung für die Abfindung' : ''}${R.avBesser ? ', plus Riester-Zulage' : ''}${R.erm35 ? `, nach Anrechnung Gewerbesteuer ${eur(R.erm35)}` : ''}${R.hh ? `, nach Abzug Haushalt/Handwerker ${eur(R.hh)}` : ''}${R.freibetragBesser ? ', plus Kindergeld' : ''}</td><td style="text-align:right">${eur(R.est)}</td></tr>
     ${R.soli ? `<tr><td>Solidaritätszuschlag</td><td style="text-align:right">${eur(R.soli)}</td></tr>` : ''}
     ${R.kist ? `<tr><td>Kirchensteuer</td><td style="text-align:right">${eur(R.kist)}</td></tr>` : ''}
     ${R.kapAbgeltung ? `<tr><td>Abgeltungsteuer auf Erträge ohne Steuerabzug</td><td style="text-align:right">${eur(R.kapAbgeltung)}</td></tr>` : ''}
@@ -1514,11 +1752,19 @@ const ICONS = {
   firma: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 21V5a1 1 0 0 1 1-1h9a1 1 0 0 1 1 1v16M15 9h4a1 1 0 0 1 1 1v11M3 21h18M8 8h3M8 12h3M8 16h3"/></svg>'
 };
 const TABS = [['start', 'Übersicht'], ['angebote', 'Angebote'], ['rechnungen', 'Rechnungen'], ['belege', 'Belege'], ['bank', 'Bank'], ['steuern', 'Steuern'], ['firma', 'Firma']];
+/* Nur private Steuererklärung (Angestellte, Rentner): ohne Firmenteil */
+const TABS_PRIVAT = [['start', 'Übersicht'], ['est', 'Steuererklärung'], ['einst', 'Einstellungen']];
+ICONS.est = ICONS.steuern;
+ICONS.einst = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>';
 
 function render() {
-  $('#tabs').innerHTML = TABS.map(([k, t]) => `<button data-act="tab" data-k="${k}"${k === tab || (tab === 'est' && k === 'steuern') ? ' aria-current="page"' : ''}>${ICONS[k]}<span>${t}</span></button>`).join('');
-  $('#firmname').textContent = S.firma.name || '';
-  const v = { start: vStart, angebote: vAngebote, rechnungen: vRechnungen, belege: vBelege, bank: vBank, steuern: vSteuern, firma: vFirma, est: vEst }[tab];
+  const P = privat();
+  if (P && !['start', 'est', 'einst'].includes(tab)) tab = 'start';
+  if (!P && tab === 'einst') tab = 'firma';
+  $('#tabs').innerHTML = (P ? TABS_PRIVAT : TABS).map(([k, t]) => `<button data-act="tab" data-k="${k}"${k === tab || (!P && tab === 'est' && k === 'steuern') ? ' aria-current="page"' : ''}>${ICONS[k]}<span>${t}</span></button>`).join('');
+  $('#firmname').textContent = P ? 'Private Steuererklärung' : S.firma.name || '';
+  $('#fab').style.display = P ? 'none' : '';
+  const v = { start: P ? vStartPrivat : vStart, angebote: vAngebote, rechnungen: vRechnungen, belege: vBelege, bank: vBank, steuern: vSteuern, firma: vFirma, est: vEst, einst: vEinst }[tab];
   $('#app').innerHTML = (S.beispiel ? `<div class="status" style="background:var(--soft);border-color:var(--accent)"><b>Du siehst Beispieldaten einer Musterfirma.</b><p class="small muted" style="margin:4px 0 8px">Schau dich in allen Reitern um und probier alles aus. So sieht man, was wo eingetragen wird.</p><button class="primary" data-act="beispiel-weg">Beispieldaten löschen und selbst starten</button></div>` : '') + v();
 }
 
@@ -1665,6 +1911,47 @@ function vRuecklage(R) {
 }
 
 /* ---------- Übersicht ---------- */
+function vModusWahl() {
+  return `<div class="card" style="border-color:var(--accent)"><h2>Wofür nutzt du das Cockpit?</h2>
+    <div style="display:grid;gap:10px;margin-top:8px">
+      <button class="primary" style="text-align:left;padding:12px 14px" data-act="modus" data-k="firma"><b>Für meine Firma</b><br><span class="small">Selbständig, Gewerbe, Freiberufler, GbR oder GmbH: Angebote, Rechnungen, Belege, Umsatzsteuer und Steuererklärung.</span></button>
+      <button style="text-align:left;padding:12px 14px" data-act="modus" data-k="privat"><b>Nur private Steuererklärung</b><br><span class="small">Angestellt, in Rente, Elternzeit oder Studium: Schritt für Schritt zur Einkommensteuererklärung für ELSTER.</span></button>
+    </div>
+    <p class="small muted" style="margin-top:8px">Du kannst später jederzeit umschalten.</p></div>`;
+}
+function vStartPrivat() {
+  const y0 = new Date().getFullYear(), j = estAktJahr();
+  const E = S.est && S.est[j] ? estFelder(S.est[j]) : null;
+  let kopf, rest = '';
+  if (!E) {
+    kopf = `<div class="big"><span class="pill grey">Noch nicht angefangen</span> Steuererklärung ${j}</div>
+      <p class="small muted" style="margin-top:6px">In etwa 20 bis 40 Minuten durch, wenn du die Lohnsteuerbescheinigung und deine Belege zur Hand hast.</p>`;
+  } else {
+    const L = estSchritte(E), i = Math.max(0, L.findIndex((x) => x[0] === E.schritt)), R = estRechnung(E, j);
+    kopf = `<div class="big">${R.saldo > 0 ? `<span class="pill warn">Nachzahlung</span> etwa ${eur(R.saldo)}` : `<span class="pill good">Erstattung</span> etwa ${eur(-R.saldo)}`}</div>
+      <p class="small muted" style="margin-top:6px">Steuererklärung ${j}, Schritt ${i + 1} von ${L.length}: ${L[i][1]}. Grobe Schätzung nach deinen bisherigen Angaben.</p>`;
+    rest = vPflicht(E, j, R);
+    if (!S.letzteSicherung || tageBis(S.letzteSicherung) < -14) rest += `<div class="card"><h2>Sicherung herunterladen</h2><p class="small muted">Deine Angaben und Unterlagen liegen nur in diesem Browser. ${S.letzteSicherung ? `Letzte Sicherung am ${dat(S.letzteSicherung)}.` : 'Eine Sicherung schützt vor Verlust.'}</p><div class="btns"><button data-act="backup">Sichern</button></div></div>`;
+  }
+  return `<h1>Deine Steuererklärung</h1>
+  <div class="status">${kopf}<div class="btns" style="margin-top:10px"><button class="primary" data-act="est-open">${E ? 'Weitermachen' : 'Starten'}</button></div></div>
+  ${rest}
+  <div class="card"><h2>So geht es</h2><ol class="small" style="margin:6px 0 0;padding-left:20px">
+    <li>Jahr wählen und ankreuzen, was auf dich zutrifft.</li>
+    <li>Die Zahlen von Lohnsteuerbescheinigung und Belegen abtippen und die Unterlagen hochladen.</li>
+    <li>Am Ende zeigt die App für jedes ELSTER-Formular, was in welche Zeile kommt. Das trägst du in „Mein ELSTER“ ein und schickst es ab.</li></ol>
+    <p class="small muted" style="margin-top:8px">Ausfüllhilfe, keine Steuerberatung. Freiwillig abgeben kannst du vier Jahre lang, ${y0 - 1} also bis ${dat(`${y0 + 3}-12-31`)}.</p></div>
+  <p class="small muted">Du hast doch eine Firma? Unter <a href="#" data-act="tab" data-k="einst">Einstellungen</a> umschalten.</p>`;
+}
+function vEinst() {
+  return `<h1>Einstellungen</h1>
+  <div class="card"><h2>Wofür nutzt du das Cockpit?</h2>
+    <p class="small muted">Gerade: nur private Steuererklärung. Mit Firma kommen Angebote, Rechnungen, Belege, Bank und Umsatzsteuer dazu. Deine Angaben zur Steuererklärung bleiben in beiden Fällen erhalten.</p>
+    <div class="btns"><button data-act="modus" data-k="firma">Auf Firma umschalten</button></div></div>
+  ${datenKarte()}
+  <div class="card"><h2>Alles löschen</h2><p class="small muted">Löscht alle Angaben und hochgeladenen Unterlagen auf diesem Gerät. Lade vorher eine Sicherung herunter.</p>
+    <div class="btns"><button class="danger" data-act="wipe">Alle Daten auf diesem Gerät löschen</button></div></div>`;
+}
 function vStart() {
   const jahr = String(new Date().getFullYear());
   const re = S.rechnungen.filter(zaehlt);
@@ -1700,7 +1987,9 @@ function vStart() {
 
   const ampel = ueber.length ? { c: 'bad', t: `${ueber.length} Rechnung${ueber.length > 1 ? 'en' : ''} überfällig` } : todos.length ? { c: 'warn', t: `${todos.length} Sache${todos.length > 1 ? 'n' : ''} zu erledigen` } : { c: 'good', t: 'Alles erledigt' };
 
+  const wahl = !S.modus && !S.beispiel && !S.firma.name && !hatDaten && !Object.keys(S.est || {}).length;
   return `
+  ${wahl ? vModusWahl() : ''}
   <h1>So steht es</h1>
   <div class="status">
     <div class="big"><span class="pill ${ampel.c}">${ampel.c === 'good' ? 'Gut' : ampel.c === 'bad' ? 'Achtung' : 'Zu tun'}</span> ${ampel.t}</div>
@@ -2142,19 +2431,7 @@ function vFirma() {
     <p class="small muted">Leistungen und Produkte mit festem Preis, und wie deine Rechnungs- und Angebotsnummern aussehen.</p>
     <div class="btns"><button data-act="artikel">Artikel und Leistungen (${S.artikel.length})</button><button data-act="lager">Lager${lagerArtikel().length ? ` (${eur(lagerWert())})` : ''}</button><button data-act="nummern">Nummern (${esc(nrBau(nrFormat('RE'), heute(), 1))})</button></div>
   </div>
-  <div class="card">
-    <h2>Sind meine Daten sicher? ${hb('sicherung')}</h2>
-    <p>Alles liegt nur in diesem Browser auf diesem Gerät${S.letzteSicherung ? `, letzte Sicherung am ${dat(S.letzteSicherung)}` : ', noch keine Sicherung'}.</p>
-    <p class="small">${dauerhaft ? '<span class="pill good">Dauerhaft gespeichert</span> Der Browser löscht die Daten nicht von selbst, auch wenn der Speicher knapp wird.' : `<span class="pill warn">Nicht fest gespeichert</span> Der Browser darf die Daten bei Platzmangel löschen, Safari auch nach 7 Tagen ohne Nutzung. Lege die App auf den Home-Bildschirm und lade regelmäßig eine Sicherung herunter. <button class="chip" data-act="speicher-fest">Dauerhaft speichern</button>`}</p>
-    <div class="btns"><button data-act="backup">Sicherung herunterladen</button><button data-act="restore">Sicherung einspielen</button></div>
-    ${vorherAm ? `<p class="small" style="margin-top:10px"><span class="pill grey">Aufgehoben</span> Der Stand vor dem Einspielen vom ${dat(vorherAm)} ist noch da. <button class="chip" data-act="vorher-zurueck">Rückgängig machen</button> <button class="chip" data-act="vorher-weg">Verwerfen</button></p>` : ''}
-    <p class="small muted" style="margin-top:6px">Die Sicherung ist eine Datei mit allen Daten und Belegen. Speichere sie auf deinem Computer, in iCloud oder Google Drive. ${hb('handy', 'Aufs Handy legen')}</p>
-    <details><summary>Auf ein anderes Gerät umziehen, z. B. vom Laptop aufs Handy</summary><ol class="small" style="margin:8px 0 0;padding-left:20px">
-      <li>Auf dem alten Gerät „Sicherung herunterladen“.</li>
-      <li>Die Datei aufs neue Gerät bringen: per AirDrop, iCloud Drive, Google Drive oder als Mail an dich selbst.</li>
-      <li>Auf dem neuen Gerät das Cockpit öffnen, Reiter Firma, „Sicherung einspielen“ und die Datei wählen. Am Computer kannst du sie auch einfach ins Fenster ziehen.</li>
-      <li>Vor dem Einspielen siehst du, was in der Sicherung steckt. Arbeite danach nur noch auf einem Gerät weiter, sonst laufen die Stände auseinander.</li></ol></details>
-  </div>
+  ${datenKarte()}
   <div class="card">
     <h2>Daten für Excel und Steuerberater</h2>
     <p class="small muted">Das Jahrespaket ist eine ZIP-Datei mit Listen aller Einnahmen, Ausgaben und Bankbuchungen (öffnen sich in Excel) und allen Belegen als PDF oder Foto, sauber nach Datum benannt. Für ELSTER gibt es im Reiter Steuern neben jeder Kennzahl einen Knopf zum Kopieren.</p>
@@ -2165,6 +2442,26 @@ function vFirma() {
     <details><summary>Weitere Daten</summary>
       <div class="btns"><button class="danger" data-act="wipe">Alle Daten auf diesem Gerät löschen</button></div>
     </details>
+  </div>
+  <div class="card">
+    <h2>Keine Firma?</h2>
+    <p class="small muted">Wer angestellt ist oder Rente bekommt, kann das Cockpit nur für die private Steuererklärung nutzen. Dann verschwinden Angebote, Rechnungen, Belege und Umsatzsteuer. Deine Daten bleiben erhalten, du kannst jederzeit zurückschalten.</p>
+    <div class="btns"><button data-act="modus" data-k="privat">Nur private Steuererklärung nutzen</button></div>
+  </div>`;
+}
+function datenKarte() {
+  return `  <div class="card">
+    <h2>Sind meine Daten sicher? ${hb('sicherung')}</h2>
+    <p>Alles liegt nur in diesem Browser auf diesem Gerät${S.letzteSicherung ? `, letzte Sicherung am ${dat(S.letzteSicherung)}` : ', noch keine Sicherung'}.</p>
+    <p class="small">${dauerhaft ? '<span class="pill good">Dauerhaft gespeichert</span> Der Browser löscht die Daten nicht von selbst, auch wenn der Speicher knapp wird.' : `<span class="pill warn">Nicht fest gespeichert</span> Der Browser darf die Daten bei Platzmangel löschen, Safari auch nach 7 Tagen ohne Nutzung. Lege die App auf den Home-Bildschirm und lade regelmäßig eine Sicherung herunter. <button class="chip" data-act="speicher-fest">Dauerhaft speichern</button>`}</p>
+    <div class="btns"><button data-act="backup">Sicherung herunterladen</button><button data-act="restore">Sicherung einspielen</button></div>
+    ${vorherAm ? `<p class="small" style="margin-top:10px"><span class="pill grey">Aufgehoben</span> Der Stand vor dem Einspielen vom ${dat(vorherAm)} ist noch da. <button class="chip" data-act="vorher-zurueck">Rückgängig machen</button> <button class="chip" data-act="vorher-weg">Verwerfen</button></p>` : ''}
+    <p class="small muted" style="margin-top:6px">Die Sicherung ist eine Datei mit allen Daten und Belegen. Speichere sie auf deinem Computer, in iCloud oder Google Drive. ${hb('handy', 'Aufs Handy legen')}</p>
+    <details><summary>Auf ein anderes Gerät umziehen, z. B. vom Laptop aufs Handy</summary><ol class="small" style="margin:8px 0 0;padding-left:20px">
+      <li>Auf dem alten Gerät „Sicherung herunterladen“.</li>
+      <li>Die Datei aufs neue Gerät bringen: per AirDrop, iCloud Drive, Google Drive oder als Mail an dich selbst.</li>
+      <li>Auf dem neuen Gerät das Cockpit öffnen, Reiter ${privat() ? 'Einstellungen' : 'Firma'}, „Sicherung einspielen“ und die Datei wählen. Am Computer kannst du sie auch einfach ins Fenster ziehen.</li>
+      <li>Vor dem Einspielen siehst du, was in der Sicherung steckt. Arbeite danach nur noch auf einem Gerät weiter, sonst laufen die Stände auseinander.</li></ol></details>
   </div>`;
 }
 function pflichtFirma() {
@@ -4480,10 +4777,11 @@ const ACT = {
   'vorher-weg': vorherWeg,
   paket: (el) => paket(el.dataset.k),
   'speicher-fest': async () => { const ok = await speicherFest(); render(); toast(ok ? 'Der Browser behält die Daten jetzt dauerhaft.' : 'Der Browser hat abgelehnt. Lege die App auf den Home-Bildschirm und sichere regelmäßig.'); },
+  modus: async (el) => { S.modus = el.dataset.k; await save(); tab = 'start'; closeDlg(); render(); window.scrollTo(0, 0); toast(privat() ? 'Nur private Steuererklärung' : 'Mit Firma'); },
   'est-open': () => { tab = 'est'; closeDlg(); render(); window.scrollTo(0, 0); },
   'est-go': async (el) => { estDaten().schritt = el.dataset.k; await save(); render(); window.scrollTo(0, 0); },
   'est-jahr': (el) => { estJahr = Number(el.dataset.k); estDaten().schritt = 'start'; render(); },
-  'est-add': async (el) => { const E = estDaten(); E[el.dataset.k].push(el.dataset.k === 'n' || el.dataset.k === 'r' ? { wer: 'ich' } : { name: '' }); await save(); render(); },
+  'est-add': async (el) => { const E = estDaten(); E[el.dataset.k].push(['n', 'r', 'av'].includes(el.dataset.k) ? { wer: 'ich' } : { name: '' }); await save(); render(); },
   'est-del': async (el) => { if (!confirm('Eintrag entfernen?')) return; const E = estDaten(); E[el.dataset.k].splice(Number(el.dataset.i), 1); await save(); render(); },
   'est-up': (el) => estUpload(el.dataset.k),
   'est-dok-del': async (el) => { if (!confirm('Datei entfernen?')) return; const E = estDaten(); await idbDel('datei:' + el.dataset.k); E.dok = E.dok.filter((d) => d.dateiId !== el.dataset.k); await save(); render(); },
