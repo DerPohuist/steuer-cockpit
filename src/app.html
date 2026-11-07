@@ -142,6 +142,9 @@ dialog::backdrop { background: rgba(0,0,0,.45); }
 .menu .ic { font-size: 24px; width: 34px; text-align: center; }
 .menu .t { display: block; font-weight: 700; }
 .menu .s { display: block; font-weight: 400; font-size: 13px; color: var(--muted); }
+.auto { outline: 2px solid var(--accent); outline-offset: 1px; }
+.spin { display: inline-block; width: 12px; height: 12px; border: 2px solid var(--line); border-top-color: var(--accent); border-radius: 50%; animation: spin 0.8s linear infinite; vertical-align: -2px; margin-right: 4px; }
+@keyframes spin { to { transform: rotate(360deg); } }
 .preview { max-width: 100%; max-height: 260px; border-radius: 8px; border: 1px solid var(--line); display: block; margin-top: 8px; }
 .toast { position: fixed; left: 50%; transform: translateX(-50%); bottom: calc(150px + env(safe-area-inset-bottom, 0px)); background: var(--fg); color: var(--bg); padding: 10px 16px; border-radius: 10px; z-index: 20; font-size: 14px; max-width: calc(100% - 32px); }
 table.tab { width: 100%; border-collapse: collapse; font-size: 14px; }
@@ -241,7 +244,7 @@ const REGISTER_RF = ['ek', 'ohg', 'ug', 'gmbh'];
 function leer() {
   return {
     v: 2,
-    firma: { name: '', inhaber: '', strasse: '', plz: '', ort: '', steuernr: '', ustid: '', email: '', tel: '', iban: '', bic: '', bank: '', rechtsform: '', registergericht: '', registernr: '', logo: '', kleinunternehmer: false, gruendung: '', turnus: 'monat', dauerfrist: false, zahlungsziel: 14, angebotTage: 30, basiszins: 1.27, skontoProz: '', skontoTage: '', nummern: {} },
+    firma: { name: '', inhaber: '', strasse: '', plz: '', ort: '', steuernr: '', bundesland: '', ustid: '', email: '', tel: '', iban: '', bic: '', bank: '', rechtsform: '', registergericht: '', registernr: '', logo: '', kleinunternehmer: false, gruendung: '', turnus: 'monat', dauerfrist: false, zahlungsziel: 14, angebotTage: 30, basiszins: 1.27, skontoProz: '', skontoTage: '', nummern: {} },
     angebote: [], rechnungen: [], belege: [], kunden: [], lieferanten: [], bank: [], vorlagen: [], artikel: [], lager: [], anlagen: [], zaehler: {}, letzteSicherung: null,
     steuer: { versteuerung: 'soll', hebesatz: 400, berater: false, svz: 0, vzEst: 0, vzGew: 0, erledigt: {}, ruecklageIst: '', kalVorher: 3, kalRe: true, skr: '03', beraterNr: '', mandantNr: '' },
     est: {}, modus: ''
@@ -506,6 +509,77 @@ function kzTabelle(rows) {
   return `<table class="tab">${rows.map((x) => `<tr${x.kz === '83' ? ' style="font-weight:700"' : ''}><td style="white-space:nowrap">Kz ${x.kz}</td><td>${x.t}${x.info ? `<div class="small muted">${x.info}</div>` : ''}</td><td style="text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums">${x.cent ? eur(x.wert) : x.wert.toLocaleString('de-DE') + ' €'}</td><td style="text-align:right"><button class="chip" data-act="st-copy" data-k="${kzWert(x)}" aria-label="Wert für Kz ${x.kz} kopieren">Kopieren</button></td></tr>`).join('')}</table>`;
 }
 
+/* Steuernummer ins 13-stellige ELSTER-Format (Bundesschema, Quelle: Tabelle bei de.wikipedia.org/wiki/Steuernummer).
+   Je Land: Vorsatz für die 10- bzw. 11-stellige Landesnummer; HE hat 11 Stellen mit führender 0, die wegfällt. */
+const BUNDESLAENDER = {
+  BW: ['Baden-Württemberg', '28', null], BY: ['Bayern', null, '9'], BE: ['Berlin', '11', null], BB: ['Brandenburg', null, '3'],
+  HB: ['Bremen', '24', null], HH: ['Hamburg', '22', null], HE: ['Hessen', null, '26-'], MV: ['Mecklenburg-Vorpommern', '40', '4'],
+  NI: ['Niedersachsen', '23', null], NW: ['Nordrhein-Westfalen', null, '5'], RP: ['Rheinland-Pfalz', '27', null], SL: ['Saarland', '10', '1'],
+  SN: ['Sachsen', null, '3'], ST: ['Sachsen-Anhalt', null, '3'], SH: ['Schleswig-Holstein', '21', null], TH: ['Thüringen', null, '4']
+};
+function stnr13(stnr, land) {
+  const d = String(stnr || '').replace(/\D/g, '');
+  let z12 = '';
+  if (d.length === 13) return /^\d{4}0\d{8}$/.test(d) ? d : '';
+  if (d.length === 12) z12 = d;
+  else {
+    const L = BUNDESLAENDER[land]; if (!L) return '';
+    const v = d.length === 10 ? L[1] : d.length === 11 ? L[2] : null; if (!v) return '';
+    z12 = v.endsWith('-') ? v.slice(0, -1) + d.slice(1) : v + d;
+  }
+  if (z12.length !== 12) return '';
+  return z12.slice(0, 4) + '0' + z12.slice(4);
+}
+/* Datei für den Import in Mein ELSTER: nur die Nutzdaten, Wurzel „Anmeldungssteuern“, Zeichensatz ISO-8859-15
+   (ELSTER-Hilfe „Hochladen von Formulardaten“). Kz09 wird beim Import ignoriert, ist aber Pflichtfeld: Platzhalter 00000. */
+function ustvaXml(key) {
+  const z = zrAus(key), u = ustva(z), f = S.firma, jahr = z.von.slice(0, 4);
+  const p = key.split('-')[1], zeitraum = p[0] === 'Q' ? '4' + p[1] : p;
+  const fehlt = [];
+  const st = stnr13(f.steuernr, f.bundesland);
+  if (!st) fehlt.push(f.steuernr ? 'Bundesland des Finanzamts im Reiter Firma (oder Steuernummer prüfen)' : 'Steuernummer im Reiter Firma');
+  for (const [k, n] of [['name', 'Firmenname'], ['strasse', 'Straße'], ['plz', 'PLZ'], ['ort', 'Ort']]) if (!String(f[k] || '').trim()) fehlt.push(n + ' im Reiter Firma');
+  if (fehlt.length) return { fehlt };
+  const x = (s, n) => String(s || '').trim().slice(0, n || 99).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  const wert = (r) => r.cent ? (Math.round(r.wert * 100) / 100).toFixed(2) : String(Math.trunc(r.wert));
+  const kz = u.rows.filter((r) => r.kz !== '83' && r.wert).map((r) => `      <Kz${r.kz}>${wert(r)}</Kz${r.kz}>`);
+  const k83 = u.rows.find((r) => r.kz === '83');
+  const xml = `<?xml version="1.0" encoding="ISO-8859-15" standalone="no"?>
+<Anmeldungssteuern xmlns="http://finkonsens.de/elster/elsteranmeldung/ustva/v${jahr}" version="${jahr}">
+  <Erstellungsdatum>${heute().replace(/-/g, '')}</Erstellungsdatum>
+  <DatenLieferant>
+    <Name>${x(f.name, 45)}</Name>
+    <Strasse>${x(f.strasse, 30)}</Strasse>
+    <PLZ>${x(f.plz, 12)}</PLZ>
+    <Ort>${x(f.ort, 30)}</Ort>
+  </DatenLieferant>
+  <Steuerfall>
+    <Umsatzsteuervoranmeldung>
+      <Jahr>${jahr}</Jahr>
+      <Zeitraum>${zeitraum}</Zeitraum>
+      <Steuernummer>${st}</Steuernummer>
+      <Kz09>00000</Kz09>
+${kz.join('\n')}${kz.length ? '\n' : ''}      <Kz83>${(Math.round((k83 ? k83.wert : 0) * 100) / 100).toFixed(2)}</Kz83>
+    </Umsatzsteuervoranmeldung>
+  </Steuerfall>
+</Anmeldungssteuern>
+`.replace(/\n\n/g, '\n');
+  return { xml, z };
+}
+/* Text in ISO-8859-15 umwandeln (€ und ein paar Sonderzeichen liegen dort anders als in Latin-1) */
+function iso885915(s) {
+  const extra = { '€': 0xa4, 'Š': 0xa6, 'š': 0xa8, 'Ž': 0xb4, 'ž': 0xb8, 'Œ': 0xbc, 'œ': 0xbd, 'Ÿ': 0xbe };
+  const out = new Uint8Array(s.length); let i = 0;
+  for (const c of s) { const n = c.charCodeAt(0); out[i++] = extra[c] !== undefined ? extra[c] : (n < 256 && ![0xa4, 0xa6, 0xa8, 0xb4, 0xb8, 0xbc, 0xbd, 0xbe].includes(n)) ? n : 0x3f; }
+  return out.slice(0, i);
+}
+function stXml(key) {
+  const r = ustvaXml(key);
+  if (r.fehlt) return toast('Für die ELSTER-Datei fehlt noch: ' + r.fehlt.join(', '));
+  download(`UStVA_${key}_ELSTER.xml`, new Blob([iso885915(r.xml)], { type: 'application/xml' }));
+  toast('ELSTER-Datei gespeichert');
+}
+
 /* Zusammenfassende Meldung: EU-Geschäfte je Kunde und Quartal */
 function zm(von, bis) {
   const m = {};
@@ -607,7 +681,7 @@ function schaetzung(jahr, gw) {
 
 /* Abgabefrist der Jahreserklärungen */
 function jahresFrist(j) {
-  if (S.steuer.berater) return werktag(j === 2024 ? '2026-04-30' : j === 2025 ? '2027-03-31' : iso(new Date(j + 2, 2, 0)));
+  if (S.steuer.berater) return werktag(j === 2024 ? '2026-04-30' : iso(new Date(j + 2, 2, 0)));
   return werktag(j === 2023 ? '2024-09-02' : `${j + 1}-07-31`);
 }
 
@@ -633,7 +707,7 @@ function fristen() {
       const y = Math.floor(q / 4), qi = q % 4;
       const von = d(y, qi * 3 + 1, 1), ende = iso(new Date(y, qi * 3 + 3, 0));
       const nd = new Date(y, qi * 3 + 3, 25);
-      add(iso(nd), `zm-${y}-Q${qi + 1}`, `Zusammenfassende Meldung ${qi + 1}. Quartal ${y}`, 'EU-Geschäfte an das Bundeszentralamt für Steuern melden (BZSt-Online-Portal).', zm(von, ende).length > 0);
+      add(iso(nd), `zm-${y}-Q${qi + 1}`, `Zusammenfassende Meldung ${qi + 1}. Quartal ${y}`, 'EU-Geschäfte an das Bundeszentralamt für Steuern melden, über Mein ELSTER (Formular „Zusammenfassende Meldung“).', zm(von, ende).length > 0);
     }
   }
   for (const y of [y0, y0 + 1]) {
@@ -680,19 +754,20 @@ function vSteuern() {
     ${u.warn.length ? `<ul class="checks">${u.warn.map((w) => `<li class="miss">${w}</li>`).join('')}</ul>` : ''}
     <h3>Diese Werte trägst du in ELSTER ein</h3>
     ${kzTabelle(u.rows)}
-    <div class="btns"><button class="primary" data-act="st-done" data-k="ustva-${zk}">${erl ? 'Doch nicht abgegeben' : 'Als abgegeben markieren'}</button><button data-act="st-csv" data-k="${zk}">Als Datei für den Steuerberater</button><button data-act="st-print" data-k="${zk}">Drucken / PDF</button></div>
+    <div class="btns"><button class="primary" data-act="st-done" data-k="ustva-${zk}">${erl ? 'Doch nicht abgegeben' : 'Als abgegeben markieren'}</button><button data-act="st-xml" data-k="${zk}">Datei für ELSTER</button><button data-act="st-csv" data-k="${zk}">Als Datei für den Steuerberater</button><button data-act="st-print" data-k="${zk}">Drucken / PDF</button></div>
     <details><summary>So gibst du sie in ELSTER ab</summary><ol class="small" style="margin:8px 0 0;padding-left:20px">
       <li>Bei <b>Mein ELSTER</b> anmelden (elster.de).</li>
       <li>„Formulare &amp; Leistungen“, dann „Alle Formulare“, „Unternehmen“, „Umsatzsteuer-Voranmeldung ${z.von.slice(0, 4)}“.</li>
       <li>Zeitraum „${esc(z.name)}“ wählen, dann die Kennzahlen oben eintragen. Mit „Kopieren“ landet der Wert in der Zwischenablage.</li>
       <li>Prüfen lassen, die Zahl bei Kz 83 vergleichen und absenden. Danach hier „Als abgegeben markieren“.</li></ol>
       <p class="small" style="margin-top:6px">${hb('elster', 'Noch kein ELSTER-Konto?')} ${hb('zahlen', 'Wie bezahle ich?')} ${hb('dauerfrist', 'Mehr Zeit bekommen')}</p>
-      <p class="small muted" style="margin-top:6px">ELSTER nimmt im Browser keine Dateien entgegen. Die direkte Übertragung aus der App braucht einen Server und eine Zulassung als Software-Hersteller und kommt später.</p></details>
+      <p class="small" style="margin-top:6px"><b>Schneller mit der Datei für ELSTER:</b> Knopf „Datei für ELSTER“ drücken. In Mein ELSTER die Umsatzsteuer-Voranmeldung öffnen und dort beim Hochladen von Formulardaten (XML-Datei) diese Datei wählen. ELSTER füllt das Formular damit aus, schickt aber nichts ab. Du prüfst alles und sendest selbst. Dafür braucht die App im Reiter Firma Steuernummer, Bundesland und Adresse.</p>
+      <p class="small muted" style="margin-top:6px">Direkt aus der App senden geht nicht, dafür bräuchte es eine Zulassung als Software-Hersteller.</p></details>
     <details><summary>So rechnet die App</summary><p class="small muted" style="margin-top:8px">${u.n} Rechnungen und Belege im Zeitraum ${dat(z.von)} bis ${dat(z.bis)}. ${S.steuer.versteuerung === 'ist' ? 'Ist-Versteuerung: Rechnungen zählen im Monat der Zahlung.' : 'Soll-Versteuerung: Rechnungen zählen nach Rechnungsdatum.'} Beträge ohne Cent wie in ELSTER, die Steuer darauf mit Cent. Vorsteuer zählt nach Belegdatum. Kleine Abweichungen zur Summe deiner Rechnungen kommen vom Abschneiden der Cent.</p></details>
   </div>` : `<div class="card"><h2>Umsatzsteuer-Voranmeldung ${hb('kleinunternehmer', 'Kleinunternehmer?')}</h2><p>Als Kleinunternehmer gibst du seit 2025 weder eine Voranmeldung noch eine Umsatzsteuer-Jahreserklärung ab, außer das Finanzamt fordert sie an (§ 19 Abs. 1 UStG).</p><p class="small muted">Ausnahme: Kaufst du Leistungen bei Firmen im Ausland ohne Umsatzsteuer ein (z. B. Werbung bei Google oder Meta), schuldest du die Steuer selbst. Markiere solche Belege, dann erscheint hier die Anmeldung. ${hb('reversecharge', 'Mehr dazu')}</p></div>`}
 
   ${zmL.length ? `<div class="card"><h2>Zusammenfassende Meldung ${qi + 1}. Quartal ${qy} ${hb('zm')}</h2>
-    <p class="small muted">Meldest du bis zum 25. nach Quartalsende im BZSt-Online-Portal. Bei Warenlieferungen über 50.000 € im Quartal monatlich.</p>
+    <p class="small muted">Meldest du bis zum 25. nach Quartalsende über Mein ELSTER. Bei Warenlieferungen über 50.000 € im Quartal monatlich (§ 18a UStG).</p>
     <table class="tab"><tr><th>Kunde</th><th>USt-IdNr.</th><th>Art</th><th style="text-align:right">Betrag</th></tr>${zmL.map((x) => `<tr><td>${esc(x.name)}</td><td>${x.land && x.nr ? esc(x.land + x.nr) : '<span class="pill bad">fehlt</span>'}</td><td>${x.art === 'S' ? 'Dienstleistung' : 'Lieferung'}</td><td style="text-align:right">${x.betrag.toLocaleString('de-DE')} €</td></tr>`).join('')}</table>
     <div class="btns"><button data-act="st-zm" data-k="${qy}-${qi}">Liste als Datei</button></div></div>` : ''}
 
@@ -1772,7 +1847,7 @@ function render() {
 function beispielDaten() {
   const B = leer(), t = heute(), tag = (n) => plusTage(t, n);
   B.beispiel = true; B.letzteSicherung = t;
-  Object.assign(B.firma, { name: 'Muster Werbetechnik', inhaber: 'Max Muster', strasse: 'Musterstraße 12', plz: '75172', ort: 'Pforzheim', steuernr: '41/123/45678', ustid: 'DE123456789', email: 'info@muster-werbetechnik.de', tel: '07231 123456', iban: 'DE02 1203 0000 0000 2020 51', bic: 'BYLADEM1001', bank: 'Musterbank', rechtsform: 'einzel' });
+  Object.assign(B.firma, { name: 'Muster Werbetechnik', inhaber: 'Max Muster', strasse: 'Musterstraße 12', plz: '75172', ort: 'Pforzheim', steuernr: '41/123/45678', bundesland: 'BW', ustid: 'DE123456789', email: 'info@muster-werbetechnik.de', tel: '07231 123456', iban: 'DE02 1203 0000 0000 2020 51', bic: 'BYLADEM1001', bank: 'Musterbank', rechtsform: 'einzel' });
   const K = [
     { id: uid(), name: 'Bäckerei Sonnenschein GmbH', adresse: 'Hauptstraße 5\n75175 Pforzheim', ustid: '', email: 'buero@baeckerei-sonnenschein.de', leitweg: '', land: '' },
     { id: uid(), name: 'Autohaus Weber KG', adresse: 'Industriestraße 20\n75179 Pforzheim', ustid: '', email: 'einkauf@autohaus-weber.de', leitweg: '', land: '' },
@@ -2022,7 +2097,7 @@ function vStart() {
   </div>`}
   <details class="card"><summary>Was kann die App schon, was kommt noch?</summary>
     <p class="small" style="margin-top:8px"><b>Schon da:</b> Angebote und Rechnungen schreiben, als PDF drucken, als E-Rechnung (XRechnung) speichern, Angebot mit einem Tipp in eine Rechnung umwandeln, Storno per Stornorechnung, Belege und alte Rechnungen hochladen, Kontoauszüge (CSV) einlesen und Zahlungen Rechnungen zuordnen, Umsatzsteuer-Voranmeldung mit ELSTER-Kennzahlen, Zusammenfassende Meldung, EÜR bzw. Gewinn-Vorschau, Steuerschätzung, Fristen als Kalender-Datei für Handy und Outlook, Steuer-Rücklage mit Ampel, Kleinunternehmer-Wächter, Beleg-Abgleich mit dem Konto, wiederkehrende Rechnungen und Ausgaben, Diagramme zu Einnahmen und Ausgaben, Jahrespaket als ZIP, Export im DATEV-Format für den Steuerberater, Sicherung und Umzug auf ein anderes Gerät.</p>
-    <p class="small"><b>Kommt noch:</b> Login und Speicherung auf einem Server, Texterkennung für Belege, direkte Qonto-Verbindung, direkte Abgabe über ELSTER, vollständige Jahreserklärungen.</p>
+    <p class="small"><b>Kommt noch:</b> Login und Speicherung auf einem Server, direkte Qonto-Verbindung, direkte Abgabe über ELSTER, vollständige Jahreserklärungen.</p>
     <p class="small muted">Deine Daten liegen nur in diesem Browser auf diesem Gerät. Andere Geräte sehen sie nicht. Lade regelmäßig eine Sicherung herunter. Die Ablage hier ist noch keine GoBD-konforme Archivierung.</p>
   </details>`;
 }
@@ -2202,7 +2277,7 @@ function vBelege() {
     ${all.length ? chips('be', opts) : ''}
     ${list.length ? `<ul class="list">${list.map((b) => `<li><button class="item" data-act="open-be" data-id="${b.id}"><div class="grow"><div class="t">${esc(b.lieferant || 'Ohne Lieferant')}</div><div class="s">${dat(b.datum)} · ${b.kategorie ? esc(b.kategorie) : '<span style="color:var(--warn)">Kategorie fehlt</span>'}${b.dateiName ? ' · 📎' : ''}${b.buchungId ? ' · 🏦' : ''}${b.zahlweg === 'privat' ? ' · privat ausgelegt' : b.zahlweg === 'bar' ? ' · bar' : ''}</div></div><div><div class="amt">${num(b.brutto) ? eur(num(b.brutto)) : '<span class="pill warn">Betrag fehlt</span>'}</div><div class="s" style="text-align:right">${b.zahlweg === 'offen' ? '<span class="pill warn">Nicht bezahlt</span>' : num(b.vorsteuer) ? 'VSt ' + eur(num(b.vorsteuer)) : ''}</div></div></button></li>`).join('')}</ul>`
       : `<div class="empty">${all.length ? 'In dieser Ansicht ist nichts.' : 'Noch kein Beleg.'}</div>`}
-    <p class="small muted" style="margin-top:8px">Betrag, Datum und Steuersatz trägst du vorerst selbst ein. Die automatische Texterkennung kommt später.</p>
+    <p class="small muted" style="margin-top:8px">Betrag, Datum, Lieferant und Steuersatz liest die App selbst aus: aus E-Rechnungen genau, aus PDFs und Fotos per Texterkennung. Das passiert nur auf deinem Gerät. Bitte die markierten Felder kurz prüfen.</p>
   </div>
   ${kat.length ? `<details class="card"><summary>Ausgaben ${jahr} nach Kategorie</summary>
     <ul class="list" style="margin-top:6px">${kat.map(([k, x]) => `<li><button class="item" data-act="filter" data-f="be" data-k="${esc(k)}"><div class="grow"><div class="t">${esc(k)}</div><div class="s">${x.n} Beleg${x.n > 1 ? 'e' : ''}</div></div><div><div class="amt">${eur(x.brutto)}</div><div class="s" style="text-align:right">${x.vst ? 'VSt ' + eur(x.vst) : ''}</div></div></button></li>`).join('')}</ul>
@@ -2401,7 +2476,8 @@ function vFirma() {
     <div class="grid2">
       ${inp('name', 'Firmenname')} ${inp('inhaber', gfLabel())}
       ${inp('strasse', 'Straße und Nr.', 'class="full"')} ${inp('plz', 'PLZ', 'inputmode="numeric"')} ${inp('ort', 'Ort')}
-      ${inp('steuernr', 'Steuernummer')} ${inp('ustid', 'USt-IdNr. (falls vorhanden)')}
+      ${inp('steuernr', 'Steuernummer')} <label>Bundesland des Finanzamts<select name="bundesland"><option value="">Bitte wählen</option>${Object.entries(BUNDESLAENDER).map(([k, v]) => `<option value="${k}"${f.bundesland === k ? ' selected' : ''}>${v[0]}</option>`).join('')}</select></label>
+      ${inp('ustid', 'USt-IdNr. (falls vorhanden)')}
       ${inp('email', 'E-Mail', 'type="email"')} ${inp('tel', 'Telefon', 'type="tel"')}
       ${inp('iban', 'IBAN')} ${inp('bic', 'BIC')} ${inp('bank', 'Bank')}
       ${REGISTER_RF.includes(f.rechtsform) ? `${inp('registergericht', 'Registergericht', 'placeholder="z. B. Amtsgericht München"')} ${inp('registernr', 'Registernummer', 'placeholder="z. B. HRB 123456"')}` : ''}
@@ -2952,7 +3028,7 @@ const HILFE = {
       'Auf elster.de bei Mein ELSTER anmelden.',
       '„Formulare &amp; Leistungen“, „Alle Formulare“, „Unternehmen“, „Umsatzsteuer“ und dann „Umsatzsteuer-Voranmeldung“ mit dem richtigen Jahr öffnen.',
       'Beim ersten Mal fragt ELSTER nach Steuernummer und Finanzamt. Die Steuernummer steht im Brief vom Finanzamt. Später übernimmt ELSTER das.',
-      'Den Zeitraum wählen (z. B. Oktober oder 3. Quartal).',
+      'Den Zeitraum wählen (z. B. Oktober oder 3. Quartal). Schneller: In der App „Datei für ELSTER“ drücken und die Datei in ELSTER beim Hochladen von Formulardaten (XML-Datei) wählen. Dann sind die Kennzahlen schon eingetragen und du prüfst nur noch.',
       'Die Werte aus der App in die gleichen Kennzahlen eintragen. Am wichtigsten: Kz 81 (Umsätze mit 19 %, ohne Steuer), Kz 86 (Umsätze mit 7 %) und Kz 66 (Vorsteuer). Die Steuer zu 81 und 86 rechnet ELSTER selbst aus.',
       'Auf „Prüfen“ klicken. Vergleiche das Ergebnis bei Kz 83 mit der Zahl in der App. Passt es, „Absenden“.',
       'Den Betrag bis zur Frist ans Finanzamt zahlen (eigene Anleitung „Steuern ans Finanzamt zahlen“). Bei einer Erstattung überweist das Finanzamt dir das Geld.',
@@ -3546,6 +3622,223 @@ function druckMahnung(r, m) {
   setTimeout(() => { document.title = altT; }, 500);
 }
 
+/* Belege automatisch auslesen. Alles läuft im Browser, der Beleg verlässt das Gerät nicht.
+   Reihenfolge: E-Rechnung (XML, auch in ZUGFeRD-PDFs eingebettet) ist exakt; dann Text aus dem PDF; zuletzt Texterkennung (Foto, Scan).
+   Die Bibliotheken werden erst beim ersten Beleg geladen (feste Version, Prüfsumme wo der Browser das erlaubt). */
+const OCR_LIBS = {
+  pdf: ['https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.min.js', 'sha384-/1qUCSGwTur9vjf/z9lmu/eCUYbpOTgSjmpbMQZ1/CtX2v/WcAIKqRv+U1DUCG6e'],
+  pdfWorker: ['https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.worker.min.js', 'sha384-SnzOobpRMLXZ52iJvZm/C0fYw0OQemTXzTjIsdsfMcrCtCEe9qgzxTd3RSklO5x2'],
+  tess: ['https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js', 'sha384-GJqSu7vueQ9qN0E9yLPb3Wtpd7OrgK8KmYzC8T1IysG1bcvxvIO4qtYR/D3A991F'],
+  tessWorker: 'https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/worker.min.js',
+  tessCore: 'https://cdn.jsdelivr.net/npm/tesseract.js-core@5.1.1',
+  tessLang: 'https://cdn.jsdelivr.net/npm/@tesseract.js-data/deu@1.0.0/4.0.0_best_int'
+};
+const skriptLaden = (src, integrity) => new Promise((res, rej) => { const el = document.createElement('script'); el.src = src; el.integrity = integrity; el.crossOrigin = 'anonymous'; el.onload = res; el.onerror = () => rej(new Error('laden')); document.head.appendChild(el); });
+let pdfJsBereit = null, ocrWorker = null;
+function ladePdfJs() {
+  if (!pdfJsBereit) {
+    pdfJsBereit = (async () => {
+      if (!window.pdfjsLib) await skriptLaden(...OCR_LIBS.pdf);
+      const r = await fetch(OCR_LIBS.pdfWorker[0], { integrity: OCR_LIBS.pdfWorker[1], mode: 'cors' });
+      if (!r.ok) throw new Error('laden');
+      window.pdfjsLib.GlobalWorkerOptions.workerSrc = URL.createObjectURL(new Blob([await r.text()], { type: 'text/javascript' }));
+      return window.pdfjsLib;
+    })();
+    pdfJsBereit.catch(() => { pdfJsBereit = null; });
+  }
+  return pdfJsBereit;
+}
+function ladeOcr() {
+  if (!ocrWorker) {
+    ocrWorker = (async () => {
+      if (!window.Tesseract) await skriptLaden(...OCR_LIBS.tess);
+      return window.Tesseract.createWorker('deu', 1, { workerPath: OCR_LIBS.tessWorker, corePath: OCR_LIBS.tessCore, langPath: OCR_LIBS.tessLang, gzip: true });
+    })();
+    ocrWorker.catch(() => { ocrWorker = null; });
+  }
+  return ocrWorker;
+}
+/* Bild auf höchstens 2400 Pixel Kantenlänge bringen, das reicht für Texterkennung und spart Zeit */
+function bildFuerOcr(blob) {
+  return new Promise((res, rej) => {
+    const img = new Image(), url = URL.createObjectURL(blob);
+    img.onload = () => { const k = Math.min(1, 2400 / Math.max(img.naturalWidth, img.naturalHeight)); const c = document.createElement('canvas'); c.width = Math.round(img.naturalWidth * k); c.height = Math.round(img.naturalHeight * k); c.getContext('2d').drawImage(img, 0, 0, c.width, c.height); URL.revokeObjectURL(url); res(c); };
+    img.onerror = () => { URL.revokeObjectURL(url); rej(new Error('bild')); }; img.src = url;
+  });
+}
+async function ocrText(bild) { const w = await ladeOcr(); const r = await w.recognize(bild); return r.data.text || ''; }
+
+/* E-Rechnung (XRechnung UBL oder ZUGFeRD/Factur-X CII) lesen */
+function ausXml(text) {
+  let d; try { d = new DOMParser().parseFromString(text, 'application/xml'); } catch (e) { return null; }
+  if (!d || d.getElementsByTagName('parsererror').length) return null;
+  const alle = (el, n) => [...el.getElementsByTagNameNS('*', n)];
+  const eins = (el, ...pfad) => { let cur = [el]; for (const n of pfad) { cur = cur.flatMap((c) => alle(c, n)); if (!cur.length) return null; } return cur[0]; };
+  const txt = (el) => el ? el.textContent.trim() : '';
+  const z = (s) => { const v = parseFloat(String(s).replace(',', '.')); return isFinite(v) ? v : 0; };
+  const root = d.documentElement, ln = root.localName;
+  const r = { quelle: 'E-Rechnung' };
+  if (ln === 'Invoice' || ln === 'CreditNote') {
+    const p = eins(root, 'AccountingSupplierParty', 'Party');
+    r.lieferant = txt(p && (eins(p, 'PartyName', 'Name') || eins(p, 'PartyLegalEntity', 'RegistrationName')));
+    r.datum = txt([...root.children].find((c) => c.localName === 'IssueDate'));
+    r.nr = txt([...root.children].find((c) => c.localName === 'ID'));
+    const lmt = eins(root, 'LegalMonetaryTotal');
+    r.brutto = z(txt(lmt && (eins(lmt, 'TaxInclusiveAmount') || eins(lmt, 'PayableAmount'))));
+    const tt = [...root.children].filter((c) => c.localName === 'TaxTotal');
+    r.vorsteuer = tt.reduce((a, t) => a + z(txt([...t.children].find((c) => c.localName === 'TaxAmount'))), 0);
+    r.saetze = alle(root, 'TaxSubtotal').map((s) => z(txt(eins(s, 'TaxCategory', 'Percent'))));
+    r.ust = alle(root, 'TaxSubtotal').map((s) => txt(eins(s, 'TaxCategory', 'ID')));
+    if (ln === 'CreditNote') { r.brutto = -r.brutto; r.vorsteuer = -r.vorsteuer; }
+  } else if (ln === 'CrossIndustryInvoice') {
+    r.lieferant = txt(eins(root, 'SellerTradeParty', 'Name'));
+    const dt = txt(eins(root, 'ExchangedDocument', 'IssueDateTime', 'DateTimeString'));
+    if (/^\d{8}$/.test(dt)) r.datum = `${dt.slice(0, 4)}-${dt.slice(4, 6)}-${dt.slice(6, 8)}`;
+    r.nr = txt(eins(root, 'ExchangedDocument', 'ID'));
+    const ms = eins(root, 'SpecifiedTradeSettlementHeaderMonetarySummation');
+    r.brutto = z(txt(ms && eins(ms, 'GrandTotalAmount')));
+    r.vorsteuer = ms ? alle(ms, 'TaxTotalAmount').reduce((a, t) => a + z(txt(t)), 0) : 0;
+    const steuern = alle(root, 'ApplicableTradeSettlement').length ? [] : [];
+    const hs = eins(root, 'ApplicableHeaderTradeSettlement');
+    const tax = hs ? [...hs.children].filter((c) => c.localName === 'ApplicableTradeTax') : steuern;
+    r.saetze = tax.map((t) => z(txt(eins(t, 'RateApplicablePercent'))));
+    r.ust = tax.map((t) => txt(eins(t, 'CategoryCode')));
+    if (txt(eins(root, 'ExchangedDocument', 'TypeCode')) === '381') { r.brutto = -Math.abs(r.brutto); r.vorsteuer = -Math.abs(r.vorsteuer); }
+  } else return null;
+  r.brutto = r2(r.brutto); r.vorsteuer = r2(r.vorsteuer);
+  const s = [...new Set(r.saetze.filter((x) => x > 0))];
+  r.ustSatz = s.length === 1 ? s[0] : s.length ? Math.max(...s) : 0;
+  if (r.ust.some((c) => c === 'AE' || c === 'K') && !r.vorsteuer) r.rcHinweis = true;
+  delete r.saetze; delete r.ust;
+  return r.brutto || r.lieferant ? r : null;
+}
+
+/* Betrag aus deutschem oder englischem Zahlformat */
+function betragAus(s) {
+  const m = String(s).match(/-?\d{1,3}(?:[.\s']\d{3})*(?:,\d{2})(?!\d)|-?\d+,\d{2}(?!\d)|-?\d{1,3}(?:,\d{3})*\.\d{2}(?!\d)|-?\d+\.\d{2}(?!\d)/g);
+  if (!m) return [];
+  return m.map((x) => { x = x.replace(/[\s']/g, ''); if (/,\d{2}$/.test(x)) x = x.replace(/\./g, '').replace(',', '.'); else x = x.replace(/,/g, ''); return parseFloat(x); }).filter((v) => isFinite(v));
+}
+/* Text eines Belegs auswerten (aus PDF oder Texterkennung). Liefert nur, was einigermaßen sicher ist. */
+function ausText(text) {
+  const zeilen = String(text || '').split(/\r?\n/).map((z) => z.replace(/\s+/g, ' ').trim()).filter(Boolean);
+  const r = { quelle: '' };
+  if (!zeilen.length) return r;
+  const klein = zeilen.map((z) => z.toLowerCase());
+  // Betrag: Zeilen mit Schlüsselwort, in dieser Reihenfolge
+  const SCHL = [/gesamtbetrag|rechnungsbetrag|zahlbetrag|zu zahlen|endbetrag|gesamtsumme|summe brutto|bruttobetrag|betrag brutto|total eur|amount due|grand total/, /brutto|\btotal\b|\bgesamt\b|\bsumme\b/, /\bbetrag\b|\bec\b|kartenzahlung|girocard|\bkarte\b/];
+  for (const re of SCHL) {
+    const kand = [];
+    zeilen.forEach((z, i) => { if (re.test(klein[i]) && !/netto|zwischensumme|ohne mwst|exkl|rückgeld|zurück|gegeben|\bbar\b/.test(klein[i])) { let b = betragAus(z); if (!b.length && zeilen[i + 1]) b = betragAus(zeilen[i + 1]); if (b.length) kand.push(Math.abs(b[b.length - 1])); } });
+    if (kand.length) { r.brutto = Math.max(...kand); break; }
+  }
+  if (!r.brutto) { const alleB = zeilen.flatMap(betragAus).map(Math.abs).filter((v) => v < 1e6); if (alleB.length) { r.brutto = Math.max(...alleB); r.unsicher = true; } }
+  // Steuersatz und Steuerbetrag
+  const hat19 = /\b19(?:[.,]0+)?\s?%/.test(text), hat7 = /\b7(?:[.,]0+)?\s?%/.test(text);
+  r.ustSatz = hat19 ? 19 : hat7 ? 7 : null;
+  if (/steuerschuldnerschaft des leistungsempf|reverse charge|reverse-charge|vat exempt|art\.? 196/i.test(text)) { r.rc = /\b(IE|NL|LU|FR|AT|PL|ES|IT|BE|DK|SE|CZ|PT|FI|EE|LV|LT|SK|SI|HU|RO|BG|HR|GR|EL|CY|MT)\s?\d/.test(text) ? 'eu' : 'welt'; r.ustSatz = 0; }
+  if (r.brutto && r.ustSatz) {
+    const erw = (s) => r2(r.brutto - r.brutto / (1 + s / 100));
+    const st = []; zeilen.forEach((z, i) => { if (/mwst|ust\b|umsatzsteuer|mehrwertsteuer|vat|steuer/.test(klein[i]) && !/steuernummer|ust-id|ustid|st\.-nr|steuer-nr/.test(klein[i])) st.push(...betragAus(z).map(Math.abs)); });
+    if (hat19 && hat7) { const sum = r2(st.filter((v) => v < r.brutto * 0.2).reduce((a, v) => a + v, 0)); r.vorsteuer = null; r.gemischt = true; void sum; }
+    else { const e = erw(r.ustSatz); if (st.some((v) => Math.abs(v - e) <= 0.02)) r.vorsteuer = e; }
+  }
+  // Datum
+  const datumAus = (z) => { let m = z.match(/\b(\d{1,2})\.\s?(\d{1,2})\.\s?(\d{4}|\d{2})\b/); if (m) { const y = m[3].length === 2 ? '20' + m[3] : m[3]; return `${y}-${m[2].padStart(2, '0')}-${m[1].padStart(2, '0')}`; } m = z.match(/\b(20\d{2})-(\d{2})-(\d{2})\b/); return m ? `${m[1]}-${m[2]}-${m[3]}` : ''; };
+  const gueltig = (d) => d && !isNaN(Date.parse(d)) && d <= plusTage(heute(), 30) && d >= plusTage(heute(), -3 * 366) && Number(d.slice(5, 7)) <= 12;
+  const di = klein.findIndex((z) => /rechnungsdatum|belegdatum|datum|invoice date|date of issue/.test(z) && gueltig(datumAus(zeilen[klein.indexOf(z)])));
+  r.datum = di >= 0 ? datumAus(zeilen[di]) : (zeilen.map(datumAus).find(gueltig) || '');
+  // Rechnungsnummer
+  const nrM = text.match(/(?:rechnungs?-?\s?(?:nummer|nr\.?)|rechnung\s+nr\.?|beleg-?\s?nr\.?|invoice\s+(?:number|no\.?|#))\s*[:#]?\s*([A-Z0-9][A-Z0-9\-/._]{2,24})/i);
+  if (nrM) r.nr = nrM[1];
+  // Lieferant: bekannter Name im Text, sonst Firmenzeile, sonst erste sinnvolle Zeile
+  const bekannt = S.lieferanten.filter((l) => l.name.length >= 3 && text.toLowerCase().includes(l.name.toLowerCase())).sort((a, b) => b.name.length - a.name.length)[0];
+  if (bekannt) r.lieferant = bekannt.name;
+  else {
+    const fz = zeilen.slice(0, 25).find((z) => /\b(gmbh|ag|ug|e\.\s?k\.|kg|ohg|gbr|ltd|limited|inc|se|s\.?a\.?r\.?l|b\.v\.)\b/i.test(z) && z.length <= 60 && !/rechnung|amtsgericht|registergericht|geschäftsführer/i.test(z));
+    const erste = zeilen.slice(0, 8).find((z) => /[a-zäöü]{3}/i.test(z) && z.length <= 50 && !/rechnung|quittung|beleg|seite|page|invoice|datum|kassenbon|^www\.|@/i.test(z));
+    r.lieferant = (fz || erste || '').replace(/[|·•]+.*$/, '').trim();
+    if (r.lieferant) r.lieferantUnsicher = true;
+  }
+  if (r.brutto) r.brutto = r2(r.brutto);
+  return r;
+}
+async function belegAuslesen(blob, name) {
+  const typ = blob.type || '', n = String(name || '').toLowerCase();
+  if (typ.includes('xml') || n.endsWith('.xml')) { const r = ausXml(await blob.text()); return r || { quelle: '' }; }
+  if (typ === 'application/pdf' || n.endsWith('.pdf')) {
+    const pdfjs = await ladePdfJs();
+    const doc = await pdfjs.getDocument({ data: new Uint8Array(await blob.arrayBuffer()), isEvalSupported: false }).promise;
+    try {
+      const an = await doc.getAttachments().catch(() => null);
+      for (const k of Object.keys(an || {})) { if (/\.xml$/i.test(k)) { const r = ausXml(new TextDecoder().decode(an[k].content)); if (r) return Object.assign(r, { quelle: 'E-Rechnung im PDF' }); } }
+      let text = '';
+      for (let i = 1; i <= Math.min(doc.numPages, 3); i++) {
+        const tc = await (await doc.getPage(i)).getTextContent();
+        let zeile = [], y = null; for (const it of tc.items) { if (y !== null && Math.abs(it.transform[5] - y) > 3) { text += zeile.join(' ') + '\n'; zeile = []; } zeile.push(it.str); y = it.transform[5]; if (it.hasEOL) { text += zeile.join(' ') + '\n'; zeile = []; y = null; } }
+        text += zeile.join(' ') + '\n';
+      }
+      if (text.replace(/\s/g, '').length > 40) return Object.assign(ausText(text), { quelle: 'Text im PDF' });
+      const page = await doc.getPage(1), vp = page.getViewport({ scale: 2.2 });
+      const c = document.createElement('canvas'); c.width = vp.width; c.height = vp.height;
+      await page.render({ canvasContext: c.getContext('2d'), viewport: vp }).promise;
+      return Object.assign(ausText(await ocrText(c)), { quelle: 'Texterkennung' });
+    } finally { doc.destroy(); }
+  }
+  if (typ.startsWith('image/')) return Object.assign(ausText(await ocrText(await bildFuerOcr(blob))), { quelle: 'Texterkennung' });
+  return { quelle: '' };
+}
+/* Ergebnis in das offene Beleg-Formular schreiben, aber nichts überschreiben, was jemand selbst eingetragen hat */
+let ausleseNr = 0;
+async function starteAuslesen(blob, name, b) {
+  const nr = ++ausleseNr, info = $('#ausleseInfo'); if (!info) return;
+  info.innerHTML = '<span class="spin"></span> Beleg wird ausgelesen … Beim ersten Mal lädt die App dafür einmalig ein Programm (etwa 5 MB).';
+  let r;
+  try { r = await belegAuslesen(blob, name); }
+  catch (e) { console.error(e); if (nr === ausleseNr && $('#ausleseInfo')) $('#ausleseInfo').textContent = navigator.onLine === false ? 'Automatisch auslesen geht nur mit Internet (zum ersten Laden). Bitte Betrag und Datum selbst eintragen.' : 'Konnte den Beleg nicht automatisch lesen. Bitte Betrag und Datum selbst eintragen.'; return; }
+  const f = $('#beForm'); if (nr !== ausleseNr || !f || edit !== b) return;
+  const gefuellt = [];
+  const setze = (k, v) => { const el = f.elements[k]; if (!el || v === undefined || v === null || v === '') return; el.value = v; el.classList.add('auto'); gefuellt.push(k); };
+  if (r.brutto && !num(f.elements.brutto.value)) setze('brutto', String(r.brutto.toFixed(2)).replace('.', ','));
+  if (r.datum && (!f.elements.datum.value || f.elements.datum.value === f.dataset.datumStart)) setze('datum', r.datum);
+  if (r.lieferant && (!f.elements.lieferant.value || f.elements.lieferant.value === f.dataset.liefAuto)) {
+    const l = S.lieferanten.find((x) => x.name.toLowerCase() === r.lieferant.toLowerCase());
+    setze('lieferant', l ? l.name : r.lieferant.slice(0, 60)); if (l) lieferantVorgaben(l, f);
+  }
+  if (r.rc && !f.elements.rc.value) setze('rc', r.rc);
+  if ([19, 7, 0].includes(r.ustSatz) && r.ustSatz !== null) setze('ustSatz', String(r.ustSatz));
+  if (r.vorsteuer && !f.elements.vorsteuer.value && !r.gemischt && !ku() && !f.elements.rc.value) setze('vorsteuer', String(r.vorsteuer.toFixed(2)).replace('.', ','));
+  if (r.nr && !f.elements.notiz.value) setze('notiz', 'Rechnung ' + r.nr);
+  calcVst();
+  const info2 = $('#ausleseInfo'); if (!info2) return;
+  if (!gefuellt.length) { info2.textContent = r.quelle ? 'Nichts Sicheres gefunden. Bitte Betrag und Datum selbst eintragen.' : 'Diese Datei kann die App nicht auslesen. Bitte Betrag und Datum selbst eintragen.'; return; }
+  const was = { brutto: 'Betrag', datum: 'Datum', lieferant: 'Lieferant', ustSatz: 'Steuersatz', vorsteuer: 'Vorsteuer', rc: 'Umsatzsteuer-Art', notiz: 'Rechnungsnummer' };
+  const exakt = /E-Rechnung/.test(r.quelle);
+  info2.innerHTML = `<b>Ausgelesen (${esc(r.quelle)}):</b> ${gefuellt.map((k) => was[k]).join(', ')}. ${exakt ? 'Aus der E-Rechnung, also genau. Kurz drüberschauen reicht.' : 'Bitte kurz prüfen, die markierten Felder sind automatisch ausgefüllt.'}${r.gemischt ? ' Auf dem Beleg stehen 19 % und 7 %: Vorsteuer bitte selbst eintragen.' : ''}${r.rcHinweis ? ' Die Rechnung ist ohne deutsche Umsatzsteuer (Reverse Charge): Feld „Umsatzsteuer auf dem Beleg“ prüfen.' : ''}`;
+}
+/* Mehrere Belege auf einmal: nacheinander im Hintergrund auslesen und nur leere Felder füllen */
+async function belegeNachlesen(ids) {
+  let n = 0;
+  for (const id of ids) {
+    const b = S.belege.find((x) => x.id === id); if (!b || num(b.brutto) || !b.dateiId) continue;
+    try {
+      const d = await idbGet('datei:' + b.dateiId); if (!d) continue;
+      const r = await belegAuslesen(d.blob, d.name);
+      if (!r.brutto) continue;
+      b.brutto = r.brutto;
+      if (r.datum) b.datum = r.datum;
+      if (r.lieferant && (!b.lieferant || b.lieferantAuto)) b.lieferant = r.lieferant.slice(0, 60);
+      if (r.rc && !b.rc) b.rc = r.rc;
+      if ([19, 7, 0].includes(r.ustSatz)) b.ustSatz = r.ustSatz;
+      b.vorsteuer = ku() || b.rc ? 0 : (r.vorsteuer && !r.gemischt ? r.vorsteuer : r2(b.brutto - b.brutto / (1 + num(b.ustSatz) / 100)));
+      if (r.nr && !b.notiz) b.notiz = 'Rechnung ' + r.nr;
+      b.ausgelesen = r.quelle; delete b.lieferantAuto; n++;
+      await save(); if (!dlg.open) render();
+    } catch (e) { console.error(e); if (/laden/.test(e.message)) break; }
+  }
+  if (n) toast(`${n} Beleg${n > 1 ? 'e' : ''} automatisch ausgelesen. Bitte kurz prüfen.`);
+}
+
 /* Beleg und hinterlegte Rechnung */
 let pendingFile = null;
 function fileInput(cur) {
@@ -3560,6 +3853,7 @@ function vBeleg(b) {
   openDlg(`${head(neu ? 'Beleg hochladen' : 'Beleg')}<form id="beForm" class="dlg-body" autocomplete="off">
     <p style="margin:0 0 8px">${hb('belege', 'Was ist ein guter Beleg?')}</p>
     ${fileInput(b.dateiId ? b : null)}
+    <p class="small muted" id="ausleseInfo" style="margin:6px 0 0">${b.dateiId ? `<button type="button" class="chip" data-act="be-auslesen">Betrag und Datum aus der Datei lesen</button>` : 'Wählst du eine Datei, liest die App Betrag, Datum und Lieferant selbst aus.'}</p>
     <div class="grid2" style="margin-top:12px">
       <label>Lieferant<input name="lieferant" list="lieferantenListe" value="${esc(b.lieferant)}" placeholder="z. B. Telekom"></label>
       <datalist id="lieferantenListe">${S.lieferanten.map((l) => `<option value="${esc(l.name)}">`).join('')}</datalist>
@@ -3577,6 +3871,7 @@ function vBeleg(b) {
   </form>
   <div class="dlg-foot">${neu ? '' : `<button class="danger" data-act="del-be" data-id="${b.id}">Löschen</button>${num(b.brutto) ? `<button data-act="vl-neu" data-k="beleg" data-id="${b.id}">Regelmäßig wiederholen</button>` : ''}`}<button class="primary" data-act="save-be">Speichern</button></div>`);
   b._neu = neu;
+  $('#beForm').dataset.datumStart = b.datum;
   if (b.dateiId && /^image\//.test(b.dateiTyp || '')) idbGet('datei:' + b.dateiId).then((d) => { const pv = $('#filePrev'); if (d && pv && !pendingFile && edit === b) pv.insertAdjacentHTML('beforeend', `<img class="preview" alt="Beleg" src="${URL.createObjectURL(d.blob)}">`); });
 }
 /* Zuordnung zur Bankbuchung (S.bank kommt aus dem Bank-Import) */
@@ -3627,8 +3922,10 @@ function zeigeDatei(file) {
   if (f && !f.elements.lieferant.value) {
     const l = rateLieferant(file.name);
     f.elements.lieferant.value = l ? l.name : nameAusDatei(file.name);
+    if (!l) f.dataset.liefAuto = f.elements.lieferant.value;
     if (l) lieferantVorgaben(l, f);
   }
+  if (f) starteAuslesen(file, file.name, edit);
 }
 function lieferantVorgaben(l, f) {
   if (l.kategorie && !f.elements.kategorie.value) f.elements.kategorie.value = l.kategorie;
@@ -3649,6 +3946,7 @@ async function dateienRein(liste) {
   if (gross.length) toast(`${gross.length} Datei${gross.length > 1 ? 'en sind' : ' ist'} größer als 25 MB und wurde${gross.length > 1 ? 'n' : ''} übersprungen.`);
   if (!files.length) return;
   if (files.length === 1) { vBeleg(null); pendingFile = files[0]; zeigeDatei(files[0]); return; }
+  const neueIds = [];
   for (const file of files) {
     pendingFile = file;
     const fi = await storeFile('b'), l = rateLieferant(file.name);
@@ -3656,7 +3954,9 @@ async function dateienRein(liste) {
   }
   pendingFile = null;
   await save(); closeDlg(); filter.be = 'fehlt'; tab = 'belege'; render(); window.scrollTo(0, 0);
-  toast(`${files.length} Belege gespeichert. Ergänze jetzt Betrag und Kategorie.`);
+  toast(`${files.length} Belege gespeichert. Die App liest jetzt Beträge und Daten aus, danach bitte Kategorie ergänzen.`);
+  for (const b of S.belege.slice(-files.length)) { neueIds.push(b.id); if (!rateLieferant(b.dateiName || '')) b.lieferantAuto = true; }
+  belegeNachlesen(neueIds);
 }
 function vExtern() {
   pendingFile = null;
@@ -4671,6 +4971,7 @@ const ACT = {
     const url = URL.createObjectURL(d.blob); const w = window.open(url, '_blank'); if (!w) download(d.name, d.blob); setTimeout(() => URL.revokeObjectURL(url), 60000);
   },
   'save-be': saveBeleg,
+  'be-auslesen': async () => { const b = edit; if (!b || !b.dateiId) return; const d = await idbGet('datei:' + b.dateiId); if (!d) return toast('Datei nicht gefunden.'); const f = $('#beForm'); if (f) { f.dataset.datumStart = f.elements.datum.value; } starteAuslesen(d.blob, d.name, b); },
   'del-be': async (el) => { if (!confirm('Beleg löschen?')) return; const b = S.belege.find((x) => x.id === el.dataset.id); if (b.dateiId) await idbDel('datei:' + b.dateiId); for (const x of S.bank || []) if (x.belegId === b.id) x.belegId = null; S.belege = S.belege.filter((x) => x.id !== b.id); await save(); closeDlg(); render(); },
   'bk-beleg': (el) => {
     const x = S.bank.find((y) => y.id === el.dataset.id); if (!x) return;
@@ -4791,6 +5092,7 @@ const ACT = {
   'st-done': async (el) => { const k = el.dataset.k; if (S.steuer.erledigt[k]) delete S.steuer.erledigt[k]; else S.steuer.erledigt[k] = heute(); await save(); render(); toast(S.steuer.erledigt[k] ? 'Als erledigt markiert' : 'Wieder offen'); },
   'st-copy': async (el) => { try { await navigator.clipboard.writeText(el.dataset.k); toast(`${el.dataset.k} kopiert`); } catch (err) { toast('Kopieren geht hier nicht, bitte abtippen.'); } },
   'st-csv': (el) => stCsv(el.dataset.k),
+  'st-xml': (el) => stXml(el.dataset.k),
   'st-zm': (el) => stZm(el.dataset.k),
   'st-print': (el) => stPrint(el.dataset.k),
   bwa: () => vBwa(),
