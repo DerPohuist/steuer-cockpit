@@ -155,6 +155,14 @@ table.tab td, table.tab th { text-align: left; padding: 6px 4px; border-top: 1px
 .upl { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
 .upl button { display: grid; justify-items: center; gap: 2px; padding: 10px 4px; font-size: 13px; }
 .upl .ic { font-size: 22px; line-height: 1.2; }
+.hb { display: inline-flex; align-items: center; gap: 5px; font-size: 13px; font-weight: 600; padding: 3px 10px 3px 4px; border-radius: 999px; border: 1px solid var(--line); background: var(--soft); color: var(--accent); cursor: pointer; vertical-align: middle; white-space: nowrap; }
+.hb::before { content: "?"; display: inline-grid; place-items: center; width: 18px; height: 18px; border-radius: 50%; background: var(--accent); color: var(--accent-fg); font-size: 12px; font-weight: 800; }
+h2 .hb, h3 .hb { margin-left: 6px; }
+.hilfe ol, .hilfe ul { margin: 4px 0 8px; padding-left: 22px; }
+.hilfe li { margin: 0 0 6px; }
+.hilfe ul.hl { list-style: none; padding-left: 0; }
+.hilfe ul.hl a { color: var(--accent); font-weight: 600; }
+.top-hilfe { border: 1px solid var(--line); background: var(--panel); color: var(--accent); border-radius: 999px; padding: 4px 12px; font-size: 13px; font-weight: 700; }
 #druck { display: none; }
 @media print {
   @page { size: A4; margin: 18mm 16mm; }
@@ -177,11 +185,12 @@ table.tab td, table.tab th { text-align: left; padding: 6px 4px; border-top: 1px
 </style>
 </head>
 <body>
-<header class="top"><div class="row"><span class="brand">Steuer-Cockpit</span><span class="firm" id="firmname"></span></div></header>
+<header class="top"><div class="row"><span class="brand">Steuer-Cockpit</span><span style="display:flex;gap:10px;align-items:center;min-width:0"><span class="firm" id="firmname"></span><button class="top-hilfe" data-act="hilfe-liste" aria-label="Hilfe und Anleitungen">? Hilfe</button></span></div></header>
 <main id="app"><p class="muted">Lädt …</p></main>
 <button class="fab" id="fab" aria-label="Neu: Angebot, Rechnung oder Beleg" data-act="menu">+</button>
 <nav class="tabs" aria-label="Bereiche"><div class="row" id="tabs"></div></nav>
 <dialog id="dlg"></dialog>
+<dialog id="hilfeDlg" aria-label="Hilfe"></dialog>
 <div id="druck"></div>
 <script>
 (function () {
@@ -659,12 +668,12 @@ function vSteuern() {
   <div class="status"><div class="big">${next ? `<span class="pill ${fz(next)}">${tage < 0 ? 'Überfällig' : tage <= 14 ? 'Bald fällig' : 'Nächste Frist'}</span> ${next.t}` : '<span class="pill good">Gut</span> Keine offenen Fristen'}</div>
   <p class="small muted" style="margin-top:6px">${next ? `Bis ${dat(next.datum)}${tage < 0 ? `, seit ${-tage} Tagen vorbei` : `, in ${tage} Tagen`}. ${next.s}` : 'Alle bekannten Fristen sind erledigt.'}</p></div>
 
-  <div class="card"><h2>Einkommensteuererklärung ${y0 - 1} selbst machen</h2>
+  <div class="card"><h2>Einkommensteuererklärung ${y0 - 1} selbst machen ${hb('est')}</h2>
     <p class="small">Schritt für Schritt: Firma, Arbeitslohn, Vermietung, Kapitalerträge, Rente, Kinder, Versicherungen und mehr. Unterlagen hochladen und sammeln. Am Ende die Werte je ELSTER-Anlage mit Zeile zum Abtippen.</p>
     <div class="btns"><button class="primary" data-act="est-open">${S.est && S.est[y0 - 1] ? 'Weitermachen' : 'Starten'}</button></div></div>
 
   ${ustCard ? `<div class="card">
-    <h2>Umsatzsteuer-Voranmeldung</h2>
+    <h2>Umsatzsteuer-Voranmeldung ${hb('ustva', 'Zum ersten Mal? So geht’s')}</h2>
     <label>Zeitraum<select id="stZr">${keys.slice().reverse().map((k) => `<option value="${k}"${k === zk ? ' selected' : ''}>${zrAus(k).name}${S.steuer.erledigt['ustva-' + k] ? ' ✓' : ''}</option>`).join('')}</select></label>
     <p style="margin-top:10px">${u.zahl >= 0 ? `<b>${eur(u.zahl)}</b> an das Finanzamt` : `<b>${eur(-u.zahl)}</b> Erstattung vom Finanzamt`}, Abgabe und Zahlung bis <b>${dat(z.frist)}</b>. ${erl ? `<span class="pill good">abgegeben am ${dat(erl)}</span>` : ''}</p>
     ${u.warn.length ? `<ul class="checks">${u.warn.map((w) => `<li class="miss">${w}</li>`).join('')}</ul>` : ''}
@@ -676,16 +685,17 @@ function vSteuern() {
       <li>„Formulare &amp; Leistungen“, dann „Alle Formulare“, „Unternehmen“, „Umsatzsteuer-Voranmeldung ${z.von.slice(0, 4)}“.</li>
       <li>Zeitraum „${esc(z.name)}“ wählen, dann die Kennzahlen oben eintragen. Mit „Kopieren“ landet der Wert in der Zwischenablage.</li>
       <li>Prüfen lassen, die Zahl bei Kz 83 vergleichen und absenden. Danach hier „Als abgegeben markieren“.</li></ol>
+      <p class="small" style="margin-top:6px">${hb('elster', 'Noch kein ELSTER-Konto?')} ${hb('zahlen', 'Wie bezahle ich?')} ${hb('dauerfrist', 'Mehr Zeit bekommen')}</p>
       <p class="small muted" style="margin-top:6px">ELSTER nimmt im Browser keine Dateien entgegen. Die direkte Übertragung aus der App braucht einen Server und eine Zulassung als Software-Hersteller und kommt später.</p></details>
     <details><summary>So rechnet die App</summary><p class="small muted" style="margin-top:8px">${u.n} Rechnungen und Belege im Zeitraum ${dat(z.von)} bis ${dat(z.bis)}. ${S.steuer.versteuerung === 'ist' ? 'Ist-Versteuerung: Rechnungen zählen im Monat der Zahlung.' : 'Soll-Versteuerung: Rechnungen zählen nach Rechnungsdatum.'} Beträge ohne Cent wie in ELSTER, die Steuer darauf mit Cent. Vorsteuer zählt nach Belegdatum. Kleine Abweichungen zur Summe deiner Rechnungen kommen vom Abschneiden der Cent.</p></details>
-  </div>` : `<div class="card"><h2>Umsatzsteuer-Voranmeldung</h2><p>Als Kleinunternehmer gibst du seit 2025 weder eine Voranmeldung noch eine Umsatzsteuer-Jahreserklärung ab, außer das Finanzamt fordert sie an (§ 19 Abs. 1 UStG).</p><p class="small muted">Ausnahme: Kaufst du Leistungen bei Firmen im Ausland ohne Umsatzsteuer ein (z. B. Werbung bei Google oder Meta), schuldest du die Steuer selbst. Markiere solche Belege, dann erscheint hier die Anmeldung.</p></div>`}
+  </div>` : `<div class="card"><h2>Umsatzsteuer-Voranmeldung ${hb('kleinunternehmer', 'Kleinunternehmer?')}</h2><p>Als Kleinunternehmer gibst du seit 2025 weder eine Voranmeldung noch eine Umsatzsteuer-Jahreserklärung ab, außer das Finanzamt fordert sie an (§ 19 Abs. 1 UStG).</p><p class="small muted">Ausnahme: Kaufst du Leistungen bei Firmen im Ausland ohne Umsatzsteuer ein (z. B. Werbung bei Google oder Meta), schuldest du die Steuer selbst. Markiere solche Belege, dann erscheint hier die Anmeldung. ${hb('reversecharge', 'Mehr dazu')}</p></div>`}
 
-  ${zmL.length ? `<div class="card"><h2>Zusammenfassende Meldung ${qi + 1}. Quartal ${qy}</h2>
+  ${zmL.length ? `<div class="card"><h2>Zusammenfassende Meldung ${qi + 1}. Quartal ${qy} ${hb('zm')}</h2>
     <p class="small muted">Meldest du bis zum 25. nach Quartalsende im BZSt-Online-Portal. Bei Warenlieferungen über 50.000 € im Quartal monatlich.</p>
     <table class="tab"><tr><th>Kunde</th><th>USt-IdNr.</th><th>Art</th><th style="text-align:right">Betrag</th></tr>${zmL.map((x) => `<tr><td>${esc(x.name)}</td><td>${x.land && x.nr ? esc(x.land + x.nr) : '<span class="pill bad">fehlt</span>'}</td><td>${x.art === 'S' ? 'Dienstleistung' : 'Lieferung'}</td><td style="text-align:right">${x.betrag.toLocaleString('de-DE')} €</td></tr>`).join('')}</table>
     <div class="btns"><button data-act="st-zm" data-k="${qy}-${qi}">Liste als Datei</button></div></div>` : ''}
 
-  <div class="card"><h2>Anlagen und Abschreibung</h2>
+  <div class="card"><h2>Anlagen und Abschreibung ${hb('afa', 'Was ist das?')}</h2>
     <p class="small">Geräte, Möbel und Fahrzeuge über 800 € netto setzt du nicht auf einmal ab, sondern über mehrere Jahre. Die App rechnet die Beträge je Jahr aus und nimmt sie in EÜR, BWA und DATEV-Export auf.${S.anlagen.length ? ` <b>${S.anlagen.length} Anlage${S.anlagen.length > 1 ? 'n' : ''}</b>, Abschreibung ${jahr}: ${eur(gw.afa)}.` : ''}</p>
     <div class="btns"><button${anlageVorschlaege().length ? ' class="primary"' : ''} data-act="anlagen">${anlageVorschlaege().length ? `${anlageVorschlaege().length} Anschaffung${anlageVorschlaege().length > 1 ? 'en' : ''} eintragen` : 'Anlagenverzeichnis'}</button></div></div>
 
@@ -694,7 +704,7 @@ function vSteuern() {
     <div class="btns"><button class="primary" data-act="bwa">BWA ansehen</button></div></div>
 
   <div class="card">
-    <h2>${gw.bilanz ? 'Gewinn-Vorschau (GuV)' : 'Einnahmen-Überschuss-Rechnung'} ${jahr}</h2>
+    <h2>${gw.bilanz ? 'Gewinn-Vorschau (GuV)' : 'Einnahmen-Überschuss-Rechnung'} ${jahr} ${gw.bilanz ? '' : hb('euer', 'Was ist das?')}</h2>
     <div class="filters" role="group">${[y0, y0 - 1, y0 - 2].map((y) => `<button class="chip" data-act="st-jahr" data-k="${y}" aria-pressed="${y === jahr}">${y}</button>`).join('')}</div>
     <table class="tab"><tr><td>Einnahmen (netto)</td><td style="text-align:right">${eur(gw.ein)}</td></tr>
       <tr><td>minus Ausgaben (netto)</td><td style="text-align:right">− ${eur(gw.aus)}</td></tr>
@@ -710,7 +720,7 @@ function vSteuern() {
   </div>
 
   <div class="card">
-    <h2>Wie viel solltest du für ${jahr} zurücklegen?</h2>
+    <h2>Wie viel solltest du für ${jahr} zurücklegen? ${hb('vorauszahlung', 'Vorauszahlungen?')}</h2>
     ${!rf ? '<p>Trag im Reiter <b>Firma</b> deine Rechtsform ein, dann rechnet die App hier.</p>' : sch.personen ? `<p>Bei ${esc(RECHTSFORMEN[rf].label)} zahlt jeder Gesellschafter seine Einkommensteuer selbst auf seinen Gewinnanteil.${sch.zeilen.length ? ` Die Gesellschaft zahlt etwa <b>${eur(sch.summe)}</b> Gewerbesteuer, falls sie gewerblich ist.` : ''}</p>` : `
     <p><b>Etwa ${eur(sch.summe)}</b>${sch.quote ? `, rund ${sch.quote} % vom Gewinn` : ''}. ${jahr === y0 ? 'Gerechnet mit dem Gewinn bis heute, das Jahr läuft noch.' : ''}</p>
     <table class="tab">${sch.zeilen.map(([t, v, s]) => `<tr><td>${t}${s ? `<div class="small muted">${s}</div>` : ''}</td><td style="text-align:right">${eur(v)}</td></tr>`).join('')}</table>`}
@@ -720,7 +730,7 @@ function vSteuern() {
   </div>
 
   <div class="card">
-    <h2>Fristen</h2>
+    <h2>Fristen ${hb('fristen', 'Frist verpasst? Brief bekommen?')}</h2>
     ${fr.length ? `<ul class="todo">${fr.slice(0, 6).map(fLi).join('')}</ul>${fr.length > 6 ? `<details><summary>${fr.length - 6} weitere</summary><ul class="todo" style="margin-top:8px">${fr.slice(6).map(fLi).join('')}</ul></details>` : ''}` : '<p class="muted">Keine offenen Fristen.</p>'}
     <div class="btns"><button data-act="st-ics">In meinen Kalender übernehmen</button></div>
     <p class="small muted" style="margin-top:6px">Die Kalender-Datei funktioniert mit iPhone, Android, Outlook und Google Kalender und erinnert dich rechtzeitig vor jeder Frist. Mit 📅 übernimmst du nur einen Termin. Fällt eine Frist auf ein Wochenende oder einen bundesweiten Feiertag, gilt der nächste Werktag.</p>
@@ -737,6 +747,7 @@ function vSteuern() {
       <label class="check" style="align-self:end"><input type="checkbox" name="berater"${S.steuer.berater ? ' checked' : ''}> Ein Steuerberater macht meine Jahreserklärungen</label>
     </form>
     <p class="small muted" style="margin-top:6px">Turnus der Voranmeldung, Dauerfristverlängerung und Rechtsform stellst du im Reiter Firma ein. Alles hier ist eine Hilfe zum Ausfüllen und ersetzt keine Steuerberatung.</p>
+    <p class="small" style="margin-top:6px">${hb('istversteuerung', 'Soll oder Ist?')} ${hb('gewerbesteuer', 'Hebesatz finden')} ${hb('vorauszahlung', 'Vorauszahlungen')}</p>
   </details>`;
 }
 async function saveSteuer() {
@@ -1596,7 +1607,7 @@ function vKuWaechter(W) {
     : W.wann ? `Bei deinem Tempo erreichst du ${eur(KU_VORJAHR)} etwa im ${W.wann}. Dann wärst du ab ${W.y0 + 1} kein Kleinunternehmer mehr.`
     : `Alles im grünen Bereich.${W.hoch ? ` Hochgerechnet kommst du dieses Jahr auf etwa ${eur(W.hoch)}.` : ''}`;
   return `<div class="card">
-    <h2>Kleinunternehmer-Wächter</h2>
+    <h2>Kleinunternehmer-Wächter ${hb('kleinunternehmer', 'Was heißt das?')}</h2>
     <p><span class="pill ${W.c}">${W.c === 'good' ? 'Gut' : W.c === 'warn' ? 'Im Blick behalten' : 'Achtung'}</span> ${satz}</p>
     <p class="small" style="margin:10px 0 0">Umsatz ${W.y0}: <b>${eur(W.jetzt.summe)}</b> von ${eur(KU_VORJAHR)}${W.jetzt.offen ? ` <span class="muted">(davon ${eur(W.jetzt.offen)} noch nicht bezahlt)</span>` : ''}</p>
     ${balken(W.jetzt.summe, KU_VORJAHR)}
@@ -1642,7 +1653,7 @@ function vRuecklage(R) {
   const proz = R.soll ? Math.min(100, Math.round((R.ist || 0) / R.soll * 100)) : 100;
   const status = R.ist == null ? 'Trag ein, wie viel du schon zurückgelegt hast' : R.c === 'good' ? 'Genug zurückgelegt' : `Es fehlen ${eur(R.fehlt)}`;
   return `<div class="card">
-    <h2>Steuer-Rücklage</h2>
+    <h2>Steuer-Rücklage ${hb('vorauszahlung', 'Warum?')}</h2>
     <p><span class="pill ${R.c}">${R.c === 'good' ? 'Gut' : R.c === 'warn' ? 'Knapp' : R.c === 'bad' ? 'Zu wenig' : 'Offen'}</span> ${status}</p>
     <p style="margin-top:6px">Zurücklegen solltest du jetzt <b>${eur(R.soll)}</b>.</p>
     ${R.ist != null && R.soll ? `<div class="bar" role="img" aria-label="${proz} Prozent der Rücklage vorhanden"><i class="${R.c}" style="width:${proz}%"></i></div><p class="small muted" style="margin:0">${eur(R.ist)} von ${eur(R.soll)} da</p>` : ''}
@@ -1699,6 +1710,7 @@ function vStart() {
     <h2>Das musst du tun</h2>
     ${todos.length ? `<ul class="todo">${todos.map((t) => `<li><span class="dot ${t.c}"></span><div class="grow"><div><b>${t.t}</b></div><div class="small muted">${t.s}</div></div>${t.act ? `<button data-act="${t.act}" data-k="${t.k || ''}" data-id="${t.id || ''}">${t.b}</button>` : ''}</li>`).join('')}</ul>` : '<p class="muted">Nichts zu tun. Neue Angebote, Rechnungen und Belege legst du über den Plus-Knopf an.</p>'}
   </div>
+  ${!S.beispiel && (!S.firma.name || !S.firma.steuernr) ? `<div class="card"><h2>Neu hier? Zum ersten Mal selbständig?</h2><p class="small muted">Kurze Anleitungen mit Schritten und Links zu ELSTER und Finanzamt. Alle findest du jederzeit oben unter „Hilfe“.</p><div class="btns">${hb('start', 'Die ersten Schritte')} ${hb('steuernummer', 'Steuernummer bekommen')} ${hb('elster', 'ELSTER-Konto anlegen')} ${hb('kleinunternehmer', 'Bin ich Kleinunternehmer?')}</div></div>` : ''}
   ${!S.beispiel && !S.firma.name && !hatDaten ? `<div class="card"><h2>Erst mal ansehen, wie es befüllt aussieht?</h2><p class="muted">Lädt eine Musterfirma mit Angeboten, Rechnungen, Belegen und Bankbuchungen. Du kannst sie jederzeit wieder löschen.</p><div class="btns"><button data-act="beispiel">Beispieldaten laden</button></div></div>` : ''}
   <div class="tiles">
     <div class="tile"><div class="q">Was ist noch offen?</div><div class="v">${eur(offenSum)}</div><div class="e">${offen.length} Rechnung${offen.length === 1 ? '' : 'en'}, davon ${ueber.length} überfällig</div></div>
@@ -1710,7 +1722,7 @@ function vStart() {
   ${R ? vRuecklage(R) : ''}
   ${hatDaten ? vZahlen() : ''}
   ${ku() ? '' : `<div class="card">
-    <h2>Wie viel Umsatzsteuer fällt für ${esc(z.name)} an?</h2>
+    <h2>Wie viel Umsatzsteuer fällt für ${esc(z.name)} an? ${hb('ustva', 'Wie gebe ich das ab?')}</h2>
     <p>${z.zahl >= 0 ? `Voraussichtlich <b>${eur(z.zahl)}</b> ans Finanzamt` : `Voraussichtlich <b>${eur(-z.zahl)}</b> Erstattung vom Finanzamt`}, Abgabe und Zahlung bis <b>${dat(z.frist)}</b> (in ${tageBis(z.frist)} Tagen).</p>
     <details><summary>So ist die Zahl entstanden</summary>
       <table class="tab"><tr><td>Umsatzsteuer</td><td style="text-align:right">${eur(z.ust)}</td></tr>
@@ -1886,7 +1898,7 @@ function vBelege() {
   for (const b of dJ) { const k = b.kategorie || 'ohne Kategorie'; const x = proKat[k] = proKat[k] || { n: 0, brutto: 0, vst: 0 }; x.n++; x.brutto += num(b.brutto); x.vst += num(b.vorsteuer); }
   const kat = Object.entries(proKat).sort((a, b) => b[1].brutto - a[1].brutto);
   return `
-  <h1>Belege</h1>
+  <h1>Belege ${hb('belege', 'Was gehört dazu?')}</h1>
   <div class="status"><div class="big">${dJ.length ? `${eur(dJ.reduce((s, b) => s + num(b.brutto), 0))} Ausgaben ${jahr}` : `Noch keine Belege für ${jahr}`}</div>
   <p class="small muted" style="margin-top:4px">${dJ.length ? `${dJ.length} Beleg${dJ.length > 1 ? 'e' : ''}, darin ${eur(dJ.reduce((s, b) => s + num(b.vorsteuer), 0))} Vorsteuer.` : 'Foto oder PDF einer Eingangsrechnung hochladen.'}${fehlt.length ? ` <b style="color:var(--warn)">${fehlt.length} noch zu ergänzen.</b>` : ''}</p></div>
   <div class="card drop" id="dropZone">
@@ -2044,9 +2056,9 @@ function vBank() {
   const dM = all.filter((b) => b.datum.startsWith(monat));
   const ein = dM.filter((b) => b.betrag > 0).reduce((s, b) => s + b.betrag, 0), aus = dM.filter((b) => b.betrag < 0).reduce((s, b) => s + b.betrag, 0);
   return `
-  <h1>Bank</h1>
+  <h1>Bank ${hb('bank')}</h1>
   <div class="status"><div class="big">${all.length ? (passt.length ? `<span class="pill warn">Zu tun</span> ${passt.length} Zahlung${passt.length > 1 ? 'en passen' : ' passt'} zu offenen Rechnungen` : `${all.filter(bankOffen).length} Buchungen ohne Zuordnung`) : 'Noch keine Kontoauszüge'}</div>
-  <p class="small muted" style="margin-top:4px">${all.length ? `${MONATE[new Date().getMonth()]}: ${eur(ein)} rein, ${eur(-aus)} raus. Letzte Buchung ${dat(all[0].datum)}.` : 'Lade den Kontoauszug als CSV hoch. Bei Qonto: Transaktionen, Exportieren, CSV.'}</p>
+  <p class="small muted" style="margin-top:4px">${all.length ? `${MONATE[new Date().getMonth()]}: ${eur(ein)} rein, ${eur(-aus)} raus. Letzte Buchung ${dat(all[0].datum)}.` : 'Lade den Kontoauszug als CSV hoch. Bei Qonto: Transaktionen, Exportieren, CSV.'} ${hb('bank', 'So holst du die Datei')}</p>
   <div class="btns"><button class="primary" data-act="bank-import">Kontoauszug (CSV) hochladen</button></div></div>
   ${vAbgleich()}
   ${all.length ? `<div class="card">
@@ -2087,10 +2099,11 @@ function vFirma() {
   <div class="status"><div class="big">${fehlt.length ? `<span class="pill warn">Zu tun</span> Es fehlen noch ${fehlt.length} Angaben` : '<span class="pill good">Gut</span> Firmendaten vollständig'}</div>
   <p class="small muted" style="margin-top:4px">${fehlt.length ? 'Fehlt: ' + fehlt.join(', ') + '. Diese Angaben stehen auf jeder Rechnung.' : 'Diese Angaben stehen auf jeder Rechnung.'}</p></div>
   <form class="card" id="firmaForm">
-    <h2>Welche Rechtsform hast du?</h2>
+    <h2>Welche Rechtsform hast du? ${hb('steuernummer', 'Gerade gegründet?')}</h2>
     <label>Rechtsform<select name="rechtsform"><option value="">Bitte wählen</option>${Object.entries(RECHTSFORMEN).map(([k, v]) => `<option value="${k}"${k === f.rechtsform ? ' selected' : ''}>${v.label}</option>`).join('')}</select></label>
     <div class="btns" style="margin-top:8px"><button type="button" data-act="rf-wizard">${f.rechtsform ? 'Rechtsform prüfen lassen' : 'Unsicher? Assistent starten'}</button></div>
     <label class="check" style="margin-top:10px"><input type="checkbox" name="kleinunternehmer"${f.kleinunternehmer ? ' checked' : ''}> Ich bin Kleinunternehmer (§ 19 UStG, keine Umsatzsteuer auf Rechnungen)</label>
+    <p style="margin:6px 0 0">${hb('kleinunternehmer', 'Bin ich Kleinunternehmer?')}</p>
     <label style="margin-top:10px;max-width:260px">Gegründet im Jahr<input name="gruendung" inputmode="numeric" maxlength="4" value="${esc(f.gruendung)}" placeholder="z. B. 2024"></label>
     ${rf ? `<div class="card" style="background:var(--soft);border:0;margin:12px 0 0"><b>Was gilt für ${esc(rf.label)}?</b>
       <table class="tab" style="margin-top:6px"><tr><td>Gewinnermittlung</td><td>${rf.gewinn}</td></tr><tr><td>Jahreserklärungen</td><td>${rf.jahr}</td></tr><tr><td>Umsatzsteuer</td><td>${f.kleinunternehmer ? 'Keine Voranmeldung und seit 2025 auch keine Jahreserklärung, außer das Finanzamt fordert sie an' : 'Voranmeldung monatlich oder vierteljährlich, Jahreserklärung'}</td></tr><tr><td>Besonderheit</td><td>${rf.extra}</td></tr></table>
@@ -2107,7 +2120,8 @@ function vFirma() {
         ${f.logo ? `<img class="logo-prev" src="${esc(f.logo)}" alt="Dein Logo"><button type="button" class="danger" data-act="logo-del">Logo entfernen</button>` : ''}</div>
     </div>
     <p class="small muted" style="margin-top:6px">Auf der Rechnung muss die Steuernummer oder die USt-IdNr. stehen.${REGISTER_RF.includes(f.rechtsform) ? ' Registergericht und Registernummer gehören bei deiner Rechtsform auf jeden Geschäftsbrief.' : ''}</p>
-    <h2 style="margin-top:18px">Voreinstellungen</h2>
+    <p class="small">${hb('steuernummer', 'Noch keine Steuernummer?')} ${hb('ustid', 'USt-IdNr. beantragen')}</p>
+    <h2 style="margin-top:18px">Voreinstellungen ${hb('dauerfrist', 'Was ist Dauerfristverlängerung?')}</h2>
     <div class="grid2">
       <label>Umsatzsteuer-Voranmeldung<select name="turnus"><option value="monat"${f.turnus === 'monat' ? ' selected' : ''}>monatlich</option><option value="quartal"${f.turnus === 'quartal' ? ' selected' : ''}>vierteljährlich</option></select></label>
       <label class="check" style="align-self:end"><input type="checkbox" name="dauerfrist"${f.dauerfrist ? ' checked' : ''}> Dauerfristverlängerung (+1 Monat)</label>
@@ -2117,7 +2131,7 @@ function vFirma() {
       <label>Skonto bei Zahlung innerhalb von Tagen<input name="skontoTage" inputmode="numeric" value="${num(f.skontoTage) ? esc(f.skontoTage) : ''}" placeholder="z. B. 7"></label>
       <label>Basiszinssatz % (für Verzugszinsen in Mahnungen)<input name="basiszins" inputmode="decimal" value="${esc(String(f.basiszins).replace('.', ','))}"></label>
     </div>
-    <p class="small muted" style="margin-top:6px">Der Basiszinssatz ändert sich jeweils zum 1. Januar und 1. Juli. Den aktuellen Wert veröffentlicht die Deutsche Bundesbank.</p>
+    <p class="small muted" style="margin-top:6px">Der Basiszinssatz ändert sich jeweils zum 1. Januar und 1. Juli. Den aktuellen Wert veröffentlicht die <a href="https://www.bundesbank.de/de/bundesbank/organisation/agb-und-regelungen/basiszinssatz-607820" target="_blank" rel="noopener">Deutsche Bundesbank</a>. ${hb('mahnung', 'Mahnen und Zinsen')}</p>
     <div class="btns"><button class="primary" type="submit">Speichern</button></div>
   </form>
   <div class="card">
@@ -2129,12 +2143,12 @@ function vFirma() {
     <div class="btns"><button data-act="artikel">Artikel und Leistungen (${S.artikel.length})</button><button data-act="lager">Lager${lagerArtikel().length ? ` (${eur(lagerWert())})` : ''}</button><button data-act="nummern">Nummern (${esc(nrBau(nrFormat('RE'), heute(), 1))})</button></div>
   </div>
   <div class="card">
-    <h2>Sind meine Daten sicher?</h2>
+    <h2>Sind meine Daten sicher? ${hb('sicherung')}</h2>
     <p>Alles liegt nur in diesem Browser auf diesem Gerät${S.letzteSicherung ? `, letzte Sicherung am ${dat(S.letzteSicherung)}` : ', noch keine Sicherung'}.</p>
     <p class="small">${dauerhaft ? '<span class="pill good">Dauerhaft gespeichert</span> Der Browser löscht die Daten nicht von selbst, auch wenn der Speicher knapp wird.' : `<span class="pill warn">Nicht fest gespeichert</span> Der Browser darf die Daten bei Platzmangel löschen, Safari auch nach 7 Tagen ohne Nutzung. Lege die App auf den Home-Bildschirm und lade regelmäßig eine Sicherung herunter. <button class="chip" data-act="speicher-fest">Dauerhaft speichern</button>`}</p>
     <div class="btns"><button data-act="backup">Sicherung herunterladen</button><button data-act="restore">Sicherung einspielen</button></div>
     ${vorherAm ? `<p class="small" style="margin-top:10px"><span class="pill grey">Aufgehoben</span> Der Stand vor dem Einspielen vom ${dat(vorherAm)} ist noch da. <button class="chip" data-act="vorher-zurueck">Rückgängig machen</button> <button class="chip" data-act="vorher-weg">Verwerfen</button></p>` : ''}
-    <p class="small muted" style="margin-top:6px">Die Sicherung ist eine Datei mit allen Daten und Belegen. Speichere sie auf deinem Computer, in iCloud oder Google Drive.</p>
+    <p class="small muted" style="margin-top:6px">Die Sicherung ist eine Datei mit allen Daten und Belegen. Speichere sie auf deinem Computer, in iCloud oder Google Drive. ${hb('handy', 'Aufs Handy legen')}</p>
     <details><summary>Auf ein anderes Gerät umziehen, z. B. vom Laptop aufs Handy</summary><ol class="small" style="margin:8px 0 0;padding-left:20px">
       <li>Auf dem alten Gerät „Sicherung herunterladen“.</li>
       <li>Die Datei aufs neue Gerät bringen: per AirDrop, iCloud Drive, Google Drive oder als Mail an dich selbst.</li>
@@ -2145,7 +2159,7 @@ function vFirma() {
     <h2>Daten für Excel und Steuerberater</h2>
     <p class="small muted">Das Jahrespaket ist eine ZIP-Datei mit Listen aller Einnahmen, Ausgaben und Bankbuchungen (öffnen sich in Excel) und allen Belegen als PDF oder Foto, sauber nach Datum benannt. Für ELSTER gibt es im Reiter Steuern neben jeder Kennzahl einen Knopf zum Kopieren.</p>
     <div class="btns">${[0, 1, 2].map((d) => new Date().getFullYear() - d).map((y) => `<button data-act="paket" data-k="${y}">Jahrespaket ${y}</button>`).join('')}</div>
-    <h3>Du hast einen Steuerberater?</h3>
+    <h3>Du hast einen Steuerberater? ${hb('steuerberater')}</h3>
     <p class="small muted">Die Kanzlei liest alle Buchungen im DATEV-Format direkt ein, mit SKR 03 oder SKR 04. Die Belege kommen als Dateien mit.</p>
     <div class="btns"><button class="primary" data-act="datev">Export für den Steuerberater (DATEV)</button></div>
     <details><summary>Weitere Daten</summary>
@@ -2377,6 +2391,7 @@ function vAnlagen() {
   const L = S.anlagen.slice().sort((a, b) => (a.datum || '').localeCompare(b.datum || '')), sum = { afa: 0, ende: 0 };
   const rows = L.map((a) => { const x = afaJahr(a, j); sum.afa += x.afa + x.rest; sum.ende += x.ende; return { a, x }; });
   openDlg(`${head('Anlagen und Abschreibung')}<div class="dlg-body">
+    <p style="margin:0 0 8px">${hb('afa', 'Wie funktioniert Abschreibung?')}</p>
     <div class="filters" role="group">${[y0, y0 - 1, y0 - 2].map((y) => `<button class="chip" data-act="anl-jahr" data-k="${y}" aria-pressed="${y === j}">${y}</button>`).join('')}</div>
     ${V.length ? `<div class="card" style="margin-top:10px"><b>Noch nicht eingetragen</b><p class="small muted" style="margin:4px 0 6px">Diese Belege sind Anschaffungen über ${eur(GWG_GRENZE)} netto. Solange sie nicht eingetragen sind, zählen sie voll im Jahr des Kaufs.</p>
       <ul class="list">${V.map((b) => `<li><button class="item" data-act="anl-neu" data-id="${b.id}"><div class="grow"><div class="t">${esc(b.lieferant || 'Beleg')}</div><div class="s">${dat(b.datum)}${b.notiz ? ' · ' + esc(b.notiz) : ''}</div></div><div><div class="amt">${eur(r2(num(b.brutto) - num(b.vorsteuer)))}</div><div style="text-align:right"><span class="pill warn">eintragen</span></div></div></button></li>`).join('')}</ul></div>` : ''}
@@ -2579,6 +2594,287 @@ function closeDlg() { if (dlg.open) dlg.close(); dlg.innerHTML = ''; }
 dlg.addEventListener('click', (e) => { if (e.target === dlg) closeDlg(); });
 const head = (t) => `<div class="dlg-head"><h2>${t}</h2><button class="x" data-act="close" aria-label="Schließen">×</button></div>`;
 
+/* ---------- Hilfe und Anleitungen: kurze Erklärungen mit Schritten und offiziellen Links ---------- */
+/* Jede Anleitung: t Titel, b Bereich, kurz (eine Zeile für die Liste), text (worum es geht), schritte, tipps, links [Name, Adresse], siehe (verwandte Anleitungen) */
+const HL = {
+  elsterReg: ['ELSTER: Benutzerkonto erstellen', 'https://www.elster.de/eportal/registrierung'],
+  elsterLogin: ['Mein ELSTER: Anmelden', 'https://www.elster.de/eportal/login'],
+  elsterForm: ['Mein ELSTER: Alle Formulare', 'https://www.elster.de/eportal/formulare-leistungen/alleformulare'],
+  elsterUstva: ['ELSTER: Umsatzsteuer-Voranmeldung', 'https://www.elster.de/eportal/formulare-leistungen/alleformulare/ustvaeru'],
+  elsterFsE: ['ELSTER: Fragebogen zur steuerlichen Erfassung (Einzelunternehmen)', 'https://www.elster.de/eportal/formulare-leistungen/alleformulare/fseeun'],
+  elsterDfv: ['ELSTER: Dauerfristverlängerung (monatliche Abgabe)', 'https://www.elster.de/eportal/formulare-leistungen/alleformulare/ustsveru'],
+  elsterDfvQ: ['ELSTER: Dauerfristverlängerung (vierteljährliche Abgabe)', 'https://www.elster.de/eportal/formulare-leistungen/alleformulare/ustdveru'],
+  elsterZm: ['ELSTER: Zusammenfassende Meldung', 'https://www.elster.de/eportal/formulare-leistungen/alleformulare/zmdo'],
+  ustid: ['USt-IdNr. beantragen (Bundeszentralamt für Steuern)', 'https://www.bzst.de/DE/Unternehmen/Identifikationsnummern/Umsatzsteuer-Identifikationsnummer/umsatzsteuer-identifikationsnummer_node.html'],
+  zm: ['Fragen und Antworten zur Zusammenfassenden Meldung (BZSt)', 'https://www.bzst.de/DE/Unternehmen/Umsatzsteuer/ZusammenfassendeMeldung/FAQ/faq_zm.html'],
+  p14: ['Gesetz: Pflichtangaben einer Rechnung (§ 14 UStG)', 'https://www.gesetze-im-internet.de/ustg_1980/__14.html'],
+  p13b: ['Gesetz: Steuerschuld des Kunden (§ 13b UStG)', 'https://www.gesetze-im-internet.de/ustg_1980/__13b.html'],
+  p19: ['Gesetz: Kleinunternehmer (§ 19 UStG)', 'https://www.gesetze-im-internet.de/ustg_1980/__19.html'],
+  p147: ['Gesetz: Aufbewahrungsfristen (§ 147 AO)', 'https://www.gesetze-im-internet.de/ao_1977/__147.html'],
+  p288: ['Gesetz: Verzugszinsen (§ 288 BGB)', 'https://www.gesetze-im-internet.de/bgb/__288.html'],
+  p286: ['Gesetz: Wann ein Kunde in Verzug ist (§ 286 BGB)', 'https://www.gesetze-im-internet.de/bgb/__286.html'],
+  basis: ['Aktueller Basiszinssatz (Deutsche Bundesbank)', 'https://www.bundesbank.de/de/bundesbank/organisation/agb-und-regelungen/basiszinssatz-607820'],
+  mahnOnline: ['Mahnbescheid online beantragen (Mahngerichte)', 'https://www.online-mahnantrag.de/'],
+  gewerbe: ['Gewerbe anmelden (Existenzgründungsportal des Bundes)', 'https://www.existenzgruendungsportal.de/Navigation/DE/So-gehts/Unternehmensanmeldung/unternehmensanmeldung'],
+  faAnm: ['Welche Ämter bei der Gründung (Existenzgründungsportal des Bundes)', 'https://www.existenzgruendungsportal.de/Navigation/DE/Gruendungswissen/Behoerden/behoerden']
+};
+const HILFE = {
+  start: { b: 'Anfangen', t: 'Die ersten Schritte mit dem Cockpit', kurz: 'In welcher Reihenfolge du am besten anfängst.',
+    text: 'Du musst nicht alles auf einmal machen. Diese Reihenfolge hat sich bewährt:',
+    schritte: ['Im Reiter <b>Firma</b> Name, Anschrift und Rechtsform eintragen. Bist du unsicher bei der Rechtsform, hilft der Assistent dort.',
+      'Steuernummer eintragen. Hast du noch keine, steht in der Anleitung „Steuernummer bekommen“, wie das geht.',
+      'Entscheiden, ob du Kleinunternehmer bist. Dann rechnet die App ohne Umsatzsteuer.',
+      'Ein ELSTER-Konto anlegen. Das dauert etwa zwei Wochen, weil ein Brief mit der Post kommt. Am besten gleich heute starten.',
+      'Erste Rechnung schreiben (Plus-Knopf unten rechts) und Belege fotografieren.',
+      'Einmal im Monat den Kontoauszug im Reiter Bank hochladen und eine Sicherung herunterladen.'],
+    tipps: ['Mit „Beispieldaten laden“ auf der Übersicht siehst du eine fertig befüllte Musterfirma und kannst gefahrlos ausprobieren.'],
+    siehe: ['steuernummer', 'elster', 'kleinunternehmer', 'handy'] },
+  steuernummer: { b: 'Anfangen', t: 'Steuernummer bekommen', kurz: 'Fragebogen zur steuerlichen Erfassung bei ELSTER.',
+    text: 'Wenn du dich selbständig machst, meldest du dich beim Finanzamt mit dem „Fragebogen zur steuerlichen Erfassung“ an. Danach schickt dir das Finanzamt per Post deine Steuernummer für die Firma und sagt dir, ob du die Umsatzsteuer-Voranmeldung monatlich oder vierteljährlich abgeben musst.',
+    schritte: ['Hast du ein Gewerbe (z. B. Handel, Online-Shop, Handwerk, Agentur), meldest du es zuerst beim Gewerbeamt deiner Stadt an. Viele Städte bieten das online an. Freiberufler (z. B. Berater, Designer, Texter) brauchen keine Gewerbeanmeldung.',
+      'Ein ELSTER-Konto anlegen, falls du noch keins hast (eigene Anleitung).',
+      'In Mein ELSTER: „Formulare &amp; Leistungen“, „Alle Formulare“, „Fragebogen zur steuerlichen Erfassung“ und dort die passende Variante wählen (z. B. „Aufnahme einer gewerblichen, selbständigen (freiberuflichen) oder land- und forstwirtschaftlichen Tätigkeit“ für Einzelunternehmer).',
+      'Ausfüllen. Du wirst nach dem erwarteten Umsatz und Gewinn gefragt. Schätze ehrlich, daraus berechnet das Finanzamt mögliche Vorauszahlungen.',
+      'Im Fragebogen kannst du gleich ankreuzen: Kleinunternehmerregelung ja oder nein, Ist-Versteuerung beantragen und eine USt-IdNr. beantragen, wenn du mit Firmen im EU-Ausland arbeitest.',
+      'Absenden. Die Steuernummer kommt in der Regel nach einigen Wochen per Brief. Trag sie dann im Reiter Firma ein.'],
+    tipps: ['Den Fragebogen musst du innerhalb eines Monats nach dem Start deiner Tätigkeit abgeben.', 'Bis die Steuernummer da ist, darfst du schon arbeiten. Rechnungen mit Umsatzsteuer brauchst du aber mit Steuernummer oder USt-IdNr., also besser warten oder die Rechnung später stellen.'],
+    links: ['elsterFsE', 'gewerbe', 'faAnm'], siehe: ['elster', 'kleinunternehmer', 'istversteuerung', 'ustid'] },
+  elster: { b: 'Anfangen', t: 'ELSTER-Konto anlegen', kurz: 'Zugang zum Online-Finanzamt, dauert etwa zwei Wochen.',
+    text: 'ELSTER ist das kostenlose Online-Finanzamt. Darüber gibst du die Umsatzsteuer-Voranmeldung, die Steuererklärungen und Anträge ab. Für den Zugang bekommst du eine Datei (Zertifikat) und ein eigenes Passwort.',
+    schritte: ['Auf elster.de auf „Benutzerkonto erstellen“ gehen und „Für mich“ wählen. Als Einzelunternehmer oder Freiberufler reicht das persönliche Konto mit deiner Steuer-Identifikationsnummer (die elfstellige Nummer, z. B. auf deiner Lohnsteuerbescheinigung).',
+      'Für eine GmbH, UG oder GbR gibt es das Konto „Für eine Organisation“ mit der Steuernummer der Firma.',
+      'Als Zugang die „Zertifikatsdatei“ wählen. Das ist am einfachsten und funktioniert auf jedem Computer.',
+      'Daten eingeben und absenden. Du bekommst eine E-Mail mit einer Aktivierungs-ID und getrennt davon einen Brief mit dem Aktivierungs-Code.',
+      'Wenn der Brief da ist: den Link aus der E-Mail öffnen, ID und Code eingeben, die Zertifikatsdatei herunterladen und ein Passwort festlegen.',
+      'Die Datei gut aufheben, z. B. auf dem Computer und einem USB-Stick. Ohne sie kommst du nicht mehr hinein. Anmelden kannst du dich dann jederzeit unter „Login“.'],
+    tipps: ['Der Brief mit dem Aktivierungs-Code braucht meist bis zu zwei Wochen. Fang also rechtzeitig vor der ersten Frist an.', 'Fürs Handy gibt es die App „ElsterSmart“, mit der du dich auch ohne Zertifikatsdatei anmelden kannst.'],
+    links: ['elsterReg', 'elsterLogin'], siehe: ['ustva', 'steuernummer'] },
+  ustva: { b: 'Umsatzsteuer', t: 'Umsatzsteuer-Voranmeldung zum ersten Mal', kurz: 'Was das ist, wann sie fällig ist und wie du sie in ELSTER abgibst.',
+    text: 'Die Umsatzsteuer, die du auf deine Rechnungen schreibst, gehört dem Finanzamt. Die Umsatzsteuer, die du selbst bei Einkäufen zahlst (Vorsteuer), bekommst du zurück. Die Differenz meldest du jeden Monat oder jedes Quartal mit der Voranmeldung und zahlst sie. Die App rechnet die Zahlen aus, du tippst sie nur noch in ELSTER ab.',
+    schritte: ['Im Reiter <b>Steuern</b> bei „Umsatzsteuer-Voranmeldung“ den Zeitraum wählen. Du siehst die Kennzahlen (Kz) mit den Beträgen.',
+      'Auf elster.de bei Mein ELSTER anmelden.',
+      '„Formulare &amp; Leistungen“, „Alle Formulare“, „Unternehmen“, „Umsatzsteuer“ und dann „Umsatzsteuer-Voranmeldung“ mit dem richtigen Jahr öffnen.',
+      'Beim ersten Mal fragt ELSTER nach Steuernummer und Finanzamt. Die Steuernummer steht im Brief vom Finanzamt. Später übernimmt ELSTER das.',
+      'Den Zeitraum wählen (z. B. Oktober oder 3. Quartal).',
+      'Die Werte aus der App in die gleichen Kennzahlen eintragen. Am wichtigsten: Kz 81 (Umsätze mit 19 %, ohne Steuer), Kz 86 (Umsätze mit 7 %) und Kz 66 (Vorsteuer). Die Steuer zu 81 und 86 rechnet ELSTER selbst aus.',
+      'Auf „Prüfen“ klicken. Vergleiche das Ergebnis bei Kz 83 mit der Zahl in der App. Passt es, „Absenden“.',
+      'Den Betrag bis zur Frist ans Finanzamt zahlen (eigene Anleitung „Steuern ans Finanzamt zahlen“). Bei einer Erstattung überweist das Finanzamt dir das Geld.',
+      'In der App „Als abgegeben markieren“. Dann verschwindet die Frist aus deiner Liste.'],
+    tipps: ['Frist ist der 10. Tag nach Ende des Monats oder Quartals, also z. B. der 10. November für Oktober. Mit Dauerfristverlängerung einen Monat später.',
+      'Auch wenn du in einem Monat nichts verkauft hast, musst du eine Voranmeldung abgeben, dann eben mit 0 (Nullmeldung).',
+      'Ob monatlich oder vierteljährlich, legt das Finanzamt fest und schreibt es dir. Stell es im Reiter Firma ein.',
+      'Gibst du zu spät ab, kann das Finanzamt einen Verspätungszuschlag festsetzen. Zahlst du zu spät, kostet das 1 % Säumniszuschlag je angefangenem Monat.',
+      'Hast du dich vertan, gibst du einfach eine neue Voranmeldung für denselben Zeitraum ab und setzt dort den Haken bei „berichtigte Anmeldung“.'],
+    links: ['elsterLogin', 'elsterUstva'], siehe: ['zahlen', 'dauerfrist', 'elster', 'reversecharge'] },
+  zahlen: { b: 'Umsatzsteuer', t: 'Steuern ans Finanzamt zahlen', kurz: 'Überweisen oder einfacher: Lastschrift erlauben.',
+    text: 'Die Voranmeldung abgeben heißt noch nicht bezahlen. Das Geld musst du selbst überweisen oder dem Finanzamt erlauben, es abzubuchen.',
+    schritte: ['<b>Am einfachsten: Lastschrift.</b> Auf der Website deines Finanzamts gibt es das Formular „SEPA-Lastschriftmandat“. Ausfüllen, unterschreiben und per Post ans Finanzamt schicken. Danach bucht das Finanzamt jede Steuer pünktlich zur Frist ab, du kannst keine Zahlung mehr vergessen.',
+      '<b>Oder überweisen.</b> Die Bankverbindung deines Finanzamts steht auf jedem Brief und Bescheid vom Finanzamt und auf seiner Website.',
+      'Als Verwendungszweck: deine Steuernummer, die Steuerart und den Zeitraum, z. B. „123/456/78901 USt 10/2026“. Sonst kann das Finanzamt die Zahlung nicht zuordnen.',
+      'Rechtzeitig überweisen. Maßgeblich ist, wann das Geld beim Finanzamt ankommt.',
+      'Die Zahlung taucht später im Reiter Bank auf. Markiere sie dort als „ohne Beleg“ (Steuerzahlung), dann stimmt auch der Export für den Steuerberater.'],
+    tipps: ['Für Überweisungen gibt es drei Tage Schonfrist, bevor Säumniszuschläge anfallen. Darauf solltest du dich nicht verlassen, bei Lastschrift brauchst du sie nicht.', 'Leg für die Steuer am besten ein eigenes Unterkonto an. Wie viel drauf sollte, zeigt die Steuer-Rücklage auf der Übersicht.'],
+    siehe: ['ustva', 'vorauszahlung'] },
+  dauerfrist: { b: 'Umsatzsteuer', t: 'Dauerfristverlängerung: einen Monat mehr Zeit', kurz: 'Voranmeldung immer einen Monat später abgeben.',
+    text: 'Mit der Dauerfristverlängerung gibst du jede Voranmeldung einen Monat später ab, also z. B. für Oktober erst am 10. Dezember statt am 10. November. Das ist praktisch, wenn Belege oft spät kommen. Das Finanzamt stimmt in der Regel zu.',
+    schritte: ['In Mein ELSTER das Formular „Antrag auf Dauerfristverlängerung / Anmeldung der Sondervorauszahlung“ öffnen (Umsatzsteuer, gleiche Stelle wie die Voranmeldung).',
+      'Gibst du monatlich ab, musst du eine Sondervorauszahlung leisten: ein Elftel der Umsatzsteuer, die du im Vorjahr insgesamt vorangemeldet hast. Im ersten Jahr schätzt du sie anhand deines erwarteten Umsatzes. Die Sondervorauszahlung wird mit der Voranmeldung für Dezember verrechnet, du bekommst sie also zurück.',
+      'Gibst du vierteljährlich ab, gibt es keine Sondervorauszahlung.',
+      'Absenden und die Sondervorauszahlung zahlen.',
+      'In der App im Reiter Firma den Haken bei „Dauerfristverlängerung“ setzen und im Reiter Steuern unter „Einstellungen“ die Sondervorauszahlung eintragen. Dann stimmen alle Fristen.'],
+    tipps: ['Den Antrag stellst du bis zur Frist der ersten Voranmeldung, für die er gelten soll: bei monatlicher Abgabe also bis 10. Februar, bei vierteljährlicher bis 10. April.', 'Der Antrag gilt so lange, bis du ihn zurücknimmst oder das Finanzamt ihn widerruft. Monatszahler melden die Sondervorauszahlung aber jedes Jahr neu an.'],
+    links: ['elsterDfv', 'elsterDfvQ'], siehe: ['ustva'] },
+  kleinunternehmer: { b: 'Umsatzsteuer', t: 'Bin ich Kleinunternehmer?', kurz: 'Keine Umsatzsteuer auf Rechnungen, wenn dein Umsatz klein ist.',
+    text: 'Als Kleinunternehmer schreibst du keine Umsatzsteuer auf deine Rechnungen und gibst keine Voranmeldungen ab. Dafür bekommst du auch die Umsatzsteuer aus deinen Einkäufen nicht zurück. Seit 2025 gilt: Umsatz im Vorjahr höchstens 25.000 € und im laufenden Jahr höchstens 100.000 € (jeweils ohne Umsatzsteuer).',
+    schritte: ['Prüfen, ob dein Umsatz unter den Grenzen bleibt. Im Gründungsjahr zählt, ob du voraussichtlich unter 25.000 € bleibst.',
+      'Lohnt es sich? Verkaufst du vor allem an Privatleute, ist es meist ein Vorteil, weil deine Preise ohne Umsatzsteuer günstiger sind. Verkaufst du an Firmen oder kaufst du viel ein (z. B. teure Geräte), kann die normale Umsatzsteuer günstiger sein.',
+      'Die Entscheidung teilst du dem Finanzamt mit, meist gleich im Fragebogen zur steuerlichen Erfassung.',
+      'In der App im Reiter Firma den Haken „Ich bin Kleinunternehmer“ setzen. Dann stellt die App Rechnungen ohne Umsatzsteuer und mit dem nötigen Hinweis aus.',
+      'Den Kleinunternehmer-Wächter auf der Übersicht im Blick behalten. Er warnt dich, bevor du über die Grenze kommst.'],
+    tipps: ['Auf jede Rechnung gehört ein Hinweis, z. B. „Gemäß § 19 UStG wird keine Umsatzsteuer berechnet.“ Das macht die App automatisch.',
+      'Wer freiwillig auf die Regelung verzichtet, ist fünf Jahre daran gebunden.',
+      'Wer über 100.000 € kommt, muss schon ab der Rechnung, die die Grenze überschreitet, Umsatzsteuer berechnen.',
+      'Kaufst du Werbung bei Google, Meta oder anderen Firmen im Ausland, musst du darauf trotzdem Umsatzsteuer ans Finanzamt zahlen (siehe „Rechnungen aus dem Ausland“).'],
+    links: ['p19'], siehe: ['reversecharge', 'steuernummer'] },
+  istversteuerung: { b: 'Umsatzsteuer', t: 'Soll- oder Ist-Versteuerung?', kurz: 'Zahlst du die Umsatzsteuer bei Rechnung oder erst bei Zahlung?',
+    text: 'Normal ist die Soll-Versteuerung: Die Umsatzsteuer ist fällig, sobald du die Rechnung schreibst, auch wenn der Kunde noch nicht bezahlt hat. Bei der Ist-Versteuerung zahlst du sie erst, wenn das Geld da ist. Das schont die Kasse.',
+    schritte: ['Ist-Versteuerung bekommen Freiberufler und alle, deren Umsatz im Vorjahr höchstens 800.000 € war. Sie gilt aber nur, wenn das Finanzamt sie genehmigt.',
+      'Beantragen kannst du sie im Fragebogen zur steuerlichen Erfassung oder später mit einem kurzen Schreiben ans Finanzamt (in Mein ELSTER über „Sonstige Nachricht an das Finanzamt“).',
+      'Wenn die Genehmigung da ist: im Reiter Steuern unter „Einstellungen für Steuern“ auf „Ist“ umstellen.'],
+    tipps: ['Die Vorsteuer aus deinen Einkäufen ziehst du in beiden Fällen nach dem Rechnungsdatum ab.', 'Stell nur um, was das Finanzamt dir bestätigt hat, sonst stimmen deine Voranmeldungen nicht.'],
+    links: ['elsterLogin'], siehe: ['ustva', 'steuernummer'] },
+  reversecharge: { b: 'Rechnungen', t: 'Rechnungen ins Ausland und aus dem Ausland', kurz: 'Wann der Kunde die Umsatzsteuer zahlt (Reverse Charge).',
+    text: 'Bei Geschäften mit Firmen im Ausland zahlt oft nicht der Verkäufer, sondern der Kunde die Umsatzsteuer in seinem Land. Das heißt „Reverse Charge“ oder „Steuerschuldnerschaft des Leistungsempfängers“.',
+    schritte: ['<b>Du verkaufst an eine Firma in einem anderen EU-Land:</b> Du brauchst ihre USt-IdNr. und eine eigene. Prüfe ihre Nummer vorher beim Bundeszentralamt für Steuern. In der Rechnung als Steuerfall „EU-Firma“ wählen, dann schreibt die App 0 % und den Pflicht-Hinweis drauf.',
+      'Diese Umsätze meldest du zusätzlich in der Zusammenfassenden Meldung (eigene Anleitung).',
+      '<b>Du verkaufst an eine Firma außerhalb der EU</b> (z. B. Schweiz, USA): meist ebenfalls ohne deutsche Umsatzsteuer, Steuerfall entsprechend wählen.',
+      '<b>Du kaufst bei einer Firma im Ausland ein</b> (z. B. Werbung bei Google Ireland oder Meta, Software aus den USA): Auf der Rechnung steht keine deutsche Umsatzsteuer. Du musst sie selbst ans Finanzamt melden. Markiere solche Belege in der App, dann rechnet sie die Steuer in die Voranmeldung ein.',
+      'Bist du nicht Kleinunternehmer, ziehst du dieselbe Summe gleich wieder als Vorsteuer ab. Unterm Strich zahlst du dann nichts, musst es aber melden.'],
+    tipps: ['Kleinunternehmer zahlen die Steuer auf solche Einkäufe, ohne sie zurückzubekommen, und müssen dafür eine Voranmeldung abgeben.', 'Verkaufst du an Privatleute im EU-Ausland, gelten andere Regeln (ab 10.000 € im Jahr die Steuer des Kundenlandes). Dafür lieber mit einem Steuerberater sprechen.'],
+    links: ['p13b', 'ustid'], siehe: ['ustid', 'zm', 'ustva'] },
+  ustid: { b: 'Rechnungen', t: 'USt-IdNr. beantragen', kurz: 'Brauchst du für Geschäfte mit Firmen in anderen EU-Ländern.',
+    text: 'Die Umsatzsteuer-Identifikationsnummer (z. B. DE123456789) brauchst du, wenn du Firmen in anderen EU-Ländern Rechnungen schreibst oder bei ihnen einkaufst. Sie ist kostenlos.',
+    schritte: ['Am einfachsten gleich im Fragebogen zur steuerlichen Erfassung ankreuzen.',
+      'Später geht es über das Online-Formular des Bundeszentralamts für Steuern (BZSt). Du brauchst deine Steuernummer und das zuständige Finanzamt.',
+      'Die Nummer kommt per Brief. Trag sie im Reiter Firma ein, dann steht sie auf jeder Rechnung.'],
+    tipps: ['Auch Kleinunternehmer können eine USt-IdNr. bekommen, z. B. für Werbung bei Google oder Meta.', 'Die USt-IdNr. deiner EU-Kunden kannst du beim BZSt kostenlos auf Gültigkeit prüfen.'],
+    links: ['ustid'], siehe: ['reversecharge', 'zm'] },
+  zm: { b: 'Umsatzsteuer', t: 'Zusammenfassende Meldung', kurz: 'Geschäfte mit EU-Firmen ans Bundeszentralamt melden.',
+    text: 'Schreibst du Rechnungen ohne Umsatzsteuer an Firmen in anderen EU-Ländern, meldest du diese Umsätze zusätzlich in der Zusammenfassenden Meldung (ZM). Die App sammelt die Kunden und Beträge im Reiter Steuern.',
+    schritte: ['Im Reiter Steuern bei „Zusammenfassende Meldung“ die Liste ansehen. Fehlt bei einem Kunden die USt-IdNr., erst nachtragen.',
+      'In Mein ELSTER „Formulare &amp; Leistungen“, „Alle Formulare“ und dort „Zusammenfassende Meldung“ öffnen. Das BZSt-Online-Portal brauchen nur Firmen mit sehr vielen Meldungen.',
+      'Für jeden Kunden Land, USt-IdNr., Betrag und Art (Lieferung oder Dienstleistung) eintragen.',
+      'Absenden, bis zum 25. Tag nach Ende des Quartals.'],
+    tipps: ['Bei Warenlieferungen über 50.000 € im Quartal meldest du monatlich.', 'Die Umsätze gehören außerdem in die Voranmeldung. Das macht die App automatisch.'],
+    links: ['elsterZm', 'zm'], siehe: ['reversecharge', 'ustid'] },
+  rechnung: { b: 'Rechnungen', t: 'Was muss auf eine Rechnung?', kurz: 'Die Pflichtangaben, die das Finanzamt sehen will.',
+    text: 'Fehlt auf einer Rechnung eine Pflichtangabe, kann dein Kunde die Vorsteuer nicht abziehen und verlangt eine neue. Die App prüft das beim Schreiben und zeigt, was fehlt.',
+    schritte: ['Dein Name und deine Anschrift, und Name und Anschrift des Kunden.',
+      'Deine Steuernummer oder USt-IdNr.',
+      'Rechnungsdatum und eine fortlaufende Rechnungsnummer, die es nur einmal gibt. Die vergibt die App.',
+      'Menge und Art der Leistung oder Ware, und wann du geliefert oder gearbeitet hast (Leistungsdatum oder -zeitraum).',
+      'Nettobetrag, Steuersatz und Steuerbetrag, oder ein Hinweis, warum keine Steuer drauf ist (Kleinunternehmer, Reverse Charge).'],
+    tipps: ['Bis 250 € (Kleinbetragsrechnung) reichen weniger Angaben, z. B. ohne Anschrift des Kunden.', 'Eine gestellte Rechnung änderst du nicht mehr, sondern stornierst sie und schreibst eine neue. Das macht die App mit einer Stornorechnung.'],
+    links: ['p14'], siehe: ['erechnung', 'mahnung'] },
+  erechnung: { b: 'Rechnungen', t: 'E-Rechnung: was gilt wann?', kurz: 'Empfangen musst du sie schon, schreiben bald auch.',
+    text: 'Eine E-Rechnung ist eine Rechnung als Datei, die ein Computer lesen kann (z. B. XRechnung oder ZUGFeRD). Ein normales PDF zählt nicht dazu. Die Pflicht kommt in Stufen und gilt nur zwischen Firmen in Deutschland, nicht bei Privatkunden.',
+    schritte: ['<b>Seit 1. Januar 2025</b> musst du E-Rechnungen empfangen können. Eine E-Mail-Adresse reicht dafür.',
+      '<b>Ab 1. Januar 2027</b> müssen Firmen mit mehr als 800.000 € Umsatz im Vorjahr E-Rechnungen schreiben.',
+      '<b>Ab 1. Januar 2028</b> gilt das für alle Firmen.',
+      'In der App kannst du jede Rechnung schon jetzt als E-Rechnung herunterladen: als XRechnung-Datei oder als PDF mit eingebauter E-Rechnung (ZUGFeRD). Das PDF ist am praktischsten, weil Menschen und Programme es lesen können.'],
+    tipps: ['Kleinunternehmer und Rechnungen bis 250 € sind von der Pflicht zum Schreiben ausgenommen.', 'Öffentliche Auftraggeber (Behörden) verlangen meist schon heute eine XRechnung mit ihrer Leitweg-ID.'],
+    links: ['p14'], siehe: ['rechnung'] },
+  mahnung: { b: 'Rechnungen', t: 'Kunde zahlt nicht: so mahnst du richtig', kurz: 'Erinnerung, Mahnung, Verzugszinsen und Mahnbescheid.',
+    text: 'Erst freundlich erinnern, dann mahnen. Die App schlägt dir die Schritte vor und rechnet Zinsen und Gebühren aus.',
+    schritte: ['Nach Ablauf des Zahlungsziels erst prüfen, ob das Geld vielleicht doch da ist (Reiter Bank).',
+      'Eine freundliche Zahlungserinnerung schicken. Viele haben die Rechnung einfach vergessen.',
+      'Kommt nichts, eine Mahnung mit neuer Frist schicken, danach eine letzte Mahnung.',
+      'Spätestens 30 Tage nach Fälligkeit und Zugang der Rechnung ist der Kunde automatisch in Verzug. Bei Privatkunden gilt das nur, wenn auf der Rechnung darauf hingewiesen wurde. Ab dann darfst du Verzugszinsen verlangen.',
+      'Zahlt der Kunde gar nicht, kannst du online einen gerichtlichen Mahnbescheid beantragen. Das kostet eine Gebühr, die der Kunde am Ende zahlen muss.'],
+    tipps: ['Verzugszinsen: bei Firmen 9 Prozentpunkte über dem Basiszinssatz, bei Privatleuten 5. Von Firmen darfst du zusätzlich 40 € Pauschale verlangen.', 'Den Basiszinssatz trägst du im Reiter Firma ein. Er ändert sich am 1. Januar und 1. Juli.'],
+    links: ['p286', 'p288', 'basis', 'mahnOnline'], siehe: ['rechnung'] },
+  belege: { b: 'Belege und Bank', t: 'Belege richtig sammeln', kurz: 'Was ein guter Beleg ist und wie lange du ihn aufhebst.',
+    text: 'Jede Ausgabe braucht einen Beleg, sonst zählt sie nicht. Fotografiere Belege am besten sofort mit dem Plus-Knopf, dann geht nichts verloren.',
+    schritte: ['Foto oder PDF hochladen, Lieferant, Datum, Betrag und Kategorie eintragen.',
+      'Steht Umsatzsteuer auf dem Beleg, die Vorsteuer übernehmen. Die bekommst du über die Voranmeldung zurück.',
+      'Bei Bewirtung (Geschäftsessen) auf dem Beleg Anlass und Teilnehmer notieren. Absetzbar sind 70 %.',
+      'Geräte über 800 € netto werden über mehrere Jahre abgeschrieben (Anleitung „Abschreibung“).',
+      'Einmal im Monat im Reiter Bank prüfen, ob zu jeder Abbuchung ein Beleg da ist.'],
+    tipps: ['Belege und Rechnungen musst du 8 Jahre aufheben, Bücher und Jahresabschlüsse 10 Jahre. Kommt eine Rechnung digital (PDF, E-Rechnung), musst du die Datei aufheben, ein Ausdruck reicht nicht.', 'Die App speichert alles nur auf diesem Gerät. Lade regelmäßig eine Sicherung herunter. Eine geprüfte Archivierung nach den Regeln des Finanzamts (GoBD) ist sie noch nicht.'],
+    links: ['p147'], siehe: ['afa', 'bank', 'sicherung'] },
+  bank: { b: 'Belege und Bank', t: 'Kontoauszug als CSV holen', kurz: 'So kommen deine Bankbuchungen in die App.',
+    text: 'Die App liest Kontoauszüge als CSV-Datei (eine Tabelle, die sich auch in Excel öffnen lässt). Damit ordnet sie Zahlungen deinen Rechnungen zu und findet Abbuchungen ohne Beleg.',
+    schritte: ['<b>Qonto:</b> In der Qonto-App oder im Browser auf „Transaktionen“, dann „Exportieren“ und „CSV“ wählen, Zeitraum einstellen und herunterladen.',
+      '<b>Andere Banken:</b> Im Online-Banking die Umsätze öffnen und nach „Export“, „Herunterladen“ oder „CSV“ suchen. Bei Sparkassen heißt es oft „Umsätze exportieren“ mit dem Format „CSV-CAMT“.',
+      'Im Reiter <b>Bank</b> auf „Kontoauszug (CSV) hochladen“ und die Datei wählen.',
+      'Die App übernimmt nur neue Buchungen. Du kannst also ruhig immer den ganzen Monat hochladen.',
+      'Danach Zahlungen den Rechnungen zuordnen und fehlende Belege ergänzen.'],
+    tipps: ['Am besten einmal im Monat, z. B. vor der Voranmeldung.'], siehe: ['belege'] },
+  afa: { b: 'Jahresende', t: 'Abschreibung: teure Anschaffungen', kurz: 'Warum ein Laptop für 1.500 € nicht auf einmal zählt.',
+    text: 'Kaufst du etwas, das mehrere Jahre hält (z. B. Möbel, Maschine, Auto), setzt du den Preis nicht auf einmal ab, sondern verteilt über die Jahre der Nutzung. Das heißt Abschreibung oder AfA.',
+    schritte: ['Bis 800 € netto: sofort voll absetzen (geringwertiges Wirtschaftsgut).',
+      'Computer, Laptops, Tablets, Zubehör und Software: Hier rechnet das Finanzamt mit nur einem Jahr Nutzungsdauer, sie sind also schnell abgesetzt.',
+      'Alles andere über 800 € netto: über die Nutzungsdauer laut AfA-Tabelle des Bundesfinanzministeriums, z. B. Büromöbel 13 Jahre, Auto 6 Jahre. Die App schlägt die Dauer vor.',
+      'In der App im Reiter Steuern „Anlagenverzeichnis“ öffnen. Belege über 800 € schlägt die App dort selbst vor.',
+      'Im ersten Jahr zählt nur der Teil ab dem Monat der Anschaffung. Das rechnet die App.'],
+    tipps: ['Verkaufst du ein Gerät später, muss das in die Rechnung. Lieber mit dem Steuerberater klären.'],
+    siehe: ['belege', 'euer'] },
+  euer: { b: 'Jahresende', t: 'Die Einnahmen-Überschuss-Rechnung (EÜR)', kurz: 'So ermitteln die meisten Selbständigen ihren Gewinn.',
+    text: 'Einzelunternehmer und Freiberufler ohne Handelsregister-Eintrag ermitteln ihren Gewinn ganz einfach: Einnahmen minus Ausgaben. Das Formular dafür heißt „Anlage EÜR“ und wird mit der Einkommensteuererklärung über ELSTER abgegeben.',
+    schritte: ['Das ganze Jahr Rechnungen schreiben und Belege sammeln. Die App rechnet die EÜR mit.',
+      'Im Reiter Steuern die Einnahmen-Überschuss-Rechnung für das Jahr ansehen. Hinweise wie offene Rechnungen oder Belege ohne Betrag vorher klären.',
+      'Im Einkommensteuer-Assistenten (Reiter Steuern) zeigt die App am Ende die Werte für die Anlage EÜR mit Zeile und Kennzahl.',
+      'In Mein ELSTER die Einkommensteuererklärung öffnen, die Anlage EÜR und die Anlage G (Gewerbe) oder S (Freiberufler) dazunehmen und die Werte eintragen.'],
+    tipps: ['Einnahmen zählen, wenn das Geld da ist, nicht wenn du die Rechnung schreibst.', 'Die Frist für die Abgabe zeigt dir die App bei den Fristen. Mit Steuerberater hast du deutlich länger Zeit.'],
+    links: ['elsterLogin'], siehe: ['est', 'afa'] },
+  est: { b: 'Jahresende', t: 'Einkommensteuererklärung selbst abgeben', kurz: 'Mit dem Assistenten und ELSTER, Schritt für Schritt.',
+    text: 'Als Selbständiger musst du jedes Jahr eine Einkommensteuererklärung abgeben, auch wenn wenig Gewinn da war. Der Assistent im Reiter Steuern sammelt deine Zahlen und zeigt, was in welche Zeile in ELSTER gehört.',
+    schritte: ['Im Reiter Steuern „Einkommensteuererklärung“ starten und das Jahr wählen.',
+      'Die Bereiche durchgehen, die auf dich zutreffen: Firma, Arbeitslohn, Kinder, Versicherungen und so weiter. Unterlagen kannst du gleich hochladen.',
+      'Am Ende steht je ELSTER-Anlage eine Liste mit Zeile, Kennzahl und Wert.',
+      'In Mein ELSTER „Formulare &amp; Leistungen“, „Alle Formulare“, „Einkommensteuer“ und das Jahr öffnen. Die Anlagen wählen, die der Assistent nennt.',
+      'Die Werte abtippen, mit „Prüfen“ kontrollieren und absenden.',
+      'Ein paar Wochen oder Monate später kommt der Steuerbescheid. Prüfe ihn. Ist etwas falsch, kannst du innerhalb eines Monats Einspruch einlegen, ebenfalls über ELSTER.'],
+    tipps: ['ELSTER kann viele Daten selbst abrufen, z. B. Lohnsteuerbescheinigung und Krankenversicherung („Belegabruf“). Das spart Tipparbeit.', 'Bei Unsicherheit lieber einen Steuerberater drüberschauen lassen. Lohnsteuerhilfevereine dürfen bei Einkünften aus Gewerbe oder freiem Beruf nicht helfen.'],
+    links: ['elsterLogin', 'elsterForm'], siehe: ['euer', 'vorauszahlung'] },
+  vorauszahlung: { b: 'Jahresende', t: 'Vorauszahlungen und Steuer-Rücklage', kurz: 'Warum das Finanzamt vorab Geld will und wie viel du zurücklegst.',
+    text: 'Hast du Gewinn, verlangt das Finanzamt oft schon im Voraus vierteljährlich Einkommensteuer, die Gemeinde Gewerbesteuer. Die Höhe steht im Vorauszahlungsbescheid. Am Jahresende wird abgerechnet.',
+    schritte: ['Einkommensteuer-Vorauszahlungen sind am 10. März, 10. Juni, 10. September und 10. Dezember fällig, Gewerbesteuer am 15. Februar, 15. Mai, 15. August und 15. November.',
+      'Die Beträge aus dem Bescheid im Reiter Steuern unter „Einstellungen für Steuern“ eintragen. Dann stehen sie bei den Fristen und in der Rücklage.',
+      'Läuft das Geschäft schlechter als gedacht, kannst du beim Finanzamt beantragen, die Vorauszahlungen zu senken (in Mein ELSTER über „Sonstige Nachricht an das Finanzamt“).',
+      'Auf der Übersicht zeigt die Steuer-Rücklage, wie viel du ungefähr zur Seite legen solltest. Trag dort ein, was auf deinem Steuer-Konto liegt.'],
+    tipps: ['Viele Selbständige legen grob 30 % von jedem Zahlungseingang zur Seite. Die App rechnet dir einen eigenen Wert aus.', 'Die Gewerbesteuer betrifft nur Gewerbetreibende, nicht Freiberufler. Einzelunternehmer haben 24.500 € Freibetrag, und ein großer Teil wird mit der Einkommensteuer verrechnet.'],
+    siehe: ['zahlen', 'gewerbesteuer'] },
+  gewerbesteuer: { b: 'Jahresende', t: 'Gewerbesteuer und Hebesatz', kurz: 'Wer sie zahlt und wo du deinen Hebesatz findest.',
+    text: 'Gewerbesteuer zahlen nur Gewerbetreibende, nicht Freiberufler. Sie geht an die Gemeinde, in der dein Betrieb sitzt. Wie hoch sie ist, hängt vom Hebesatz der Gemeinde ab.',
+    schritte: ['Den Hebesatz findest du auf der Website deiner Stadt oder Gemeinde (Suche: „Hebesatz Gewerbesteuer“ und Ortsname). Er liegt meist zwischen 250 % und 500 %.',
+      'Im Reiter Steuern unter „Einstellungen für Steuern“ eintragen. Dann wird die Schätzung genauer.',
+      'Für Einzelunternehmen und Personengesellschaften bleiben 24.500 € Gewinn im Jahr frei.',
+      'Die Gewerbesteuererklärung gibst du einmal im Jahr über ELSTER ab, zusammen mit den anderen Jahreserklärungen.'],
+    tipps: ['Einzelunternehmer bekommen einen großen Teil der Gewerbesteuer bei der Einkommensteuer gutgeschrieben. Bei einem Hebesatz um 400 % gleicht sich das fast aus.'],
+    siehe: ['vorauszahlung'] },
+  fristen: { b: 'Jahresende', t: 'Fristen und Briefe vom Finanzamt', kurz: 'Was passiert, wenn du eine Frist verpasst, und was du bei Bescheiden tun kannst.',
+    text: 'Die App zeigt dir alle Fristen im Reiter Steuern und kann sie in deinen Kalender übernehmen. Wenn doch mal etwas schiefgeht:',
+    schritte: ['<b>Frist verpasst:</b> so schnell wie möglich nachholen. Bei Voranmeldungen ist ein Verspätungszuschlag möglich, bei kurzer Verspätung wird er oft nicht festgesetzt.',
+      '<b>Zu spät gezahlt:</b> pro angefangenem Monat 1 % Säumniszuschlag. Bei Lastschrift kann das nicht passieren.',
+      '<b>Schaffst du eine Frist nicht</b> (z. B. Krankheit): vorher beim Finanzamt eine Fristverlängerung beantragen, in Mein ELSTER über „Antrag auf Fristverlängerung“ oder eine Nachricht.',
+      '<b>Bescheid bekommen:</b> mit deinen Zahlen vergleichen. Ist etwas falsch, innerhalb eines Monats Einspruch einlegen, in Mein ELSTER unter „Einspruch“. Eine kurze Begründung reicht.',
+      '<b>Brief mit Fragen vom Finanzamt:</b> nicht liegen lassen. Antworten kannst du über Mein ELSTER als Nachricht, auch mit Anhängen.'],
+    tipps: ['Fällt eine Frist auf einen Samstag, Sonntag oder Feiertag, gilt der nächste Werktag. Das rechnet die App mit.'],
+    links: ['elsterLogin'], siehe: ['ustva', 'zahlen'] },
+  steuerberater: { b: 'App', t: 'Daten an den Steuerberater geben', kurz: 'DATEV-Export und Jahrespaket.',
+    text: 'Arbeitest du mit einer Kanzlei, kann sie deine Buchungen direkt in ihr Programm (DATEV) einlesen. Das spart ihr Arbeit und dir Geld.',
+    schritte: ['Bei der Kanzlei nach Beraternummer, Mandantennummer und Kontenrahmen (SKR 03 oder SKR 04) fragen.',
+      'Im Reiter Firma oder Steuern „Für den Steuerberater (DATEV)“ öffnen und die Angaben eintragen.',
+      '„ZIP mit allem“ wählen. Die Datei enthält die Buchungen, deine Kunden und Lieferanten und alle Belege.',
+      'Die ZIP-Datei an die Kanzlei schicken, z. B. per Mail oder über ihr Upload-Portal.'],
+    tipps: ['Ohne Steuerberater reicht das Jahrespaket: Listen für Excel plus alle Belege.'], siehe: ['euer'] },
+  sicherung: { b: 'App', t: 'Sicherung und Gerätewechsel', kurz: 'Damit keine Daten verloren gehen.',
+    text: 'Alle Daten liegen nur in diesem Browser auf diesem Gerät, nicht im Internet. Geht das Gerät kaputt oder löschst du den Browserverlauf, sind sie weg, außer du hast eine Sicherung.',
+    schritte: ['Im Reiter Firma „Sicherung herunterladen“. Es entsteht eine Datei mit allen Daten und Belegen.',
+      'Die Datei woanders ablegen: iCloud, Google Drive, USB-Stick oder als Mail an dich selbst.',
+      'Am besten alle zwei Wochen. Die App erinnert dich auf der Übersicht.',
+      'Neues Gerät: dort das Cockpit öffnen, im Reiter Firma „Sicherung einspielen“ und die Datei wählen.'],
+    tipps: ['Arbeite immer nur auf einem Gerät, sonst laufen die Stände auseinander.'], siehe: ['handy'] },
+  handy: { b: 'App', t: 'Cockpit aufs Handy legen', kurz: 'Wie eine App auf dem Startbildschirm.',
+    text: 'Das Cockpit läuft im Browser, lässt sich aber wie eine App auf den Startbildschirm legen. Dann startet es schneller und der Browser löscht die Daten nicht so leicht.',
+    schritte: ['<b>iPhone und iPad:</b> Das Cockpit in Safari öffnen, unten auf das Teilen-Symbol (Quadrat mit Pfeil) tippen, dann „Zum Home-Bildschirm“.',
+      '<b>Android:</b> In Chrome oben rechts auf die drei Punkte tippen, dann „App installieren“ oder „Zum Startbildschirm hinzufügen“.',
+      '<b>Computer:</b> In Chrome oder Edge in der Adresszeile auf das Installieren-Symbol klicken.'],
+    tipps: ['Jedes Gerät hat seine eigenen Daten. Zum Umziehen die Sicherung nutzen.'], siehe: ['sicherung'] }
+};
+const HILFE_BEREICHE = ['Anfangen', 'Umsatzsteuer', 'Rechnungen', 'Belege und Bank', 'Jahresende', 'App'];
+const hb = (k, txt) => HILFE[k] ? `<button type="button" class="hb" data-act="hilfe" data-k="${k}">${txt || 'So geht’s'}</button>` : '';
+const hilfeDlg = $('#hilfeDlg');
+hilfeDlg.addEventListener('click', (e) => { if (e.target === hilfeDlg) hilfeDlg.close(); });
+function hilfeZeig(html) { hilfeDlg.innerHTML = html; if (!hilfeDlg.open) hilfeDlg.showModal(); hilfeDlg.scrollTop = 0; }
+const hHead = (t) => `<div class="dlg-head"><h2>${t}</h2><button class="x" data-act="hilfe-zu" aria-label="Schließen">×</button></div>`;
+const hLink = (k) => { const l = HL[k]; if (!l) return ''; let host = ''; try { host = new URL(l[1]).hostname.replace(/^www\./, ''); } catch (e) { return ''; } return `<li><a href="${esc(l[1])}" target="_blank" rel="noopener">${esc(l[0])}</a> <span class="small muted">${esc(host)}</span></li>`; };
+function vHilfe(k) {
+  const h = HILFE[k]; if (!h) return vHilfeListe();
+  hilfeZeig(`${hHead(h.t)}<div class="dlg-body hilfe">
+    <p>${h.text}</p>
+    ${h.schritte ? `<h3>So geht’s</h3><ol>${h.schritte.map((s) => `<li>${s}</li>`).join('')}</ol>` : ''}
+    ${h.tipps && h.tipps.length ? `<h3>Gut zu wissen</h3><ul>${h.tipps.map((s) => `<li>${s}</li>`).join('')}</ul>` : ''}
+    ${h.links && h.links.length ? `<h3>Offizielle Seiten</h3><ul class="hl">${h.links.map(hLink).join('')}</ul><p class="small muted">Öffnet sich in einem neuen Fenster.</p>` : ''}
+    ${h.siehe && h.siehe.length ? `<h3>Passt dazu</h3><div class="btns" style="margin-top:4px">${h.siehe.filter((x) => HILFE[x]).map((x) => `<button type="button" class="chip" data-act="hilfe" data-k="${x}">${HILFE[x].t}</button>`).join('')}</div>` : ''}
+    <p class="small muted" style="margin-top:14px">Vereinfachte Erklärung zum Zurechtfinden, keine Steuerberatung. Formulare und Menüs bei ELSTER ändern sich manchmal ein wenig.</p>
+  </div><div class="dlg-foot"><button data-act="hilfe-liste">Alle Anleitungen</button><button class="primary" data-act="hilfe-zu">Fertig</button></div>`);
+}
+function hilfeListeHtml(q) {
+  q = (q || '').trim().toLowerCase();
+  const passt = (k) => { if (!q) return true; const h = HILFE[k]; return [h.t, h.kurz, h.text, (h.schritte || []).join(' '), (h.tipps || []).join(' ')].join(' ').toLowerCase().includes(q); };
+  const out = HILFE_BEREICHE.map((b) => { const ks = Object.keys(HILFE).filter((k) => HILFE[k].b === b && passt(k)); return ks.length ? `<h3>${b}</h3><ul class="list">${ks.map((k) => `<li><button class="item" data-act="hilfe" data-k="${k}"><div class="grow"><div class="t">${HILFE[k].t}</div><div class="s">${HILFE[k].kurz}</div></div><span class="muted" aria-hidden="true">›</span></button></li>`).join('')}</ul>` : ''; }).join('');
+  return out || '<div class="empty">Dazu gibt es noch keine Anleitung. Versuch ein anderes Wort.</div>';
+}
+function vHilfeListe() {
+  hilfeZeig(`${hHead('Hilfe und Anleitungen')}<div class="dlg-body">
+    <p class="small muted">Kurze Erklärungen für alles, was man zum ersten Mal macht, mit Schritten und Links zu den offiziellen Seiten von ELSTER, Finanzamt und Ministerium.</p>
+    <label>Suchen<input id="hilfeQ" type="search" placeholder="z. B. Voranmeldung, ELSTER, Mahnung" autocomplete="off"></label>
+    <div id="hilfeL" style="margin-top:6px">${hilfeListeHtml('')}</div>
+  </div><div class="dlg-foot"><button class="primary" data-act="hilfe-zu">Schließen</button></div>`);
+}
+
 function vMenu() {
   openDlg(`${head('Was möchtest du anlegen?')}<div class="dlg-body"><div class="menu">
     <button data-act="new-an"><span class="ic">📝</span><span><span class="t">Angebot erstellen</span><span class="s">Kunde, Positionen, Gültigkeit. Später mit einem Tipp zur Rechnung.</span></span></button>
@@ -2695,6 +2991,7 @@ function vEditor() {
       ${RC[d.rc] && d.rc !== 'inland13b' ? `<label>Land des Kunden (2 Buchstaben, z. B. AT, CH, US)<input name="k_land" maxlength="2" value="${esc(d.kunde.land)}" placeholder="${esc(ustLand(d.kunde.ustid))}"></label>` : ''}
       ${d.ku ? '' : `<label>Steuerfall<select name="rc"><option value="">Normal, mit deutscher Umsatzsteuer</option>${Object.entries(RC).map(([k, v]) => `<option value="${k}"${k === rcArt(d) ? ' selected' : ''}>${v.t}</option>`).join('')}</select></label>`}
       ${RC[d.rc] ? `<p class="small muted full" style="margin:0">Ohne Umsatzsteuer. Auf der Rechnung steht: „${RC[d.rc].hinweis}“</p>` : ''}
+      ${d.ku ? '' : `<p class="small full" style="margin:0">${hb('reversecharge', 'Kunde im Ausland? Welcher Steuerfall?')}</p>`}
       ${isRe ? `<label>Leitweg-ID (nur bei Behörden)<input name="k_leitweg" value="${esc(d.kunde.leitweg)}" placeholder="z. B. 991-12345-67"></label>` : ''}
     </div>
     <h3>Wann?</h3>
@@ -2713,7 +3010,7 @@ function vEditor() {
     ${d.ku ? `<p class="small muted">${KU_HINWEIS} Steht automatisch auf dem Dokument.</p>` : ''}
     <div id="kuWarn">${kuWarnung(d)}</div>
     <label style="margin-top:10px">Text unter den Positionen (optional)<textarea name="hinweis" rows="2" placeholder="${isRe ? 'z. B. Vielen Dank für Ihren Auftrag.' : 'z. B. Wir freuen uns auf Ihre Rückmeldung.'}">${esc(d.hinweis)}</textarea></label>
-    ${isRe ? `<div class="card" style="margin-top:12px"><b id="chkHead">${allOk ? 'Alle Pflichtangaben nach § 14 UStG sind da' : 'Es fehlen noch Pflichtangaben'}</b><ul class="checks" id="checks">${checks.map((c) => `<li class="${c[1] ? 'ok' : 'miss'}">${c[0]}</li>`).join('')}</ul>
+    ${isRe ? `<div class="card" style="margin-top:12px"><b id="chkHead">${allOk ? 'Alle Pflichtangaben nach § 14 UStG sind da' : 'Es fehlen noch Pflichtangaben'}</b> ${hb('rechnung', 'Was muss drauf?')}<ul class="checks" id="checks">${checks.map((c) => `<li class="${c[1] ? 'ok' : 'miss'}">${c[0]}</li>`).join('')}</ul>
       ${pflichtFirma().length ? '<p class="small" style="margin:6px 0 0">Deine eigenen Daten trägst du im Reiter <b>Firma</b> ein.</p>' : ''}</div>` : ''}
   </form>
   <div class="dlg-foot">
@@ -2830,7 +3127,7 @@ function vDetailRe(id) {
     <details><summary>Warum kann ich die Rechnung nicht ändern oder löschen?</summary><p class="small muted" style="margin-top:6px">Eine gestellte Rechnung darf nach GoBD nicht mehr verändert werden, und die Nummern müssen lückenlos sein. Ist sie ganz falsch, stornierst du sie und schreibst eine neue. Stimmt nur ein Teil nicht (z. B. eine Position zu viel oder ein Preisnachlass), nimm „Teil gutschreiben“.</p></details>
   </div>
   <div class="dlg-foot">
-    ${!r.extern ? `<button data-act="print" data-id="${r.id}" data-t="re">Drucken / PDF</button><button data-act="zugferd" data-id="${r.id}">PDF mit E-Rechnung</button><button data-act="xml" data-id="${r.id}">XRechnung (XML)</button><button data-act="mail" data-k="re" data-id="${r.id}">Per E-Mail</button>` : ''}
+    ${!r.extern ? `<button data-act="print" data-id="${r.id}" data-t="re">Drucken / PDF</button><button data-act="zugferd" data-id="${r.id}">PDF mit E-Rechnung</button><button data-act="xml" data-id="${r.id}">XRechnung (XML)</button>${hb('erechnung', 'Was ist eine E-Rechnung?')}<button data-act="mail" data-k="re" data-id="${r.id}">Per E-Mail</button>` : ''}
     ${!r.extern && r.typ !== 'gutschrift' && r.status !== 'storniert' ? `<button data-act="abls" data-k="ls" data-t="re" data-id="${r.id}">Lieferschein</button>` : ''}
     ${!r.extern && r.typ !== 'gutschrift' && r.status !== 'storniert' ? `<button data-act="vl-neu" data-k="rechnung" data-id="${r.id}">Regelmäßig wiederholen</button>` : ''}
     ${!r.extern && r.typ !== 'gutschrift' && r.status !== 'storniert' ? `<button data-act="korrektur" data-id="${r.id}">Teil gutschreiben</button>` : ''}
@@ -2884,6 +3181,7 @@ function vMahnen(id) {
   const firma = !!r.kunde.ustid, z = mahnZinsen(r, firma);
   const hatPauschale = (r.mahnungen || []).some((x) => x.pauschale), hatZinsen = (r.mahnungen || []).some((x) => x.zinsen);
   openDlg(`${head(M.t + ' zu ' + esc(r.nr))}<form id="mahnForm" class="dlg-body" autocomplete="off" data-id="${r.id}" data-stufe="${stufe}">
+    <p style="margin:0 0 8px">${hb('mahnung', 'Wie mahne ich richtig?')}</p>
     <p>${esc(r.kunde.name)} schuldet dir <b>${eur(offenBetrag(r))}</b>${gezahlt(r) ? ` (von ${eur(summen(r).brutto)}, ${eur(gezahlt(r))} schon bezahlt)` : ''}, fällig seit ${dat(r.faellig)} (${z.tage} Tage).${mahnStufe(r) ? ` Zuletzt: ${MAHN[mahnStufe(r)].t} vom ${dat(letzteMahnung(r).datum)}.` : ''}</p>
     <div class="grid2">
       <label>Neue Zahlungsfrist<input type="date" name="frist" value="${plusTage(heute(), M.frist)}"></label>
@@ -2963,6 +3261,7 @@ function vBeleg(b) {
   b = b || { id: uid(), datum: heute(), lieferant: '', brutto: '', ustSatz: 19, vorsteuer: '', kategorie: '', notiz: '' };
   edit = b;
   openDlg(`${head(neu ? 'Beleg hochladen' : 'Beleg')}<form id="beForm" class="dlg-body" autocomplete="off">
+    <p style="margin:0 0 8px">${hb('belege', 'Was ist ein guter Beleg?')}</p>
     ${fileInput(b.dateiId ? b : null)}
     <div class="grid2" style="margin-top:12px">
       <label>Lieferant<input name="lieferant" list="lieferantenListe" value="${esc(b.lieferant)}" placeholder="z. B. Telekom"></label>
@@ -3945,6 +4244,9 @@ const ACT = {
   tab: (el) => { tab = el.dataset.k; closeDlg(); render(); window.scrollTo(0, 0); },
   filter: (el) => { filter[el.dataset.f] = el.dataset.k; render(); },
   menu: vMenu,
+  hilfe: (el) => vHilfe(el.dataset.k),
+  'hilfe-liste': vHilfeListe,
+  'hilfe-zu': () => { if (hilfeDlg.open) hilfeDlg.close(); },
   close: closeDlg,
   'new-an': () => { edit = Object.assign(neuesDoc('angebot'), { neu: true }); vEditor(); },
   'new-re': () => { edit = Object.assign(neuesDoc('rechnung'), { neu: true }); vEditor(); },
@@ -4208,6 +4510,7 @@ document.addEventListener('click', (e) => {
   Promise.resolve(fn(el)).catch((err) => { console.error(err); toast('Da ist etwas schiefgegangen.'); });
 });
 document.addEventListener('input', (e) => {
+  if (e.target.id === 'hilfeQ') { $('#hilfeL').innerHTML = hilfeListeHtml(e.target.value); return; }
   if (e.target.closest('#estForm') && e.target.name && e.target.tagName === 'INPUT' && e.target.type !== 'checkbox') estEingabe(e.target);
   if (e.target.name === 'p_text' && e.target.closest('#edForm')) {
     const a = S.artikel.find((x) => x.name === e.target.value), pos = e.target.closest('.pos');
