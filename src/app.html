@@ -264,6 +264,7 @@ async function load() {
   const s = await idbGet('state');
   if (s) S = Object.assign(leer(), s, { firma: Object.assign(leer().firma, s.firma || {}), steuer: Object.assign(leer().steuer, s.steuer || {}) });
   migriere();
+  protoStand = protoSchnitt();
 }
 /* Ältere Stände: Kunden bekommen eine id, Lieferanten entstehen aus vorhandenen Belegen */
 function migriere() {
@@ -275,7 +276,53 @@ function migriere() {
   }
   for (const l of S.lieferanten) if (!l.id) l.id = uid();
 }
-async function save() { S.geaendert = new Date().toISOString(); await idbSet('state', S); }
+async function save() { protoMerke(); S.geaendert = new Date().toISOString(); await idbSet('state', S); }
+
+/* ---------- Änderungsprotokoll: jede Änderung an gebuchten Daten bleibt nachvollziehbar (GoBD) ----------
+   Beim Speichern vergleicht die App den neuen Stand mit dem letzten und schreibt auf, was neu, geändert oder gelöscht ist.
+   Bei Änderungen und Löschungen bleibt der alte Stand im Eintrag erhalten (samt Datei, die Sicherung nimmt sie mit). */
+const PROTO = { rechnungen: ['Rechnung', 'Rechnungen'], belege: ['Beleg', 'Belege'], bank: ['Bankbuchung', 'Bankbuchungen'], anlagen: ['Anlage', 'Anlagen'], lager: ['Lagerbuchung', 'Lagerbuchungen'], kunden: ['Kunde', 'Kunden'], lieferanten: ['Lieferant', 'Lieferanten'] };
+const PROTO_FELD = { status: 'Status', zahlungen: 'Zahlungen', bezahltAm: 'bezahlt am', mahnungen: 'Mahnungen', kunde: 'Kundendaten', versendetAm: 'verschickt am', stornoId: 'Storno', brutto: 'Betrag', vorsteuer: 'Vorsteuer', ustSatz: 'Steuersatz', datum: 'Datum', lieferant: 'Lieferant', kategorie: 'Kategorie', notiz: 'Notiz', dateiId: 'Datei', zahlweg: 'Zahlweg', belegId: 'Beleg zugeordnet', rechnungId: 'Rechnung zugeordnet', name: 'Name', adresse: 'Anschrift', ustid: 'USt-IdNr.', email: 'E-Mail', iban: 'IBAN', steuernr: 'Steuernummer', strasse: 'Straße', plz: 'PLZ', ort: 'Ort', kleinunternehmer: 'Kleinunternehmer', rechtsform: 'Rechtsform', nummern: 'Nummernkreise', menge: 'Menge', anlageId: 'Anlage', ls: 'Lieferschein', rc: 'Steuerfall' };
+let protoStand = null;
+/* Entwürfe sind noch nicht gebucht; feste Kopien und reine Merkfelder zählen nicht als Änderung */
+const protoJson = (x) => JSON.stringify(x, (k, v) => (k === 'archiv' || k === '_neu' ? undefined : v));
+function protoSchnitt() {
+  const m = { beispiel: !!S.beispiel };
+  for (const k in PROTO) { m[k] = new Map(); for (const x of S[k] || []) if (x && x.id && !(k === 'rechnungen' && x.status === 'entwurf')) m[k].set(x.id, protoJson(x)); }
+  const f = Object.assign({}, S.firma); delete f.logo; m.firma = JSON.stringify(f);
+  return m;
+}
+function protoName(k, x) {
+  if (!x) return '';
+  if (k === 'rechnungen') return [x.nr, x.kunde && x.kunde.name, x.extern ? '' : eur(summen(x).brutto)].filter(Boolean).join(' · ');
+  if (k === 'belege') return [x.lieferant || 'Beleg', dat(x.datum), eur(num(x.brutto))].join(' · ');
+  if (k === 'bank') return [dat(x.datum), x.gegenpartei, eur(num(x.betrag))].filter(Boolean).join(' · ');
+  if (k === 'lager') { const a = (S.artikel || []).find((y) => y.id === x.artikelId); return [a ? a.name : 'Artikel', dat(x.datum), x.menge != null ? String(x.menge).replace('.', ',') : ''].filter(Boolean).join(' · '); }
+  return x.name || '';
+}
+const protoFelder = (a, b) => [...new Set(Object.keys(a).concat(Object.keys(b)))].filter((k) => k !== 'archiv' && JSON.stringify(a[k]) !== JSON.stringify(b[k])).map((k) => PROTO_FELD[k] || k);
+function protoMerke() {
+  const neu = protoSchnitt(), alt = protoStand; protoStand = neu;
+  if (!alt || alt.beispiel || neu.beispiel) return;
+  const t = new Date().toISOString(), out = [];
+  const e = (o) => out.push(Object.assign({ id: uid(), t }, o));
+  for (const k in PROTO) {
+    const zu = [];
+    for (const [id, j] of neu[k]) {
+      const v = alt[k].get(id);
+      if (v === undefined) zu.push(id);
+      else if (v !== j) { const a = JSON.parse(v), b = JSON.parse(j); e({ art: 'geändert', b: k, ref: id, n: protoName(k, b), felder: protoFelder(a, b), vorher: a }); }
+    }
+    for (const [id, v] of alt[k]) if (!neu[k].has(id)) { const a = JSON.parse(v); e({ art: 'gelöscht', b: k, ref: id, n: protoName(k, a), vorher: a }); }
+    if (zu.length > 3) e({ art: 'neu', b: k, n: `${zu.length} ${PROTO[k][1]}`, refs: zu });
+    else for (const id of zu) e({ art: k === 'rechnungen' ? 'gestellt' : 'neu', b: k, ref: id, n: protoName(k, JSON.parse(neu[k].get(id))) });
+  }
+  if (alt.firma !== neu.firma) { const a = JSON.parse(alt.firma); e({ art: 'geändert', b: 'firma', n: 'Firmendaten', felder: protoFelder(a, JSON.parse(neu.firma)), vorher: a }); }
+  if (out.length) S.protokoll = (S.protokoll || []).concat(out);
+}
+/* Besondere Vorgänge, die kein einzelner Eintrag sind (z. B. Sicherung eingespielt) */
+function protoNotiz(n) { if (S.beispiel) return; S.protokoll = (S.protokoll || []).concat([{ id: uid(), t: new Date().toISOString(), art: 'Vorgang', b: 'app', n }]); }
+const PROTO_B = Object.assign({ firma: ['Firma'], app: ['App'] }, PROTO);
 
 /* ---------- Hilfen ---------- */
 const $ = (sel, root) => (root || document).querySelector(sel);
@@ -416,6 +463,21 @@ const RC = {
   ausfuhr: { t: 'Warenlieferung in ein Land außerhalb der EU', kz: '43', xml: 'G', hinweis: 'Steuerfreie Ausfuhrlieferung.' }
 };
 const rcArt = (r) => (r.rc === true ? 'eu-leistung' : RC[r.rc] ? r.rc : '');
+/* Steuerfreie Leistung oder 0 % Steuersatz: der Grund muss auf die Rechnung (§ 14 Abs. 4 Nr. 8 UStG) */
+const BEFREIUNG = {
+  heil: { t: 'Heilbehandlung (Arzt, Heilpraktiker, Physiotherapie)', h: 'Steuerfreie Heilbehandlung nach § 4 Nr. 14 UStG.' },
+  bildung: { t: 'Unterricht, Schulung oder Bildung', h: 'Steuerfreie Bildungsleistung nach § 4 Nr. 21 UStG.' },
+  miete: { t: 'Vermietung von Räumen oder Grundstücken', h: 'Steuerfreie Vermietung nach § 4 Nr. 12 UStG.' },
+  versicherung: { t: 'Vermittlung von Versicherungen', h: 'Steuerfreie Versicherungsvermittlung nach § 4 Nr. 11 UStG.' },
+  finanz: { t: 'Vermittlung von Krediten oder Geldanlagen', h: 'Steuerfreier Umsatz nach § 4 Nr. 8 UStG.' },
+  pv: { t: 'Solaranlage samt Zubehör und Montage (0 % Steuersatz)', h: 'Umsatzsteuer 0 % nach § 12 Abs. 3 UStG.' },
+  anders: { t: 'Anderer Grund, selbst eintragen', h: '' }
+};
+/* Eine Position mit 0 % auf einer normalen Rechnung (nicht Kleinunternehmer, kein Auslands- oder § 13b-Fall) */
+const hat0 = (d) => !!d && !d.extern && !d.ku && !RC[rcArt(d)] && (d.positionen || []).some((p) => num(p.ust) === 0 && num(p.preis) !== 0);
+const befreiungText = (d) => !hat0(d) || !BEFREIUNG[d.befreiung] ? '' : d.befreiung === 'anders' ? String(d.befreiungText || '').trim() : BEFREIUNG[d.befreiung].h;
+/* 0 % als Steuersatz (Solaranlage) ist etwas anderes als eine Steuerbefreiung: in der E-Rechnung Z statt E */
+const nullsatz = (d) => hat0(d) && d.befreiung === 'pv';
 const BILANZ = ['ek', 'ohg', 'ug', 'gmbh'];
 const KAPITAL = ['ug', 'gmbh'];
 let stZr = '', stJahr = 0;
@@ -451,7 +513,7 @@ function zrAus(key) {
 /* Umsatzsteuer für einen Zeitraum, aufgeteilt auf die ELSTER-Kennzahlen */
 function ustva(z) {
   const ist = S.steuer.versteuerung === 'ist';
-  const b = { 81: 0, 86: 0, 41: 0, 43: 0, 21: 0, 45: 0, 60: 0, 46: 0, 52: 0 };
+  const b = { 81: 0, 86: 0, 41: 0, 43: 0, 21: 0, 45: 0, 60: 0, 46: 0, 52: 0, 48: 0, 87: 0 };
   const warn = []; let vst = 0, frei = 0, n = 0;
   const drin = (d) => d && d >= z.von && d <= z.bis;
   for (const r of S.rechnungen) {
@@ -472,6 +534,7 @@ function ustva(z) {
       const t = r2(teile[k] * fa);
       if (Number(k) === 19) b[81] += t;
       else if (Number(k) === 7) b[86] += t;
+      else if (Number(k) === 0 && befreiungText(r)) b[nullsatz(r) ? 87 : 48] += t;
       else if (t) { frei += t; warn.push(`${esc(r.nr || 'Rechnung')}: ${eur(t)} mit ${k} % USt ohne Steuerfall, nicht eingerechnet. Steuerfall in der Rechnung angeben oder mit dem Steuerberater klären.`); }
     }
   }
@@ -496,6 +559,8 @@ function ustva(z) {
     ['86', 'Umsätze zu 7 %', bas[86], `Steuer ${eur(st[86])} rechnet ELSTER selbst`],
     ['41', 'Warenlieferungen an Firmen in der EU (mit USt-IdNr.)', bas[41]],
     ['43', 'Steuerfreie Ausfuhrlieferungen (außerhalb der EU)', bas[43]],
+    ['48', 'Steuerfreie Umsätze ohne Vorsteuerabzug (z. B. Heilbehandlung, Unterricht)', bas[48]],
+    ['87', 'Umsätze mit 0 % Steuersatz (Solaranlagen)', bas[87]],
     ['21', 'Dienstleistungen an Firmen in der EU (Reverse Charge)', bas[21]],
     ['45', 'Übrige nicht steuerbare Umsätze (Leistung im Ausland)', bas[45]],
     ['60', 'Umsätze, bei denen der Kunde die Steuer schuldet (§ 13b)', bas[60]],
@@ -2067,6 +2132,7 @@ function vStart() {
   if (new Date().getMonth() < 7 && abMonate(abJ).length && !abFertig('J' + abJ)) { const A = abStand('J' + abJ); todos.push({ c: 'warn', t: `Jahresabschluss ${abJ}`, s: `${A.n} von ${A.L.length} Schritten erledigt. Inventur, Anlagen und Unterlagen für die Steuererklärung.`, act: 'abschluss', k: 'J' + abJ, b: A.n ? 'Weitermachen' : 'Starten' }); }
   const hatDaten = S.rechnungen.length + S.angebote.length + S.belege.length > 0;
   if (hatDaten && (!S.letzteSicherung || tageBis(S.letzteSicherung) < -14)) todos.push({ c: 'warn', t: 'Sicherung herunterladen', s: S.letzteSicherung ? `Letzte Sicherung am ${dat(S.letzteSicherung)}.` : 'Deine Daten liegen nur in diesem Browser. Eine Sicherung schützt vor Verlust.', act: 'backup', b: 'Sichern' });
+  if (!S.beispiel && !S.vdoku && S.rechnungen.filter((r) => r.status !== 'entwurf').length + S.belege.length >= 5) todos.push({ c: 'warn', t: 'Verfahrensdokumentation anlegen', s: 'Eine Seite, wie du Belege bekommst, buchst und aufhebst. Die App füllt das meiste vor, du beantwortest ein paar Fragen.', act: 'vdoku', b: 'Anlegen' });
   const R = hatDaten ? ruecklage() : null;
   if (R && R.c === 'bad') todos.push({ c: 'warn', t: `Steuer-Rücklage aufstocken: es fehlen ${eur(R.fehlt)}`, s: `Zurücklegen solltest du ${eur(R.soll)}, da sind ${eur(R.ist)}.` });
   const W = ku() ? kuWaechter() : null;
@@ -2110,7 +2176,7 @@ function vStart() {
   <details class="card"><summary>Was kann die App schon, was kommt noch?</summary>
     <p class="small" style="margin-top:8px"><b>Schon da:</b> Angebote und Rechnungen schreiben, als PDF drucken, als E-Rechnung (XRechnung) speichern, Angebot mit einem Tipp in eine Rechnung umwandeln, Storno per Stornorechnung, Belege und alte Rechnungen hochladen, Kontoauszüge (CSV) einlesen und Zahlungen Rechnungen zuordnen, Umsatzsteuer-Voranmeldung mit ELSTER-Kennzahlen, Zusammenfassende Meldung, EÜR bzw. Gewinn-Vorschau, Steuerschätzung, Fristen als Kalender-Datei für Handy und Outlook, Steuer-Rücklage mit Ampel, Kleinunternehmer-Wächter, Beleg-Abgleich mit dem Konto, wiederkehrende Rechnungen und Ausgaben, Diagramme zu Einnahmen und Ausgaben, Jahrespaket als ZIP, Export im DATEV-Format für den Steuerberater, Sicherung und Umzug auf ein anderes Gerät. Abläufe: Monats- und Jahresabschluss Schritt für Schritt, jeder Auftrag mit Leiste vom Angebot bis zur Zahlung und dem nächsten Schritt, Belege werden beim Hochladen gleich mit der Kontozahlung verknüpft, feste Regeln für wiederkehrende Kontobewegungen.</p>
     <p class="small"><b>Kommt noch:</b> Login und Speicherung auf einem Server, direkte Qonto-Verbindung, direkte Abgabe über ELSTER, vollständige Jahreserklärungen.</p>
-    <p class="small muted">Deine Daten liegen nur in diesem Browser auf diesem Gerät. Andere Geräte sehen sie nicht. Lade regelmäßig eine Sicherung herunter. Die Ablage hier ist noch keine GoBD-konforme Archivierung.</p>
+    <p class="small muted">Deine Daten liegen nur in diesem Browser auf diesem Gerät. Andere Geräte sehen sie nicht. Lade regelmäßig eine Sicherung herunter. Gestellte Rechnungen und alle Änderungen hält die App fest, siehe „Ordnung und Aufbewahrung“ im Reiter Firma.</p>
   </details>`;
 }
 
@@ -2574,6 +2640,8 @@ function abJahrSchritte(y) {
     s: S.steuer.berater ? 'Macht dein Steuerberater, sobald er das Paket hat. Hak es ab, wenn es erledigt ist.' : 'Mit dem Assistenten im Reiter Steuern Schritt für Schritt. Hak es ab, wenn sie abgegeben ist.', act: 'est-open', b: 'Starten' });
   L.push({ id: 'sich', t: 'Sicherung herunterladen', ok: !!S.letzteSicherung && S.letzteSicherung > bis,
     s: S.letzteSicherung ? `Letzte Sicherung am ${dat(S.letzteSicherung)}.` : 'Noch nie gesichert.', act: 'backup', b: 'Sichern' });
+  L.push({ id: 'ablage', t: 'Jahrespaket und Sicherung an zwei Orten ablegen', ok: !!(S.archivJahre && S.archivJahre[y]),
+    s: S.archivJahre && S.archivJahre[y] ? `Abgelegt am ${dat(S.archivJahre[y])}.` : 'Rechnungen und Belege musst du 8 Jahre aufheben. Weil alles nur in diesem Browser liegt, beide Dateien z. B. auf einen USB-Stick und in eine Cloud.', act: 'jahrarchiv', k: String(y), b: 'Ablegen' });
   return L;
 }
 const abOk = (k, x) => x.ok || !!abD(k).haken[x.id];
@@ -2754,6 +2822,7 @@ function vFirma() {
     <div class="btns"><button data-act="artikel">Artikel und Leistungen (${S.artikel.length})</button><button data-act="lager">Lager${lagerArtikel().length ? ` (${eur(lagerWert())})` : ''}</button><button data-act="nummern">Nummern (${esc(nrBau(nrFormat('RE'), heute(), 1))})</button></div>
   </div>
   ${datenKarte()}
+  ${ordnungKarte()}
   <div class="card">
     <h2>Daten für Excel und Steuerberater</h2>
     <p class="small muted">Das Jahrespaket ist eine ZIP-Datei mit Listen aller Einnahmen, Ausgaben und Bankbuchungen (öffnen sich in Excel) und allen Belegen als PDF oder Foto, sauber nach Datum benannt. Für ELSTER gibt es im Reiter Steuern neben jeder Kennzahl einen Knopf zum Kopieren.</p>
@@ -2770,6 +2839,132 @@ function vFirma() {
     <p class="small muted">Wer angestellt ist oder Rente bekommt, kann das Cockpit nur für die private Steuererklärung nutzen. Dann verschwinden Angebote, Rechnungen, Belege und Umsatzsteuer. Deine Daten bleiben erhalten, du kannst jederzeit zurückschalten.</p>
     <div class="btns"><button data-act="modus" data-k="privat">Nur private Steuererklärung nutzen</button></div>
   </div>`;
+}
+function ordnungKarte() {
+  const P = S.protokoll || [], weg = P.filter((p) => p.art === 'gelöscht').length, y = new Date().getFullYear() - 1;
+  return `  <div class="card">
+    <h2>Ordnung und Aufbewahrung ${hb('ordnung', 'Was heißt das?')}</h2>
+    <p class="small muted">Das Finanzamt will nachvollziehen können, was wann gebucht und geändert wurde. Das meiste erledigt die App von selbst.</p>
+    <ul class="checks" style="margin-top:6px">
+      <li class="ok">Gestellte Rechnungen sind gesperrt und als feste Kopie abgelegt</li>
+      <li class="ok">Änderungsprotokoll läuft mit (${P.length} Eintr${P.length === 1 ? 'ag' : 'äge'}${weg ? `, ${weg} gelöscht` : ''})</li>
+      <li class="${S.vdoku ? 'ok' : 'miss'}">${S.vdoku ? `Verfahrensdokumentation, Stand ${dat(S.vdoku.stand)}` : 'Verfahrensdokumentation fehlt noch'}</li>
+      <li class="${S.archivJahre && S.archivJahre[y] ? 'ok' : 'miss'}">${S.archivJahre && S.archivJahre[y] ? `Jahr ${y} abgelegt am ${dat(S.archivJahre[y])}` : `Jahr ${y} noch nicht abgelegt`}</li>
+    </ul>
+    <div class="btns"><button data-act="protokoll">Änderungsprotokoll</button><button${S.vdoku ? '' : ' class="primary"'} data-act="vdoku">Verfahrensdokumentation</button><button data-act="jahrarchiv" data-k="${y}">Jahr ${y} ablegen</button></div>
+  </div>`;
+}
+/* Änderungsprotokoll ansehen, Gelöschtes zurückholen */
+let protoFilter = '';
+function protoZeilen(P) {
+  return [['Zeitpunkt', 'Was', 'Bereich', 'Eintrag', 'Geänderte Felder', 'Alter Stand']].concat(P.map((p) => [new Date(p.t).toLocaleString('de-DE'), p.art, (PROTO_B[p.b] || [p.b])[0], p.n, (p.felder || []).join(', '), p.vorher ? JSON.stringify(p.vorher) : '']));
+}
+function vProtokoll() {
+  const alle = (S.protokoll || []).slice().reverse(), P = alle.filter((p) => !protoFilter || p.art === protoFilter);
+  const da = (p) => p.b && PROTO[p.b] && (S[p.b] || []).some((x) => x.id === p.ref);
+  const li = (p) => `<li style="padding:8px 0;border-top:1px solid var(--line)"><div style="display:flex;justify-content:space-between;gap:8px;align-items:flex-start"><div style="min-width:0">
+      <span class="pill ${p.art === 'gelöscht' ? 'bad' : p.art === 'geändert' ? 'warn' : 'grey'}">${esc(p.art)}</span> <b>${esc((PROTO_B[p.b] || [p.b])[0])}</b> ${esc(p.n || '')}
+      <div class="small muted">${new Date(p.t).toLocaleString('de-DE', { dateStyle: 'medium', timeStyle: 'short' })}${p.felder && p.felder.length ? ' · geändert: ' + esc(p.felder.join(', ')) : ''}</div></div>
+      ${p.art === 'gelöscht' && p.vorher && PROTO[p.b] && !da(p) ? `<button class="chip" data-act="proto-zurueck" data-id="${p.id}">Zurückholen</button>` : ''}
+      ${p.art === 'gelöscht' && p.vorher && p.vorher.dateiId ? `<button class="chip" data-act="file" data-id="${esc(p.vorher.dateiId)}">Datei</button>` : ''}</div></li>`;
+  openDlg(`${head('Änderungsprotokoll')}<div class="dlg-body">
+    <p class="small muted">Die App schreibt hier von selbst mit, wenn du gestellte Rechnungen, Belege, Bankbuchungen, Anlagen, Lager, Kunden, Lieferanten oder deine Firmendaten anlegst, änderst oder löschst. Bei Änderungen und Löschungen bleibt der alte Stand erhalten, auch die Datei. Entwürfe zählen noch nicht. Das Protokoll ist in jeder Sicherung und im Jahrespaket enthalten.</p>
+    <div class="filters" role="group">${[['', 'Alle'], ['gelöscht', 'Gelöscht'], ['geändert', 'Geändert']].map(([k, t]) => `<button class="chip" data-act="proto-filter" data-k="${k}" aria-pressed="${protoFilter === k}">${t}</button>`).join('')}</div>
+    ${P.length ? `<ul style="list-style:none;margin:8px 0 0;padding:0">${P.slice(0, 200).map(li).join('')}</ul>${P.length > 200 ? `<p class="small muted">Dazu ${P.length - 200} ältere Einträge, alle in der Liste für Excel.</p>` : ''}` : '<div class="empty">Noch nichts protokolliert.</div>'}
+  </div><div class="dlg-foot"><button data-act="proto-csv"${alle.length ? '' : ' disabled'}>Liste für Excel</button><button class="primary" data-act="close">Fertig</button></div>`);
+}
+async function protoZurueck(id) {
+  const p = (S.protokoll || []).find((x) => x.id === id); if (!p || !p.vorher || !PROTO[p.b]) return;
+  if ((S[p.b] || []).some((x) => x.id === p.vorher.id)) return toast('Ist schon wieder da.');
+  S[p.b].push(JSON.parse(JSON.stringify(p.vorher)));
+  await save(); vProtokoll(); render(); toast(`${PROTO[p.b][0]} zurückgeholt`);
+}
+/* Verfahrensdokumentation: kurze Beschreibung, wie du Belege bekommst, buchst und aufhebst. Die App füllt vor, was sie weiß. */
+const VD_EINGANG = [['papier', 'auf Papier (Post, Kassenbon)'], ['pdf', 'als PDF per E-Mail'], ['xml', 'als E-Rechnung (XML)'], ['foto', 'als Foto mit dem Handy'], ['portal', 'zum Herunterladen aus Kundenkonten (z. B. Amazon, Telekom)']];
+function vdokuFelder() {
+  const f = S.firma;
+  return Object.assign({ wer: f.inhaber || f.name || '', berater: '', eingang: ['pdf', 'papier'], papier: 'aufheben', ablage: '', rhythmus: '14', bank: (S.bank || []).length ? 'Kontoauszüge werden als CSV-Datei aus dem Online-Banking eingelesen und den Rechnungen und Belegen zugeordnet.' : '', bar: '', zeitnah: '10', ab: heute() }, (S.vdoku && S.vdoku.felder) || {});
+}
+function vVdoku(vorab) {
+  const v = vorab || vdokuFelder(), sel = (n, o) => `<select name="${n}">${o.map(([k, t]) => `<option value="${k}"${String(v[n]) === k ? ' selected' : ''}>${t}</option>`).join('')}</select>`;
+  openDlg(`${head('Verfahrensdokumentation')}<form id="vdForm" class="dlg-body" autocomplete="off">
+    <p class="small muted">Das ist eine kurze Beschreibung, wie bei dir Belege ankommen, gebucht und aufgehoben werden. Jeder Unternehmer braucht sie, das Finanzamt kann sie bei einer Prüfung verlangen. Die App füllt aus, was sie schon weiß. Du beantwortest nur diese Fragen, dann kannst du sie drucken oder als PDF speichern.</p>
+    <div class="grid2">
+      <label>Wer kümmert sich um Belege und Buchhaltung?<input name="wer" value="${esc(v.wer)}" placeholder="z. B. Max Muster (Inhaber)"></label>
+      <label>Gilt ab<input type="date" name="ab" value="${esc(v.ab)}"></label>
+      <label>Hast du einen Steuerberater?<input name="berater" value="${esc(v.berater)}" placeholder="Name der Kanzlei, leer = keiner"></label>
+      <label>Belege trage ich spätestens ein nach<select name="zeitnah">${[['3', '3 Tagen'], ['10', '10 Tagen'], ['30', 'einem Monat']].map(([k, t]) => `<option value="${k}"${v.zeitnah === k ? ' selected' : ''}>${t}</option>`).join('')}</select></label>
+    </div>
+    <fieldset style="border:0;padding:0;margin:12px 0 0"><legend style="font-weight:600">Wie kommen Rechnungen und Belege bei dir an?</legend>
+      ${VD_EINGANG.map(([k, t]) => `<label class="check"><input type="checkbox" name="eingang" value="${k}"${v.eingang.includes(k) ? ' checked' : ''}> ${t}</label>`).join('')}</fieldset>
+    <label style="margin-top:10px">Was passiert mit Papierbelegen, nachdem du sie fotografiert oder gescannt hast?${sel('papier', [['aufheben', 'Ich hebe das Papier zusätzlich auf (Ordner je Jahr)'], ['vernichten', 'Ich werfe das Papier danach weg']])}</label>
+    ${v.papier === 'vernichten' ? '<p class="small" style="margin:4px 0 0"><span class="pill warn">Achtung</span> Papier wegwerfen ist erlaubt, wenn der Scan vollständig und gut lesbar ist und das hier beschrieben steht. Ausnahmen gibt es zum Beispiel bei Zollpapieren. Im Zweifel den Steuerberater fragen.</p>' : ''}
+    <div class="grid2" style="margin-top:10px">
+      <label>Wo liegen deine Sicherungen und Jahrespakete?<input name="ablage" value="${esc(v.ablage)}" placeholder="z. B. USB-Stick im Büro und Google Drive"></label>
+      <label>Wie oft sicherst du?${sel('rhythmus', [['7', 'jede Woche'], ['14', 'alle zwei Wochen'], ['30', 'jeden Monat']])}</label>
+    </div>
+    <label style="margin-top:10px">Bankkonto (optional)<input name="bank" value="${esc(v.bank)}" placeholder="z. B. Qonto, Auszüge als CSV jeden Monat eingelesen"></label>
+    <label style="margin-top:10px">Bargeld (optional)<input name="bar" value="${esc(v.bar)}" placeholder="leer = keine Bareinnahmen; sonst z. B. Quittungsblock, Kassenbuch"></label>
+  </form>
+  <div class="dlg-foot"><button data-act="vdoku-save">Speichern</button><button class="primary" data-act="vdoku-druck">Speichern und drucken / PDF</button></div>`);
+}
+function leseVdokuFelder() {
+  const f = $('#vdForm'), g = (n) => (f.elements[n] ? f.elements[n].value.trim() : '');
+  return { wer: g('wer'), ab: g('ab') || heute(), berater: g('berater'), zeitnah: g('zeitnah'), eingang: [...f.querySelectorAll('[name=eingang]:checked')].map((x) => x.value), papier: g('papier'), ablage: g('ablage'), rhythmus: g('rhythmus'), bank: g('bank'), bar: g('bar') };
+}
+function leseVdoku() {
+  const felder = leseVdokuFelder();
+  S.vdoku = { felder, stand: heute(), versionen: ((S.vdoku && S.vdoku.versionen) || []).concat(S.vdoku ? [{ stand: S.vdoku.stand, felder: S.vdoku.felder }] : []) };
+}
+function vdokuHtml() {
+  const f = S.firma, v = vdokuFelder(), rf = RECHTSFORMEN[f.rechtsform], st = S.steuer;
+  const eingang = VD_EINGANG.filter(([k]) => v.eingang.includes(k)).map(([, t]) => t);
+  const rh = { 7: 'jede Woche', 14: 'alle zwei Wochen', 30: 'jeden Monat' }[v.rhythmus] || 'regelmäßig';
+  const zt = { 3: '3 Tagen', 10: '10 Tagen', 30: 'einem Monat' }[v.zeitnah] || '10 Tagen';
+  const nr = nrBau(nrFormat('RE'), new Date().getFullYear(), 1);
+  const h2 = (t) => `<h2 style="font-size:12pt;margin:6mm 0 2mm">${t}</h2>`;
+  return `<h1>Verfahrensdokumentation</h1>
+    <p>${esc(f.name || 'Firma')}${f.inhaber && f.inhaber !== f.name ? ', ' + esc(f.inhaber) : ''}${f.strasse ? ', ' + esc(f.strasse) : ''}${f.ort ? ', ' + esc([f.plz, f.ort].join(' ')) : ''}${f.steuernr ? '<br>Steuernummer ' + esc(f.steuernr) : ''}</p>
+    <p>Gilt ab ${dat(v.ab)}. Stand ${dat((S.vdoku && S.vdoku.stand) || heute())}.</p>
+    ${h2('1. Allgemeines')}
+    <p>Rechtsform: ${esc(rf ? rf.label : 'nicht angegeben')}. Gewinnermittlung: ${esc(rf ? rf.gewinn : 'Einnahmen-Überschuss-Rechnung')}. Umsatzsteuer: ${f.kleinunternehmer ? 'Kleinunternehmer nach § 19 UStG, keine Umsatzsteuer auf Rechnungen.' : `${st.versteuerung === 'ist' ? 'Versteuerung nach vereinnahmten Entgelten (Ist)' : 'Versteuerung nach vereinbarten Entgelten (Soll)'}, Voranmeldung ${f.turnus === 'quartal' ? 'vierteljährlich' : 'monatlich'}${f.dauerfrist ? ' mit Dauerfristverlängerung' : ''}.`}</p>
+    <p>Zuständig für Belege und Buchhaltung: ${esc(v.wer || 'Inhaber')}.${v.berater ? ` Steuerberater: ${esc(v.berater)}. Er erhält die Buchungen als DATEV-Export mit allen Belegen.` : ' Es gibt keinen Steuerberater.'}</p>
+    ${h2('2. Eingesetzte Programme')}
+    <p>Rechnungen, Belege, Bankbuchungen, Anlagen und Auswertungen werden mit dem Steuer-Cockpit geführt. Das ist eine Web-App, die im Browser läuft. Alle Daten und Dateien liegen nur auf dem genutzten Gerät im Speicher des Browsers, nicht auf einem Server.${v.bank ? ' ' + esc(v.bank) : ''}</p>
+    ${h2('3. Ausgangsrechnungen')}
+    <p>Rechnungen werden im Steuer-Cockpit geschrieben. Die App prüft vor dem Stellen die Pflichtangaben nach § 14 Abs. 4 UStG und vergibt die Rechnungsnummer selbst, fortlaufend und lückenlos (Muster: ${esc(nr)}). Nach dem Stellen lässt sich eine Rechnung nicht mehr ändern oder löschen. Fehler werden mit einer Stornorechnung oder einer Rechnungskorrektur berichtigt, die auf die ursprüngliche Rechnung verweist.</p>
+    <p>Beim Stellen legt die App eine feste Kopie der Rechnung ab, so wie sie verschickt wird. E-Rechnungen (XRechnung, PDF mit eingebetteter E-Rechnung) werden beim ersten Erzeugen ebenfalls als feste Datei aufgehoben. Versand per E-Mail oder auf Papier.</p>
+    ${h2('4. Eingangsrechnungen und Belege')}
+    <p>Belege kommen ${eingang.length ? esc(eingang.join(', ')) : 'auf Papier und per E-Mail'} an. Sie werden spätestens nach ${zt} im Steuer-Cockpit erfasst: Datei hochladen oder fotografieren, dazu Datum, Lieferant, Betrag, Steuersatz und Kategorie. Die Vorsteuer rechnet die App aus und lässt sich korrigieren.${v.eingang.includes('xml') ? ' E-Rechnungen werden in dem Format aufgehoben, in dem sie ankommen (XML-Datei).' : ''}</p>
+    <p>${v.papier === 'vernichten' ? 'Papierbelege werden vollständig und gut lesbar fotografiert oder gescannt, die Datei wird geprüft und gespeichert. Danach wird das Papier vernichtet (ersetzendes Scannen). Ausgenommen sind Unterlagen, die im Original aufbewahrt werden müssen.' : 'Papierbelege werden fotografiert oder gescannt und zusätzlich im Original aufbewahrt, abgelegt in einem Ordner je Jahr.'}</p>
+    ${v.bar ? `<p>Bargeld: ${esc(v.bar)}</p>` : '<p>Es gibt keine Bareinnahmen und keine Kasse.</p>'}
+    ${h2('5. Bank und Zahlungen')}
+    <p>Zahlungseingänge werden bei der jeweiligen Rechnung eingetragen, auch Teilzahlungen und Skonto. ${(S.bank || []).length ? 'Kontoauszüge werden eingelesen und mit Rechnungen und Belegen abgeglichen. Fehlende Belege zeigt die App an.' : ''}</p>
+    ${h2('6. Änderungen nachvollziehbar')}
+    <p>Das Steuer-Cockpit protokolliert selbstständig jede Änderung und Löschung an gestellten Rechnungen, Belegen, Bankbuchungen, Anlagen, Lagerbuchungen, Kunden, Lieferanten und Firmendaten mit Zeitpunkt. Der alte Stand bleibt im Protokoll erhalten, auch die Datei. Gelöschte Einträge lassen sich wiederherstellen. Das Protokoll ist Teil jeder Sicherung und jedes Jahrespakets.</p>
+    ${h2('7. Datensicherung und Aufbewahrung')}
+    <p>Eine Sicherung aller Daten und Dateien wird ${rh} heruntergeladen${v.ablage ? ' und abgelegt: ' + esc(v.ablage) : ''}. Nach jedem Jahresende wird das Jahrespaket (Listen, Rechnungen, Belege, Protokoll) zusammen mit einer Sicherung an mindestens zwei Orten abgelegt. Die App erinnert daran.</p>
+    <p>Aufbewahrung: Rechnungen und Belege 8 Jahre, Bücher, Aufzeichnungen, Jahresabschlüsse und diese Dokumentation 10 Jahre, jeweils ab Ende des Kalenderjahres. Bis dahin wird nichts gelöscht.</p>
+    ${h2('8. Zugriff des Finanzamts')}
+    <p>Bei einer Prüfung stehen die Daten als Jahrespaket (CSV-Listen für Excel und alle Belege), als DATEV-Buchungsstapel und als Ausdruck zur Verfügung.</p>
+    ${h2('9. Änderungen dieser Dokumentation')}
+    <p>Ändert sich der Ablauf, wird diese Dokumentation angepasst. Frühere Fassungen bleiben erhalten.${S.vdoku && S.vdoku.versionen && S.vdoku.versionen.length ? ' Frühere Stände: ' + S.vdoku.versionen.map((x) => dat(x.stand)).join(', ') + '.' : ''}</p>
+    <div style="display:flex;gap:12mm;margin-top:16mm"><div style="flex:1;border-top:.3mm solid #000;padding-top:1mm;font-size:8.5pt">Ort, Datum</div><div style="flex:2;border-top:.3mm solid #000;padding-top:1mm;font-size:8.5pt">Unterschrift</div></div>
+    <p style="font-size:8.5pt;margin-top:8mm">Vorlage aus dem Steuer-Cockpit. Bitte lesen und anpassen, wenn dein Ablauf anders ist. Keine Steuerberatung.</p>`;
+}
+/* Jahr abschließen: Jahrespaket und Sicherung an zwei Orte */
+function vJahrArchiv(y) {
+  const erl = S.archivJahre && S.archivJahre[y];
+  openDlg(`${head('Jahr ' + y + ' ablegen')}<div class="dlg-body">
+    <p>Rechnungen und Belege musst du 8 Jahre aufheben, Bücher und Auswertungen 10 Jahre. Weil die Daten nur in diesem Browser liegen, legst du jedes Jahr einmal ein Archiv ab.</p>
+    <ol>
+      <li>Jahrespaket ${y} herunterladen. Darin: alle Listen, Rechnungen als feste Kopie, Belege und das Änderungsprotokoll.</li>
+      <li>Eine Sicherung herunterladen.</li>
+      <li>Beide Dateien an zwei Orten aufheben, zum Beispiel auf einem USB-Stick und in einer Cloud wie iCloud oder Google Drive.</li>
+    </ol>
+    <div class="btns"><button data-act="paket" data-k="${y}">Jahrespaket ${y}</button><button data-act="backup">Sicherung herunterladen</button></div>
+    ${erl ? `<p class="small" style="margin-top:10px"><span class="pill good">Erledigt</span> Abgelegt am ${dat(erl)}.</p>` : ''}
+  </div><div class="dlg-foot"><button data-act="close">Später</button><button class="primary" data-act="jahrarchiv-ok" data-k="${y}">${erl ? 'Erneut abgelegt' : 'Erledigt, liegt an zwei Orten'}</button></div>`);
 }
 function datenKarte() {
   return `  <div class="card">
@@ -3380,7 +3575,7 @@ const HILFE = {
       'Bei Bewirtung (Geschäftsessen) auf dem Beleg Anlass und Teilnehmer notieren. Absetzbar sind 70 %.',
       'Geräte über 800 € netto werden über mehrere Jahre abgeschrieben (Anleitung „Abschreibung“).',
       'Einmal im Monat im Reiter Bank prüfen, ob zu jeder Abbuchung ein Beleg da ist.'],
-    tipps: ['Belege und Rechnungen musst du 8 Jahre aufheben, Bücher und Jahresabschlüsse 10 Jahre. Kommt eine Rechnung digital (PDF, E-Rechnung), musst du die Datei aufheben, ein Ausdruck reicht nicht.', 'Die App speichert alles nur auf diesem Gerät. Lade regelmäßig eine Sicherung herunter. Eine geprüfte Archivierung nach den Regeln des Finanzamts (GoBD) ist sie noch nicht.'],
+    tipps: ['Belege und Rechnungen musst du 8 Jahre aufheben, Bücher und Jahresabschlüsse 10 Jahre. Kommt eine Rechnung digital (PDF, E-Rechnung), musst du die Datei aufheben, ein Ausdruck reicht nicht.', 'Die App speichert alles nur auf diesem Gerät. Lade regelmäßig eine Sicherung herunter. Gestellte Rechnungen legt sie als feste Kopie ab und schreibt Änderungen im Änderungsprotokoll mit. Ein geprüftes Archivsystem ist sie trotzdem nicht, deshalb nach jedem Jahr das Jahrespaket und eine Sicherung an zwei Orten ablegen.'],
     links: ['p147'], siehe: ['afa', 'bank', 'sicherung'] },
   bank: { b: 'Belege und Bank', t: 'Kontoauszug als CSV holen', kurz: 'So kommen deine Bankbuchungen in die App.',
     text: 'Die App liest Kontoauszüge als CSV-Datei (eine Tabelle, die sich auch in Excel öffnen lässt). Damit ordnet sie Zahlungen deinen Rechnungen zu und findet Abbuchungen ohne Beleg.',
@@ -3456,6 +3651,14 @@ const HILFE = {
       'Am besten alle zwei Wochen. Die App erinnert dich auf der Übersicht.',
       'Neues Gerät: dort das Cockpit öffnen, im Reiter Firma „Sicherung einspielen“ und die Datei wählen.'],
     tipps: ['Arbeite immer nur auf einem Gerät, sonst laufen die Stände auseinander.'], siehe: ['handy'] },
+  ordnung: { b: 'Jahresende', t: 'Ordnung und Aufbewahrung', kurz: 'Was das Finanzamt bei der Buchhaltung erwartet.',
+    text: 'Für die Buchhaltung gelten Regeln, die GoBD heißen. Kurz gesagt: Belege vollständig und zeitnah erfassen, nichts spurlos ändern oder löschen, alles lange genug aufheben und aufschreiben, wie du dabei vorgehst. Die Regeln gelten für dich als Unternehmer, nicht für die App. Die App nimmt dir aber das meiste ab.',
+    schritte: ['Gestellte Rechnungen sperrt die App und legt eine feste Kopie ab. Fehler korrigierst du mit Storno oder Rechnungskorrektur.',
+      'Änderungen und Löschungen schreibt die App im Änderungsprotokoll mit (Reiter Firma). Gelöschtes lässt sich dort zurückholen.',
+      'Einmal die Verfahrensdokumentation ausfüllen (Reiter Firma). Das ist eine Seite, wie du Belege bekommst, buchst und aufhebst.',
+      'Regelmäßig eine Sicherung herunterladen und nach jedem Jahresende das Jahr ablegen: Jahrespaket und Sicherung an zwei Orten.'],
+    tipps: ['Aufheben: Rechnungen und Belege 8 Jahre, Bücher, Jahresabschlüsse und die Verfahrensdokumentation 10 Jahre, jeweils ab Ende des Jahres.', 'Eingehende E-Rechnungen im Original (XML-Datei) hochladen, nicht nur als Ausdruck.', 'Papier darfst du nach dem Scannen wegwerfen, wenn der Scan gut lesbar ist und das in der Verfahrensdokumentation steht.'],
+    siehe: ['sicherung'] },
   handy: { b: 'App', t: 'Cockpit aufs Handy legen', kurz: 'Wie eine App auf dem Startbildschirm.',
     text: 'Das Cockpit läuft im Browser, lässt sich aber wie eine App auf den Startbildschirm legen. Dann startet es schneller und der Browser löscht die Daten nicht so leicht.',
     schritte: ['<b>iPhone und iPad:</b> Das Cockpit in Safari öffnen, unten auf das Teilen-Symbol (Quadrat mit Pfeil) tippen, dann „Zum Home-Bildschirm“.',
@@ -3543,6 +3746,8 @@ function readEditor() {
     artikelId: (p.querySelector('[name=p_art]') || {}).value || undefined
   }));
   if (f.elements.skontoProz) Object.assign(edit, { skontoProz: num(g('skontoProz')), skontoTage: Math.round(num(g('skontoTage'))) });
+  if (f.elements.befreiung) edit.befreiung = g('befreiung');
+  if (f.elements.befreiungText) edit.befreiungText = g('befreiungText');
   if (edit.artSchluss || istSchluss(edit)) { const ids = [...f.querySelectorAll('[name=abz]:checked')].map((x) => x.value); edit.abzuege = S.rechnungen.filter((x) => ids.includes(x.id)).map(abzugAus); }
 }
 function pflichtDoc(d) {
@@ -3555,6 +3760,7 @@ function pflichtDoc(d) {
   c.push(['Jede Position mit Beschreibung und Preis', d.positionen.length > 0 && d.positionen.every((p) => p.text.trim() && num(p.menge) !== 0)]);
   if (RC[d.rc] && RC[d.rc].idPflicht) c.push(['USt-IdNr. des Kunden (EU-Geschäft)', /^[A-Z]{2}[0-9A-Z+*]{2,12}$/.test(String(d.kunde.ustid || '').replace(/\s/g, '').toUpperCase())]);
   c.push([d.ku ? 'Hinweis auf Kleinunternehmerregelung' : RC[d.rc] ? 'Hinweis auf den Steuerfall' : 'Steuersatz und Steuerbetrag', true]);
+  if (hat0(d)) c.push(['Grund für 0 % Umsatzsteuer', !!befreiungText(d)]);
   c.push(['Fortlaufende Rechnungsnummer', true]);
   return c;
 }
@@ -3627,6 +3833,7 @@ function vEditor() {
     ${S.artikel.length ? `<select id="artPick" aria-label="Aus der Artikelliste einfügen" style="width:auto"><option value="">+ Aus der Artikelliste …</option>${S.artikel.slice().sort((a, b) => a.name.localeCompare(b.name, 'de')).map((a) => `<option value="${a.id}">${esc(a.name)} · ${eur(num(a.preis))}</option>`).join('')}</select>` : '<button type="button" data-act="artikel">Artikelliste anlegen</button>'}</div>
     ${isRe && !gut && (d.artSchluss || istSchluss(d)) ? `<h3>Abschläge abziehen</h3>${abList.length ? `<div id="abzList">${abList.map((x) => `<label class="check"><input type="checkbox" name="abz" value="${x.id}"${gewaehlt.has(x.id) ? ' checked' : ''}> ${esc(x.nr)} vom ${dat(x.datum)}: ${eur(summen(x).netto)} netto, ${eur(summen(x).brutto)} brutto${hatZahlung(x) ? '' : ' <span class="small muted">(noch nicht bezahlt)</span>'}</label>`).join('')}</div>` : `<p class="small muted">Für ${esc(d.kunde.name || 'diesen Kunden')} gibt es keine Abschlagsrechnung, die noch nicht abgezogen wurde. Der Kundenname muss genau gleich geschrieben sein.</p>`}` : ''}
     <div id="totals" style="margin-top:10px">${totalsHtml(d)}</div>
+    <div id="befr" data-k="${befrKey(d)}">${befrHtml(d)}</div>
     ${d.ku ? `<p class="small muted">${KU_HINWEIS} Steht automatisch auf dem Dokument.</p>` : ''}
     <div id="kuWarn">${kuWarnung(d)}</div>
     <label style="margin-top:10px">Text unter den Positionen (optional)<textarea name="hinweis" rows="2" placeholder="${isRe ? 'z. B. Vielen Dank für Ihren Auftrag.' : 'z. B. Wir freuen uns auf Ihre Rückmeldung.'}">${esc(d.hinweis)}</textarea></label>
@@ -3641,9 +3848,21 @@ function vEditor() {
     ${isRe ? `<button class="primary" data-act="stellen" id="btnStellen"${allOk ? '' : ' disabled'}>${gut ? 'Korrektur stellen' : docTitel(d) + ' stellen'}</button>` : ''}
   </div>`);
 }
+function befrKey(d) { return hat0(d) ? 'j' + (d.befreiung || '') : 'n'; }
+function befrHtml(d) {
+  if (!hat0(d)) return '';
+  const b = BEFREIUNG[d.befreiung];
+  return `<div class="card" style="margin-top:10px"><b>Warum 0 % Umsatzsteuer?</b>
+    <p class="small muted" style="margin:4px 0 6px">Mindestens eine Position hat 0 %. Dann muss auf der Rechnung stehen, warum.</p>
+    <label>Grund<select name="befreiung"><option value="">Bitte wählen</option>${Object.entries(BEFREIUNG).map(([k, v]) => `<option value="${k}"${d.befreiung === k ? ' selected' : ''}>${v.t}</option>`).join('')}</select></label>
+    ${d.befreiung === 'anders' ? `<label style="margin-top:8px">Text auf der Rechnung<input name="befreiungText" value="${esc(d.befreiungText || '')}" placeholder="z. B. Steuerfreie Leistung nach § 4 Nr. 20 UStG."></label>` : ''}
+    ${b && b.h ? `<p class="small muted" style="margin:6px 0 0">Auf der Rechnung steht: „${b.h}“</p>` : ''}
+    <p class="small muted" style="margin:6px 0 0">Nicht sicher, ob deine Leistung steuerfrei ist? Frag deinen Steuerberater. Wer steuerfreie Leistungen hat, darf die Vorsteuer aus den Einkäufen dafür meist nicht abziehen.</p></div>`;
+}
 function refreshEditor() {
   readEditor();
   $('#totals').innerHTML = totalsHtml(edit);
+  const bf = $('#befr'); if (bf && bf.dataset.k !== befrKey(edit)) { bf.innerHTML = befrHtml(edit); bf.dataset.k = befrKey(edit); }
   if ($('#kuWarn')) $('#kuWarn').innerHTML = kuWarnung(edit);
   document.querySelectorAll('#posList .pos').forEach((el, i) => { el.querySelector('.sum').textContent = eur(posNetto(edit.positionen[i])); });
   if (edit.typ !== 'angebot') {
@@ -3669,6 +3888,7 @@ async function saveDoc(stellen) {
     if (d.typ === 'gutschrift' && summen(d).brutto >= 0) return toast('Eine Korrektur muss einen Minus-Betrag haben. Mengen bitte mit Minus eintragen.');
     d.nr = naechsteNr('RE', d.datum || heute());
     d.status = 'offen'; d.gestelltAm = heute();
+    await archivRechnung(d);
   }
   merkeKunde(d.kunde);
   const i = coll.findIndex((x) => x.id === d.id);
@@ -3717,6 +3937,7 @@ function vDetailAn(id) {
 function vDetailRe(id) {
   const r = S.rechnungen.find((x) => x.id === id); if (!r) return;
   if (r.status === 'entwurf' && !r.extern) { edit = JSON.parse(JSON.stringify(r)); return vEditor(); }
+  archivVorladen(r);
   const st = reStatus(r);
   const storno = r.stornoId ? S.rechnungen.find((x) => x.id === r.stornoId) : null;
   const orig = r.stornoVon ? S.rechnungen.find((x) => x.id === r.stornoVon) : null;
@@ -3746,6 +3967,7 @@ function vDetailRe(id) {
       ${st.k === 'ueberfaellig' && mahnStufe(r) < 3 ? `<p class="small muted" style="margin:6px 0 0">${mahnenFaellig(r) ? 'Der nächste Schritt ist dran.' : `Die Frist der letzten Mahnung läuft noch bis ${dat(letzteMahnung(r).frist)}.`}</p><div class="btns"><button${mahnenFaellig(r) ? ' class="primary"' : ''} data-act="mahnen" data-id="${r.id}">${MAHN[mahnStufe(r) + 1].b}</button></div>` : ''}
       ${st.k === 'ueberfaellig' && mahnStufe(r) >= 3 && tageBis(letzteMahnung(r).frist) < 0 ? '<p class="small" style="margin:6px 0 0">Alle Mahnstufen sind durch. Nächster Schritt wäre ein gerichtlicher Mahnbescheid (online über mahngerichte.de) oder ein Inkassobüro.</p>' : ''}</div>` : ''}
     ${st.k === 'bezahlt' ? `<div class="btns"><button data-act="unbezahlt" data-id="${r.id}">Doch nicht bezahlt</button></div>` : ''}
+    ${archivFest(r) && r.archiv ? `<p class="small muted">${r.archiv.nachtraeglich ? 'Feste Kopie nachträglich abgelegt am' : 'Feste Kopie abgelegt beim Stellen am'} ${dat(r.archiv.am.slice(0, 10))}. Drucken und das Jahrespaket nehmen immer diese Kopie, auch wenn du später deine Firmendaten änderst.</p>` : ''}
     <details><summary>Warum kann ich die Rechnung nicht ändern oder löschen?</summary><p class="small muted" style="margin-top:6px">Eine gestellte Rechnung darf nach GoBD nicht mehr verändert werden, und die Nummern müssen lückenlos sein. Ist sie ganz falsch, stornierst du sie und schreibst eine neue. Stimmt nur ein Teil nicht (z. B. eine Position zu viel oder ein Preisnachlass), nimm „Teil gutschreiben“.</p></details>
   </div>
   <div class="dlg-foot">
@@ -4154,7 +4376,7 @@ async function saveBeleg() {
   b.rc = f.elements.rc.value;
   b.vorsteuer = ku() || b.rc ? 0 : (vstIn ? num(vstIn) : r2(br - br / (1 + s / 100)));
   const fi = await storeFile('b');
-  if (fi) { if (b.dateiId) await idbDel('datei:' + b.dateiId); Object.assign(b, fi); }
+  if (fi) Object.assign(b, fi); // die alte Datei bleibt, das Protokoll verweist darauf
   if (!b.dateiId && !br) return toast('Bitte eine Datei wählen oder einen Betrag eintragen.');
   const i = S.belege.findIndex((x) => x.id === b.id);
   if (i >= 0) S.belege[i] = b; else S.belege.push(b);
@@ -4264,10 +4486,10 @@ async function wiederkehrend() {
       if (d > h || (v.ende && d > v.ende)) break;
       if (v.art === 'rechnung') {
         const r = neuesDoc('rechnung'), q = JSON.parse(JSON.stringify(v.daten));
-        Object.assign(r, { kunde: q.kunde, positionen: q.positionen.map((x) => Object.assign(x, { text: vlText(x.text, d) })), rc: q.rc || '', hinweis: vlText(q.hinweis, d), ku: ku(), datum: d < h && v.stellen ? h : d, leistungsdatum: d, vorlage: v.id });
+        Object.assign(r, { kunde: q.kunde, positionen: q.positionen.map((x) => Object.assign(x, { text: vlText(x.text, d) })), rc: q.rc || '', befreiung: q.befreiung || '', befreiungText: q.befreiungText || '', hinweis: vlText(q.hinweis, d), ku: ku(), datum: d < h && v.stellen ? h : d, leistungsdatum: d, vorlage: v.id });
         r.faellig = plusTage(r.datum, num(S.firma.zahlungsziel) || 14);
         // Hat sich der Kleinunternehmer-Status geändert, erst prüfen lassen
-        if (v.stellen && !!q.ku === ku() && pflichtDoc(r).every((c) => c[1])) { r.nr = naechsteNr('RE', r.datum); r.status = 'offen'; r.gestelltAm = h; }
+        if (v.stellen && !!q.ku === ku() && pflichtDoc(r).every((c) => c[1])) { r.nr = naechsteNr('RE', r.datum); r.status = 'offen'; r.gestelltAm = h; await archivRechnung(r); }
         else entwurf++;
         S.rechnungen.push(r); nRe++;
       } else {
@@ -4313,7 +4535,7 @@ function vVorlage(v) {
 }
 function vorlageAus(art, id) {
   const q = art === 'rechnung' ? S.rechnungen.find((x) => x.id === id) : S.belege.find((x) => x.id === id); if (!q) return;
-  const daten = art === 'rechnung' ? { kunde: JSON.parse(JSON.stringify(q.kunde)), positionen: JSON.parse(JSON.stringify(q.positionen)), ku: !!q.ku, rc: q.rc || '', hinweis: q.hinweis || '' }
+  const daten = art === 'rechnung' ? { kunde: JSON.parse(JSON.stringify(q.kunde)), positionen: JSON.parse(JSON.stringify(q.positionen)), ku: !!q.ku, rc: q.rc || '', hinweis: q.hinweis || '', befreiung: q.befreiung || '', befreiungText: q.befreiungText || '' }
     : { lieferant: q.lieferant, brutto: num(q.brutto), ustSatz: num(q.ustSatz), kategorie: q.kategorie, zahlweg: q.zahlweg === 'offen' ? 'konto' : q.zahlweg || 'konto', rc: q.rc || '', notiz: q.notiz || '' };
   const basis = art === 'rechnung' ? q.leistungsdatum || q.datum : q.datum;
   let start = plusMonate(basis || heute(), 1); while (start <= heute()) start = plusMonate(start, 1);
@@ -4392,7 +4614,14 @@ const mailFelder = () => { const f = $('#mailForm').elements; return { an: f.an.
 
 /* ---------- Druck / PDF ---------- */
 /* modus: '' Angebot/Rechnung, 'ab' Auftragsbestätigung, 'ls' Lieferschein (ohne Preise) */
-function druck(d, titel, modus) {
+function druck(d, titel, modus) { druckZeig(druckHtml(d, titel, modus), (modus === 'ls' ? d.ls.nr : modus === 'ab' ? d.ab.nr : d.nr) || titel); }
+function druckZeig(html, name) {
+  $('#druck').innerHTML = html;
+  const alt = document.title; document.title = String(name || 'Dokument').replace(/[^\w-]+/g, '_');
+  window.print();
+  setTimeout(() => { document.title = alt; }, 500);
+}
+function druckHtml(d, titel, modus) {
   const f = S.firma, s = summen(d), sv = istSchluss(d) ? summenVoll(d) : s, ls = modus === 'ls', ab = modus === 'ab';
   const absender = [f.name, f.strasse, [f.plz, f.ort].join(' ')].filter((x) => x && x.trim()).join(' · ');
   const isRe = d.typ !== 'angebot' && !modus, rab = hatRabatt(d) && !ls;
@@ -4405,7 +4634,7 @@ function druck(d, titel, modus) {
     : `<tr><th>Pos.</th><th>Beschreibung</th><th class="r">Menge</th><th class="r">Einzelpreis</th>${rab ? '<th class="r">Rabatt</th>' : ''}${d.ku ? '' : '<th class="r">USt</th>'}<th class="r">Betrag</th></tr>`;
   const zeile = (p, i) => ls ? `<tr><td>${i + 1}</td><td>${esc(p.text)}</td><td class="r">${String(p.menge).replace('.', ',')} ${esc(p.einheit)}</td></tr>`
     : `<tr><td>${i + 1}</td><td>${esc(p.text)}</td><td class="r">${String(p.menge).replace('.', ',')} ${esc(p.einheit)}</td><td class="r">${eur(num(p.preis))}</td>${rab ? `<td class="r">${num(p.rabatt) ? String(p.rabatt).replace('.', ',') + ' %' : ''}</td>` : ''}${d.ku ? '' : `<td class="r">${num(p.ust)} %</td>`}<td class="r">${eur(posNetto(p))}</td></tr>`;
-  $('#druck').innerHTML = `
+  return `
     <div class="kopf"><div><div class="absender">${esc(absender)}</div><div style="white-space:pre-line"><b>${esc(d.kunde.name)}</b>\n${esc(d.kunde.adresse)}${d.kunde.ustid && !ls ? '\nUSt-IdNr.: ' + esc(d.kunde.ustid) : ''}</div></div>
     <div>${f.logo ? `<img class="logo" src="${esc(f.logo)}" alt="">` : ''}<table class="meta">${nrZeilen}
     ${f.steuernr && !ls ? `<tr><td>Steuernr.</td><td>${esc(f.steuernr)}</td></tr>` : ''}${f.ustid && !ls ? `<tr><td>USt-IdNr.</td><td>${esc(f.ustid)}</td></tr>` : ''}</table></div></div>
@@ -4420,13 +4649,60 @@ function druck(d, titel, modus) {
     ${istSchluss(d) ? d.abzuege.map((a) => `<div><span>Abzüglich Abschlagsrechnung ${esc(a.nr)} vom ${dat(a.datum)}${d.ku ? '' : `<br><small>netto ${eur(a.netto)}, USt ${eur(a.ust)}</small>`}</span><span>−${eur(a.brutto)}</span></div>`).join('') + `<div class="g"><span>Noch zu zahlen</span><span>${eur(s.brutto)}</span></div>` : ''}</div>
     ${d.ku ? `<p>${KU_HINWEIS}</p>` : ''}
     ${RC[d.rc] ? `<p>${RC[d.rc].hinweis}</p>` : ''}
+    ${befreiungText(d) && !ls ? `<p>${esc(befreiungText(d))}</p>` : ''}
     ${isRe && d.typ !== 'gutschrift' && d.faellig ? `<p>Bitte überweisen Sie den Betrag bis zum ${dat(d.faellig)} unter Angabe der Rechnungsnummer${f.iban ? ' auf das unten genannte Konto' : ''}.${hatSkonto(d) ? ' ' + skontoText(d) : ''}</p>` : ''}
     ${ab ? `<p>Die Rechnung erhalten Sie nach Erbringung der Leistung.${d.ab.text ? '' : ' Bei Fragen melden Sie sich gern.'}</p>${d.ab.text ? `<p style="white-space:pre-line">${esc(d.ab.text)}</p>` : ''}<p>Mit freundlichen Grüßen<br>${esc(f.inhaber || f.name)}</p>` : ''}`}
     ${d.hinweis && !modus ? `<p style="white-space:pre-line">${esc(d.hinweis)}</p>` : ''}
     ${fussHtml()}`;
-  const alt = document.title; document.title = ((ls ? d.ls.nr : ab ? d.ab.nr : d.nr) || titel).replace(/[^\w-]+/g, '_');
-  window.print();
-  setTimeout(() => { document.title = alt; }, 500);
+}
+
+/* ---------- Feste Kopien: so, wie die Rechnung beim Stellen aussah ----------
+   Spätere Änderungen an Firmendaten, Logo oder an der App ändern eine gestellte Rechnung nicht mehr.
+   Die Kopie ist eine eigene HTML-Datei (lässt sich im Browser öffnen und drucken), die erste E-Rechnung (XML, PDF) wird ebenso aufgehoben. */
+const DRUCK_CSS = `@page{size:A4;margin:18mm 16mm}body{font-family:system-ui,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;margin:0;background:#fff;color:#000}
+#druck{font-size:10.5pt;color:#000;max-width:178mm;margin:0 auto;padding:6mm 0}#druck .absender{font-size:8pt;text-decoration:underline;margin-bottom:4mm}
+#druck .kopf{display:flex;justify-content:space-between;gap:10mm;margin-bottom:12mm}#druck .meta td{padding:0 0 1mm 6mm}#druck .logo{display:block;max-height:22mm;max-width:60mm;margin:0 0 4mm auto}
+#druck h1{font-size:16pt;margin:0 0 6mm}#druck table.p{width:100%;border-collapse:collapse;margin:4mm 0}#druck table.p th,#druck table.p td{border-bottom:.3mm solid #999;padding:2mm 1mm;text-align:left}
+#druck table.p .r{text-align:right}#druck .sum{margin-left:auto;width:75mm}#druck .sum div{display:flex;justify-content:space-between;padding:.8mm 0}
+#druck .sum .g{font-weight:700;border-top:.4mm solid #000;margin-top:1mm;padding-top:1.5mm}#druck .fuss{margin-top:14mm;font-size:8.5pt;color:#333;display:grid;grid-template-columns:repeat(3,1fr);gap:6mm;border-top:.3mm solid #999;padding-top:3mm}`;
+const archivCache = {};
+const archivDoc = (titel, inhalt, am) => `<!doctype html><html lang="de"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${esc(titel)}</title><style>${DRUCK_CSS}</style></head><body><div id="druck"><!--inhalt-->${inhalt}<!--/inhalt--></div><!-- Feste Kopie aus dem Steuer-Cockpit, abgelegt am ${am} --></body></html>`;
+const archivInhalt = (doc) => { const a = doc.indexOf('<!--inhalt-->'), b = doc.lastIndexOf('<!--/inhalt-->'); return a >= 0 && b > a ? doc.slice(a + 13, b) : doc; };
+async function archivLege(r, art, inhalt, typ, name) {
+  const id = 'k' + uid();
+  await idbSet('datei:' + id, { name, type: typ, blob: inhalt instanceof Blob ? inhalt : new Blob([inhalt], { type: typ }) });
+  r.archiv = Object.assign({ am: new Date().toISOString() }, r.archiv || {}, { [art]: id });
+  return id;
+}
+async function archivHol(r, art) {
+  const id = r && r.archiv && r.archiv[art]; if (!id) return null;
+  const d = await idbGet('datei:' + id); return d && d.blob ? d.blob : null;
+}
+/* Beim Stellen (oder nachträglich für ältere Rechnungen) */
+async function archivRechnung(r, nachtraeglich) {
+  const am = new Date().toISOString(), inhalt = druckHtml(r, docTitel(r));
+  r.archiv = { am };
+  await archivLege(r, 'html', archivDoc(`${docTitel(r)} ${r.nr}`, inhalt, am), 'text/html', `${dateiName(r.nr)}.html`);
+  if (nachtraeglich) r.archiv.nachtraeglich = true;
+  archivCache[r.id] = inhalt;
+}
+const archivFest = (r) => r && !r.extern && r.status !== 'entwurf' && r.typ !== 'angebot';
+/* E-Rechnung: die erste erzeugte Datei bleibt; ändern sich danach Kundendaten für die E-Rechnung, entsteht eine neue und die alte bleibt dabei */
+async function archivDatei(r, art, mach, typ, name) {
+  if (!archivFest(r)) return mach();
+  const b = await archivHol(r, art); if (b) return b;
+  const inhalt = await mach(); if (!inhalt) return inhalt;
+  await archivLege(r, art, inhalt, typ, name); await save();
+  return inhalt;
+}
+function archivNeuFuer(r) {
+  if (!r.archiv) return;
+  r.archiv.frueher = (r.archiv.frueher || []).concat(['xml', 'pdf'].filter((k) => r.archiv[k]).map((k) => ({ art: k, id: r.archiv[k], bis: heute() })));
+  delete r.archiv.xml; delete r.archiv.pdf;
+}
+async function archivVorladen(r) {
+  if (!archivFest(r) || archivCache[r.id]) return;
+  const b = await archivHol(r, 'html'); if (b) archivCache[r.id] = archivInhalt(await b.text());
 }
 
 /* ---------- E-Rechnung (XRechnung 3.0, UBL) ---------- */
@@ -4467,16 +4743,17 @@ function xrechnung(r) {
   const credit = r.typ === 'gutschrift';
   const adr = kundenAdresse;
   const k = adr(r.kunde.adresse);
-  const kat = (satz) => r.ku ? 'E' : RC[r.rc] ? RC[r.rc].xml : (satz > 0 ? 'S' : 'Z');
+  const kat = (satz) => r.ku ? 'E' : RC[r.rc] ? RC[r.rc].xml : (satz > 0 ? 'S' : nullsatz(r) ? 'Z' : 'E');
   const sub = r.ku ? [[0, s.netto]] : Object.entries(s.proSatz).map(([k2, v]) => [Number(k2), v]);
   const rcKat = !r.ku && RC[r.rc] ? RC[r.rc].xml : '';
+  const frei0 = (satz) => !r.ku && !rcKat && satz === 0 && kat(0) === 'E' ? `<cbc:TaxExemptionReason>${x(befreiungText(r) || 'Steuerfreie Leistung')}</cbc:TaxExemptionReason>` : '';
   /* BR-O-2/5/9: bei „nicht steuerbar“ (O) weder Steuersatz noch USt-IdNr. von Verkäufer oder Käufer */
   const satzEl = (v) => rcKat === 'O' ? '' : `<cbc:Percent>${rcKat ? 0 : v}</cbc:Percent>`;
   const befreiung = r.ku ? '<cbc:TaxExemptionReason>Kleinunternehmer gemäß § 19 UStG</cbc:TaxExemptionReason>' : rcKat ? `<cbc:TaxExemptionReasonCode>${VATEX[rcKat]}</cbc:TaxExemptionReasonCode><cbc:TaxExemptionReason>${RC[r.rc].hinweis}</cbc:TaxExemptionReason>` : '';
   const land = kundenLand(r);
   const taxSub = sub.map(([satz, basis]) => `
       <cac:TaxSubtotal><cbc:TaxableAmount currencyID="EUR">${a(r2(basis))}</cbc:TaxableAmount><cbc:TaxAmount currencyID="EUR">${a(r2(basis * satz / 100))}</cbc:TaxAmount>
-        <cac:TaxCategory><cbc:ID>${kat(satz)}</cbc:ID>${satzEl(satz)}${befreiung}<cac:TaxScheme><cbc:ID>VAT</cbc:ID></cac:TaxScheme></cac:TaxCategory></cac:TaxSubtotal>`).join('');
+        <cac:TaxCategory><cbc:ID>${kat(satz)}</cbc:ID>${satzEl(satz)}${befreiung}${frei0(satz)}<cac:TaxScheme><cbc:ID>VAT</cbc:ID></cac:TaxScheme></cac:TaxCategory></cac:TaxSubtotal>`).join('');
   const lines = r.positionen.map((p, i) => `
   <cac:InvoiceLine><cbc:ID>${i + 1}</cbc:ID><cbc:InvoicedQuantity unitCode="${/std/i.test(p.einheit) ? 'HUR' : /tag/i.test(p.einheit) ? 'DAY' : 'C62'}">${num(p.menge)}</cbc:InvoicedQuantity><cbc:LineExtensionAmount currencyID="EUR">${a(posNetto(p))}</cbc:LineExtensionAmount>${num(p.rabatt) ? `
     <cac:AllowanceCharge><cbc:ChargeIndicator>false</cbc:ChargeIndicator><cbc:AllowanceChargeReasonCode>95</cbc:AllowanceChargeReasonCode><cbc:AllowanceChargeReason>Rabatt</cbc:AllowanceChargeReason><cbc:MultiplierFactorNumeric>${num(p.rabatt)}</cbc:MultiplierFactorNumeric><cbc:Amount currencyID="EUR">${a(posRabatt(p))}</cbc:Amount><cbc:BaseAmount currencyID="EUR">${a(posBasis(p))}</cbc:BaseAmount></cac:AllowanceCharge>` : ''}
@@ -4530,7 +4807,8 @@ function ciiXml(r) {
   const d102 = (iso) => `<udt:DateTimeString format="102">${String(iso).replace(/-/g, '')}</udt:DateTimeString>`;
   const credit = r.typ === 'gutschrift', k = kundenAdresse(r.kunde.adresse), land = kundenLand(r);
   const rcKat = !r.ku && RC[r.rc] ? RC[r.rc].xml : '';
-  const kat = (satz) => r.ku ? 'E' : rcKat || (satz > 0 ? 'S' : 'Z');
+  const kat = (satz) => r.ku ? 'E' : rcKat || (satz > 0 ? 'S' : nullsatz(r) ? 'Z' : 'E');
+  const frei0 = (satz) => !r.ku && !rcKat && satz === 0 && kat(0) === 'E' ? `<ram:ExemptionReason>${x(befreiungText(r) || 'Steuerfreie Leistung')}</ram:ExemptionReason>` : '';
   const satzEl = (v) => rcKat === 'O' ? '' : `<ram:RateApplicablePercent>${rcKat || r.ku ? 0 : v}</ram:RateApplicablePercent>`;
   const sub = r.ku ? [[0, s.netto]] : Object.entries(s.proSatz).map(([k2, v]) => [Number(k2), v]);
   const vorab = istSchluss(r) ? r2(r.abzuege.reduce((q, z) => q + num(z.brutto), 0)) : 0;
@@ -4550,7 +4828,7 @@ function ciiXml(r) {
     </ram:IncludedSupplyChainTradeLineItem>`).join('');
   const befreiung = r.ku ? '<ram:ExemptionReason>Kleinunternehmer gemäß § 19 UStG</ram:ExemptionReason>' : rcKat ? `<ram:ExemptionReason>${RC[r.rc].hinweis}</ram:ExemptionReason>` : '';
   const steuern = sub.map(([satz, basis]) => `
-      <ram:ApplicableTradeTax><ram:CalculatedAmount>${a(rcKat || r.ku ? 0 : basis * satz / 100)}</ram:CalculatedAmount><ram:TypeCode>VAT</ram:TypeCode>${befreiung}<ram:BasisAmount>${a(basis)}</ram:BasisAmount><ram:CategoryCode>${kat(satz)}</ram:CategoryCode>${rcKat ? `<ram:ExemptionReasonCode>${VATEX[rcKat]}</ram:ExemptionReasonCode>` : ''}${satzEl(satz)}</ram:ApplicableTradeTax>`).join('');
+      <ram:ApplicableTradeTax><ram:CalculatedAmount>${a(rcKat || r.ku ? 0 : basis * satz / 100)}</ram:CalculatedAmount><ram:TypeCode>VAT</ram:TypeCode>${befreiung}${frei0(satz)}<ram:BasisAmount>${a(basis)}</ram:BasisAmount><ram:CategoryCode>${kat(satz)}</ram:CategoryCode>${rcKat ? `<ram:ExemptionReasonCode>${VATEX[rcKat]}</ram:ExemptionReasonCode>` : ''}${satzEl(satz)}</ram:ApplicableTradeTax>`).join('');
   const adresse = (plz, str, ort, cc) => `<ram:PostalTradeAddress>${plz ? `<ram:PostcodeCode>${x(plz)}</ram:PostcodeCode>` : ''}${str ? `<ram:LineOne>${x(str)}</ram:LineOne>` : ''}${ort ? `<ram:CityName>${x(ort)}</ram:CityName>` : ''}<ram:CountryID>${cc}</ram:CountryID></ram:PostalTradeAddress>`;
   const ustReg = (id) => id && rcKat !== 'O' ? `<ram:SpecifiedTaxRegistration><ram:ID schemeID="VA">${x(id.replace(/\s/g, ''))}</ram:ID></ram:SpecifiedTaxRegistration>` : '';
   const notes = [r.ku ? KU_HINWEIS : '', r.hinweis || ''].filter(Boolean);
@@ -4768,7 +5046,10 @@ ${[['DocumentFileName', 'name of the embedded XML invoice file'], ['DocumentType
 async function zugferdLos(r) {
   const m = zugferdFehlt(r); if (m.length) return vERechnungFehlt(r, m, true);
   toast('PDF wird erstellt …');
-  try { const bytes = await zugferdPdf(r); download(`${dateiName(r.nr)}.pdf`, new Blob([bytes], { type: 'application/pdf' })); toast('PDF mit E-Rechnung gespeichert'); return bytes; }
+  try {
+    const b = await archivDatei(r, 'pdf', async () => new Blob([await zugferdPdf(r)], { type: 'application/pdf' }), 'application/pdf', `${dateiName(r.nr)}.pdf`);
+    download(`${dateiName(r.nr)}.pdf`, b); toast('PDF mit E-Rechnung gespeichert'); return new Uint8Array(await b.arrayBuffer());
+  }
   catch (err) { console.error(err); toast(navigator.onLine ? 'Das PDF konnte nicht erstellt werden.' : 'Beim ersten Mal braucht das PDF Internet. Bitte verbinden und nochmal versuchen.'); return null; }
 }
 function download(name, text, type) {
@@ -4833,12 +5114,15 @@ async function sicherungEinspielen() {
   const j = sicherung; if (!j) return;
   toast('Sicherung wird eingespielt …');
   const neu = Object.assign(leer(), j.state, { firma: Object.assign(leer().firma, j.state.firma || {}), steuer: Object.assign(leer().steuer, j.state.steuer || {}) });
+  // Protokoll geht nicht verloren: Einträge beider Stände zusammen, dazu der Vorgang selbst
+  if (!S.beispiel || neu.beispiel) { const ids = new Set((neu.protokoll || []).map((p) => p.id)); neu.protokoll = (neu.protokoll || []).concat((S.protokoll || []).filter((p) => !ids.has(p.id))).sort((a, b) => a.t.localeCompare(b.t)); }
+  if (!neu.beispiel) neu.protokoll = (neu.protokoll || []).concat([{ id: uid(), t: new Date().toISOString(), art: 'Vorgang', b: 'app', n: `Sicherung vom ${j.erstellt ? new Date(j.erstellt).toLocaleString('de-DE', { dateStyle: 'medium', timeStyle: 'short' }) : 'unbekannt'} eingespielt` }]);
   const files = []; let kaputt = 0;
   for (const [k, d] of Object.entries(j.dateien || {})) { try { files.push([k, { name: d.name, type: d.type, blob: dataToBlob(d.data, d.type) }]); } catch (e) { kaputt++; } }
   const alt = S, hatteDaten = zaehle(alt).re + zaehle(alt).be + zaehle(alt).bank + zaehle(alt).an > 0 && !alt.beispiel;
   // Alles in einer Transaktion: bricht etwas ab, bleibt der alte Stand vollständig erhalten
   await kv('readwrite', (st) => { for (const [k, v] of files) st.put(v, k); if (hatteDaten) st.put({ am: heute(), state: alt }, 'state-vorher'); else st.delete('state-vorher'); st.put(neu, 'state'); });
-  S = neu; migriere(); sicherung = null; vorherAm = hatteDaten ? heute() : null;
+  S = neu; migriere(); protoStand = protoSchnitt(); sicherung = null; vorherAm = hatteDaten ? heute() : null;
   await aufraeumen(); speicherFest();
   closeDlg(); tab = 'start'; render(); window.scrollTo(0, 0);
   toast(kaputt ? `Eingespielt. ${kaputt} Datei${kaputt > 1 ? 'en waren' : ' war'} beschädigt.` : 'Sicherung eingespielt');
@@ -4854,8 +5138,12 @@ let vorherAm = null;
 async function vorherZurueck() {
   const v = await idbGet('state-vorher'); if (!v) return;
   if (!confirm(`Zurück zum Stand vom ${dat(v.am)}, bevor die Sicherung eingespielt wurde?`)) return;
-  await kv('readwrite', (st) => { st.put(v.state, 'state'); st.delete('state-vorher'); });
-  S = Object.assign(leer(), v.state); migriere(); vorherAm = null; await aufraeumen(); render(); toast('Alter Stand wiederhergestellt');
+  const P0 = S.protokoll || [];
+  S = Object.assign(leer(), v.state); migriere();
+  { const ids = new Set((S.protokoll || []).map((p) => p.id)); S.protokoll = (S.protokoll || []).concat(P0.filter((p) => !ids.has(p.id))).sort((a, b) => a.t.localeCompare(b.t)); }
+  protoNotiz(`Einspielen der Sicherung rückgängig gemacht, Stand vom ${dat(v.am)} zurückgeholt`); protoStand = protoSchnitt();
+  await kv('readwrite', (st) => { st.put(S, 'state'); st.delete('state-vorher'); });
+  vorherAm = null; await aufraeumen(); render(); toast('Alter Stand wiederhergestellt');
 }
 async function vorherWeg() {
   if (!confirm('Den aufgehobenen alten Stand endgültig löschen?')) return;
@@ -4904,12 +5192,19 @@ async function paket(j, mitDatev) {
     const f = await datei('Belege', b.dateiId, `${b.datum} ${b.lieferant || 'Beleg'}${num(b.brutto) ? ' ' + num(b.brutto).toFixed(2).replace('.', ',') : ''}`);
     aus.push([dat(b.datum), b.lieferant, b.kategorie, r2(num(b.brutto) - num(b.vorsteuer)), num(b.vorsteuer), num(b.brutto), String(num(b.ustSatz)), zahlweg[b.zahlweg || 'konto'] || '', b.notiz, f]);
   }
+  let neuKopie = false;
   const ein = [['Rechnungsnr.', 'Art', 'Rechnungsdatum', 'Bezahlt am', 'Kunde', 'Netto', 'Umsatzsteuer', 'Brutto', 'Status', 'Datei im Paket']];
   for (const r of S.rechnungen.filter((x) => zaehlt(x) && ((x.datum || '').startsWith(y) || (x.bezahltAm || '').startsWith(y))).sort((a, c) => (a.datum || '').localeCompare(c.datum || ''))) {
     const s = summen(r);
     let f = '';
     if (r.dateiId) f = await datei('Rechnungen', r.dateiId, r.nr || 'Rechnung');
-    else if (!r.extern) { try { f = frei(`Rechnungen/${dateiName(r.nr)}.xml`); files.push({ name: f, data: xrechnung(r) }); } catch (e) { f = ''; } }
+    else if (!r.extern) {
+      if (!(r.archiv && r.archiv.html)) { await archivRechnung(r, true); neuKopie = true; }
+      f = await datei('Rechnungen', r.archiv.html, r.nr || 'Rechnung');
+      if (r.archiv.xml) await datei('Rechnungen', r.archiv.xml, r.nr || 'Rechnung');
+      else { try { files.push({ name: frei(`Rechnungen/${dateiName(r.nr)}.xml`), data: xrechnung(r) }); } catch (e) { /* E-Rechnung nicht möglich */ } }
+      if (r.archiv.pdf) await datei('Rechnungen', r.archiv.pdf, r.nr || 'Rechnung');
+    }
     ein.push([r.nr, r.typ === 'gutschrift' ? 'Stornorechnung' : r.extern ? 'Hinterlegt' : 'Rechnung', dat(r.datum), r.bezahltAm ? dat(r.bezahltAm) : '', r.kunde && r.kunde.name, s.netto, s.ust, s.brutto, reStatus(r).t, f]);
   }
   const bank = [['Datum', 'Gegenpartei', 'Verwendungszweck', 'Betrag', 'Zugeordnet']];
@@ -4923,6 +5218,10 @@ async function paket(j, mitDatev) {
   mon.push(['Gewinn', '', '', gw.gewinn], [], ['Ausgaben nach Kategorie']);
   for (const [k, v] of Object.entries(gw.kat).sort((a, b) => b[1] - a[1])) mon.push([k, '', v]);
   const dv = mitDatev ? datev(j) : null;
+  if (neuKopie) await save();
+  const proto = protoZeilen((S.protokoll || []).filter((p) => p.t.startsWith(y)));
+  if (proto.length > 1) files.push({ name: `Aenderungsprotokoll-${y}.csv`, data: csvText(proto) });
+  if (S.vdoku) files.push({ name: 'Verfahrensdokumentation.html', data: archivDoc('Verfahrensdokumentation', vdokuHtml(), new Date().toISOString()) });
   files.unshift(
     { name: `Uebersicht-${y}.csv`, data: csvText(mon) },
     { name: `BWA-${y}.csv`, data: bwaCsvJahr(j) },
@@ -5152,7 +5451,7 @@ const ACT = {
     const r = S.rechnungen.find((x) => x.id === el.dataset.id); if (!r) return;
     const g = JSON.parse(JSON.stringify(r));
     Object.assign(g, { id: uid(), typ: 'gutschrift', teil: true, nr: '', datum: heute(), status: 'entwurf', stornoVon: r.id, hinweis: '', ausAngebot: null, art: '', abzuege: null, artSchluss: false, skontoProz: 0, skontoTage: 0, neu: true });
-    for (const k of ['bezahltAm', 'stornoId', 'zahlungen', 'mahnungen', 'versendetAm', 'verschicktAnders', 'ls', 'gestelltAm', 'vorlage']) delete g[k];
+    for (const k of ['bezahltAm', 'stornoId', 'zahlungen', 'mahnungen', 'versendetAm', 'verschicktAnders', 'ls', 'gestelltAm', 'vorlage', 'archiv']) delete g[k];
     g.positionen = g.positionen.map((p) => Object.assign(p, { menge: -Math.abs(num(p.menge)) }));
     edit = g; vEditor();
   },
@@ -5171,17 +5470,22 @@ const ACT = {
     if (r.extern) { g = { id: uid(), typ: 'gutschrift', extern: true, nr: naechsteNr('RE', heute()), datum: heute(), kunde: r.kunde, netto: -num(r.netto), ust: -num(r.ust), status: 'offen', stornoVon: r.id }; }
     else { g = JSON.parse(JSON.stringify(r)); Object.assign(g, { id: uid(), typ: 'gutschrift', nr: naechsteNr('RE', heute()), datum: heute(), status: 'offen', stornoVon: r.id, hinweis: '', ausAngebot: null }); delete g.bezahltAm; delete g.stornoId; g.positionen = g.positionen.map((p) => Object.assign(p, { menge: -num(p.menge) })); }
     r.status = 'storniert'; r.stornoId = g.id;
+    delete g.archiv; if (!g.extern) await archivRechnung(g);
     S.rechnungen.push(g); await save(); vDetailRe(g.id); render(); toast(`Stornorechnung ${g.nr} erstellt`);
   },
-  'del-ext': async (el) => { if (!confirm('Hinterlegte Rechnung entfernen?')) return; const r = S.rechnungen.find((x) => x.id === el.dataset.id); if (r.dateiId) await idbDel('datei:' + r.dateiId); S.rechnungen = S.rechnungen.filter((x) => x.id !== r.id); await save(); closeDlg(); render(); },
-  print: (el) => {
-    if (el.dataset.t === 'an') druck(S.angebote.find((x) => x.id === el.dataset.id), 'Angebot');
-    else { const r = S.rechnungen.find((x) => x.id === el.dataset.id); druck(r, docTitel(r)); }
+  'del-ext': async (el) => { if (!confirm('Hinterlegte Rechnung entfernen? Sie bleibt mit Datei im Änderungsprotokoll und lässt sich dort zurückholen.')) return; const r = S.rechnungen.find((x) => x.id === el.dataset.id); S.rechnungen = S.rechnungen.filter((x) => x.id !== r.id); await save(); closeDlg(); render(); },
+  print: async (el) => {
+    if (el.dataset.t === 'an') return druck(S.angebote.find((x) => x.id === el.dataset.id), 'Angebot');
+    const r = S.rechnungen.find((x) => x.id === el.dataset.id);
+    if (!archivFest(r)) return druck(r, docTitel(r));
+    if (!archivCache[r.id]) await archivVorladen(r);
+    if (!archivCache[r.id]) { await archivRechnung(r, true); await save(); }
+    druckZeig(archivCache[r.id], r.nr || docTitel(r));
   },
-  xml: (el) => {
+  xml: async (el) => {
     const r = S.rechnungen.find((x) => x.id === el.dataset.id), m = eRechnungFehlt(r);
     if (m.length) return vERechnungFehlt(r, m);
-    download(`${dateiName(r.nr)}.xml`, xrechnung(r), 'application/xml'); toast('E-Rechnung gespeichert');
+    download(`${dateiName(r.nr)}.xml`, await archivDatei(r, 'xml', () => xrechnung(r), 'application/xml', `${dateiName(r.nr)}.xml`), 'application/xml'); toast('E-Rechnung gespeichert');
   },
   'kunde-nach': async (el) => {
     const r = S.rechnungen.find((x) => x.id === el.dataset.id), f = $('#nachForm');
@@ -5191,10 +5495,10 @@ const ACT = {
     if (f.elements.k_land) r.kunde.land = f.elements.k_land.value.trim().toUpperCase();
     const plz = f.elements.k_plz.value.trim(), ort = f.elements.k_ort.value.trim();
     if (plz && ort) { const k = kundenAdresse(r.kunde.adresse); r.kunde.adresse = (k.strasse ? k.strasse.split(', ').join('\n') + '\n' : '') + plz + ' ' + ort + (k.landZeile ? '\n' + k.landZeile : ''); }
-    merkeKunde(r.kunde); await save();
+    archivNeuFuer(r); merkeKunde(r.kunde); await save();
     if (el.dataset.pdf) { const m2 = zugferdFehlt(r); if (m2.length) return vERechnungFehlt(r, m2, true); vDetailRe(r.id); return zugferdLos(r); }
     const m = eRechnungFehlt(r); if (m.length) return vERechnungFehlt(r, m);
-    download(`${dateiName(r.nr)}.xml`, xrechnung(r), 'application/xml'); toast('E-Rechnung gespeichert'); vDetailRe(r.id);
+    download(`${dateiName(r.nr)}.xml`, await archivDatei(r, 'xml', () => xrechnung(r), 'application/xml', `${dateiName(r.nr)}.xml`), 'application/xml'); toast('E-Rechnung gespeichert'); vDetailRe(r.id);
   },
   mahnen: (el) => vMahnen(el.dataset.id),
   'mahn-save': saveMahnung,
@@ -5225,7 +5529,7 @@ const ACT = {
   },
   'save-be': saveBeleg,
   'be-auslesen': async () => { const b = edit; if (!b || !b.dateiId) return; const d = await idbGet('datei:' + b.dateiId); if (!d) return toast('Datei nicht gefunden.'); const f = $('#beForm'); if (f) { f.dataset.datumStart = f.elements.datum.value; } starteAuslesen(d.blob, d.name, b); },
-  'del-be': async (el) => { if (!confirm('Beleg löschen?')) return; const b = S.belege.find((x) => x.id === el.dataset.id); if (b.dateiId) await idbDel('datei:' + b.dateiId); for (const x of S.bank || []) if (x.belegId === b.id) x.belegId = null; S.belege = S.belege.filter((x) => x.id !== b.id); await save(); closeDlg(); render(); },
+  'del-be': async (el) => { if (!confirm('Beleg löschen? Er verschwindet aus allen Listen und Rechnungen, bleibt aber mit Datei im Änderungsprotokoll und lässt sich dort zurückholen.')) return; const b = S.belege.find((x) => x.id === el.dataset.id); for (const x of S.bank || []) if (x.belegId === b.id) x.belegId = null; S.belege = S.belege.filter((x) => x.id !== b.id); await save(); closeDlg(); render(); },
   'bk-beleg': (el) => {
     const x = S.bank.find((y) => y.id === el.dataset.id); if (!x) return;
     const rg = regelFuer(x, 'lieferant'), l = rg ? Object.assign({}, S.lieferanten.find((y) => y.name.toLowerCase() === (rg.lieferant || '').toLowerCase()) || {}, { name: rg.lieferant || rg.wort, kategorie: rg.kategorie }) : S.lieferanten.find((y) => (x.gegenpartei || '').toLowerCase().includes(y.name.toLowerCase()));
@@ -5348,6 +5652,15 @@ const ACT = {
   'ab-inv': (el) => { filter.invTag = el.dataset.k; vInventur(); },
   'ab-anl': (el) => { filter.anlJahr = el.dataset.k; vAnlagen(); },
   'ab-gewinn': (el) => { stJahr = Number(el.dataset.k); tab = 'steuern'; closeDlg(); render(); window.scrollTo(0, 0); },
+  protokoll: () => vProtokoll(),
+  'proto-filter': (el) => { protoFilter = el.dataset.k; vProtokoll(); },
+  'proto-zurueck': (el) => protoZurueck(el.dataset.id),
+  'proto-csv': () => download(`Aenderungsprotokoll-${heute()}.csv`, csvText(protoZeilen(S.protokoll || [])), 'text/csv'),
+  vdoku: () => vVdoku(),
+  'vdoku-save': async () => { leseVdoku(); await save(); closeDlg(); render(); toast('Verfahrensdokumentation gespeichert'); },
+  'vdoku-druck': async () => { leseVdoku(); await save(); closeDlg(); render(); druckZeig(vdokuHtml(), 'Verfahrensdokumentation'); },
+  jahrarchiv: (el) => vJahrArchiv(el.dataset.k),
+  'jahrarchiv-ok': async (el) => { S.archivJahre = Object.assign({}, S.archivJahre, { [el.dataset.k]: heute() }); protoNotiz(`Jahr ${el.dataset.k} abgelegt (Jahrespaket und Sicherung)`); await save(); closeDlg(); render(); toast(`Jahr ${el.dataset.k} als abgelegt vermerkt`); },
   'ab-paket': async (el) => { const y = el.dataset.k; await paket(y, !!S.steuer.berater); abDaten('J' + y).haken.paket = heute(); await save(); render(); vAbschluss('J' + y); },
   'schon-weg': async (el) => { const an = el.dataset.k === 'an', d = (an ? S.angebote : S.rechnungen).find((x) => x.id === el.dataset.id); if (!d) return; d.verschicktAnders = heute(); await save(); render(); an ? vDetailAn(d.id) : vDetailRe(d.id); },
   'lager-ein-be': (el) => vWareneingang('', el.dataset.id),
@@ -5386,7 +5699,7 @@ const ACT = {
   'st-ics': stIcs,
   'kal-ok': kalSpeichern,
   'kal-eins': (el) => { const f = fristen().find((x) => x.key === el.dataset.k); if (!f) return; icsDatei([{ uid: f.key, datum: f.datum, t: f.t, s: f.s }], [num(S.steuer.kalVorher)], `frist-${f.key}.ics`); toast('Termin gespeichert. Datei öffnen, um ihn zu übernehmen.'); },
-  wipe: async () => { if (!confirm('Wirklich alle Daten auf diesem Gerät löschen? Das kann nicht rückgängig gemacht werden.')) return; for (const k of await idbKeys()) await idbDel(k); S = leer(); vorherAm = null; render(); toast('Alle Daten gelöscht'); }
+  wipe: async () => { if (!confirm('Wirklich alle Daten auf diesem Gerät löschen? Das kann nicht rückgängig gemacht werden.')) return; for (const k of await idbKeys()) await idbDel(k); S = leer(); protoStand = protoSchnitt(); vorherAm = null; render(); toast('Alle Daten gelöscht'); }
 };
 document.addEventListener('click', (e) => {
   const el = e.target.closest('[data-act]'); if (!el) return;
@@ -5420,6 +5733,7 @@ document.addEventListener('input', (e) => {
 document.addEventListener('change', async (e) => {
   if (e.target.closest('#estForm') && e.target.name && (e.target.type === 'checkbox' || e.target.tagName === 'SELECT' || e.target.type === 'date')) { estEingabe(e.target); if (e.target.type === 'checkbox' && e.target.name.startsWith('bereiche.')) { await save(); render(); } return; }
   if (e.target.name === 'rc' && e.target.closest('#edForm')) { readEditor(); vEditor(); return; }
+  if (e.target.name === 'papier' && e.target.closest('#vdForm')) { vVdoku(leseVdokuFelder()); return; }
   if (e.target.id === 'artPick') {
     const a = S.artikel.find((x) => x.id === e.target.value); if (!a) return;
     readEditor();
