@@ -3762,11 +3762,206 @@ function vMenu() {
   openDlg(`${head('Was möchtest du anlegen?')}<div class="dlg-body"><div class="menu">
     <button data-act="new-an"><span class="ic">📝</span><span><span class="t">Angebot erstellen</span><span class="s">Kunde, Positionen, Gültigkeit. Später mit einem Tipp zur Rechnung.</span></span></button>
     <button data-act="new-re"><span class="ic">🧾</span><span><span class="t">Rechnung erstellen</span><span class="s">Pflichtangaben werden geprüft, Nummer kommt automatisch. PDF und E-Rechnung.</span></span></button>
+    <button data-act="new-re-text"><span class="ic">📋</span><span><span class="t">Rechnung aus Text</span><span class="s">Text aus E-Mail oder Notiz einfügen, die App füllt Kunde, Leistungen und Preise aus.</span></span></button>
     <button data-act="new-be"><span class="ic">📷</span><span><span class="t">Beleg hochladen</span><span class="s">Foto oder PDF einer Eingangsrechnung, für Ausgaben und Vorsteuer.</span></span></button>
     ${lagerArtikel().length ? '<button data-act="lager-ein" data-id=""><span class="ic">📦</span><span><span class="t">Wareneingang buchen</span><span class="s">Neue Ware ins Lager, Bestand und Lagerwert stimmen dann wieder.</span></span></button>' : ''}
     <button data-act="vorlagen"><span class="ic">🔁</span><span><span class="t">Wiederkehrend</span><span class="s">Miete, Abos oder monatliche Kundenrechnungen automatisch anlegen.</span></span></button>
     <button data-act="new-ext"><span class="ic">📂</span><span><span class="t">Vorhandene Rechnung hinterlegen</span><span class="s">Alte Ausgangsrechnung aus Word oder einem anderen Programm, damit dein Umsatz vollständig ist.</span></span></button>
   </div></div>`);
+}
+
+
+/* ---------- Rechnung aus Text ausfüllen ----------
+   Freier Text (E-Mail, Notiz, Auftrag) → Kunde, Positionen, Daten, Zahlungsziel, Skonto.
+   Läuft komplett im Browser, ohne KI. Liefert nur Vorschläge, alles bleibt im Formular änderbar. */
+let txtStand = null;
+const TXT_EINHEIT = [[/^(std|stunden?|h)\.?$/i, 'Std.'], [/^tage?s?$/i, 'Tag'], [/^(pauschal|psch|pausch|pauschale)\.?$/i, 'pauschal'], [/^(stk|stück|st|x|×|mal)\.?$/i, 'Stk.'], [/^monate?$/i, 'Monat'], [/^km$/i, 'km'], [/^(m²|qm|m2)$/i, 'm²'], [/^(m|meter)$/i, 'm'], [/^(kg)$/i, 'kg'], [/^(l|liter)$/i, 'l']];
+const txtEinheit = (w) => { for (const [re, e] of TXT_EINHEIT) if (re.test(w)) return e; return ''; };
+const txtZahl = (s) => parseFloat(String(s).replace(/\s/g, '').replace(/\.(?=\d{3}(\D|$))/g, '').replace(',', '.'));
+/* Datumsangaben in einer Zeile: 12.11.2026, 12.11.26, 12.11., 2026-11-12, 12. November 2026 */
+const TXT_MONATE = ['januar', 'februar', 'märz', 'april', 'mai', 'juni', 'juli', 'august', 'september', 'oktober', 'november', 'dezember'];
+function txtDaten(z) {
+  const out = [], j0 = heute().slice(0, 4);
+  z.replace(/\b(\d{1,2})\.\s?(\d{1,2})\.\s?(\d{4}|\d{2})?(?!\d)/g, (x, d, m, y) => { if (+m >= 1 && +m <= 12 && +d >= 1 && +d <= 31) out.push(`${y ? (y.length === 2 ? '20' + y : y) : j0}-${m.padStart(2, '0')}-${d.padStart(2, '0')}`); return x; });
+  z.replace(/\b(20\d{2})-(\d{2})-(\d{2})\b/g, (x, y, m, d) => { out.push(`${y}-${m}-${d}`); return x; });
+  z.replace(/\b(\d{1,2})\.?\s+(januar|februar|märz|april|mai|juni|juli|august|september|oktober|november|dezember)\s*(\d{4})?/gi, (x, d, mo, y) => { out.push(`${y || j0}-${String(TXT_MONATE.indexOf(mo.toLowerCase()) + 1).padStart(2, '0')}-${d.padStart(2, '0')}`); return x; });
+  return out.filter((d) => !isNaN(Date.parse(d)));
+}
+/* Geldbeträge in einer Zeile (Daten, Prozente, Telefonnummern vorher entfernt) */
+function txtBetraege(z) {
+  const s = z.replace(/\b\d{1,2}\.\s?\d{1,2}\.(\s?\d{2,4})?/g, ' ').replace(/\d+(?:[.,]\d+)?\s*%/g, ' ');
+  const out = [];
+  const re = /(€|eur(?:o)?\b)?\s*(\d{1,3}(?:\.\d{3})+|\d+)(?:[,.](\d{2})(?!\d))?(\s*(?:€|eur(?:o)?\b|,-))?/gi;
+  let m;
+  while ((m = re.exec(s))) {
+    if (!m[2]) { re.lastIndex++; continue; }
+    const geld = !!(m[1] || m[4] || m[3]);
+    if (!geld) continue;
+    out.push({ wert: txtZahl(m[2] + (m[3] ? ',' + m[3] : '')), pos: m.index, ende: m.index + m[0].length, roh: m[0] });
+  }
+  return out;
+}
+const TXT_STRASSE = /(straße|strasse|str\.|weg|gasse|platz|allee|ring|damm|ufer|chaussee|steig|pfad|markt|hof|feld|berg|garten|park|stieg|zeile|kamp|wall)\s*\d+\s*[a-z]?\b|^[A-ZÄÖÜ][\wäöüß.\- ]{2,40}\s\d{1,4}\s?[a-z]?$/i;
+const TXT_PLZ = /^(?:(D|DE|A|AT|CH)[- ]?)?(\d{4,5})\s+([A-ZÄÖÜ][\wäöüß.\- ()]{0,40}[\wäöüß)])\.?$/;
+const TXT_PRAEFIX = /^(?:.{0,30}?\b(?:rechnung|angebot)\s+(?:an|für)\s+|(?:rechnung|angebot|kunde|kundin|empfänger|rechnungsempfänger|an|für|auftraggeber|firma|adresse|anschrift)\b\s*(?:an|für)?\s*:?\s*)/i;
+function textAuslesen(text, typ) {
+  const r = { kunde: {}, positionen: [], felder: [], hinweise: [], brutto: false };
+  const zeilen = String(text || '').replace(/\r/g, '').split('\n').map((z) => z.replace(/\s+/g, ' ').trim()).filter(Boolean);
+  if (!zeilen.length) return r;
+  const alles = zeilen.join('\n'), klein = alles.toLowerCase();
+  // E-Mail, USt-IdNr.
+  const mail = alles.match(/[\w.+-]+@[\w-]+(\.[\w-]+)+/); if (mail) r.kunde.email = mail[0];
+  const ust = alles.match(/\b(DE|AT|BE|BG|CY|CZ|DK|EE|EL|ES|FI|FR|HR|HU|IE|IT|LT|LU|LV|MT|NL|PL|PT|RO|SE|SI|SK|XI)\s?([0-9A-Z]{8,12})\b/);
+  if (ust && /ust|vat|mwst|steuer|id/i.test(alles.slice(Math.max(0, ust.index - 25), ust.index))) r.kunde.ustid = ust[1] + ust[2];
+  r.brutto = /\bbrutto\b|inkl\.?\s*(mwst|ust|mehrwertsteuer|umsatzsteuer)|inklusive\s*(mwst|ust|mehrwertsteuer|umsatzsteuer)/i.test(alles) && !/\bnetto\b|zzgl|zuzüglich/i.test(alles);
+  const ohneSteuer = /ohne\s*(mwst|ust|mehrwertsteuer|umsatzsteuer)|steuerfrei|0\s?%\s*(mwst|ust)/i.test(alles);
+  const satzAlle = /\b7\s?%/.test(alles) && !/\b19\s?%/.test(alles) ? 7 : 19;
+  // Teile: Zeilen, an Kommas getrennt (Kommas in Beträgen haben kein Leerzeichen danach)
+  const teile = []; zeilen.forEach((z, i) => z.split(/[,;]\s+|\s+\|\s+/).forEach((t) => teile.push({ t: t.trim(), z: i })));
+  const benutzt = new Set();
+  // Anschrift: PLZ-Ort-Teil suchen, davor Straße, davor Name
+  const iPlz = teile.findIndex((t) => TXT_PLZ.test(t.t) && txtBetraege(t.t).length === 0);
+  if (iPlz >= 0) {
+    const plz = teile[iPlz].t.match(TXT_PLZ);
+    let iStr = iPlz - 1;
+    while (iStr >= 0 && !TXT_STRASSE.test(teile[iStr].t) && iPlz - iStr < 3) iStr--;
+    if (iStr < 0 || !TXT_STRASSE.test(teile[iStr].t)) iStr = -1;
+    const vorher = []; let k = (iStr >= 0 ? iStr : iPlz) - 1;
+    while (k >= 0 && vorher.length < 2) {
+      const t = teile[k].t.replace(TXT_PRAEFIX, '').trim();
+      if (!t || txtBetraege(t).length || /@|\b(tel|telefon|fax|mobil|datum|rechnung|angebot|hallo|hi|liebe|sehr geehrte|bitte)\b/i.test(t) || t.length > 70) { if (vorher.length || !t) break; k--; continue; }
+      vorher.unshift(t); benutzt.add(k); k--;
+      if (/^(rechnung|angebot|kunde|empfänger|an|für)\b/i.test(teile[k + 1].t)) break;
+    }
+    if (vorher.length) { r.kunde.name = vorher[0]; if (vorher[1]) r.kunde.zusatz = vorher[1]; }
+    const adr = []; if (r.kunde.zusatz) adr.push(r.kunde.zusatz);
+    if (iStr >= 0) { adr.push(teile[iStr].t.replace(TXT_PRAEFIX, '')); benutzt.add(iStr); }
+    adr.push(`${plz[2]} ${plz[3]}`); benutzt.add(iPlz);
+    if (plz[1] && !/^D/.test(plz[1])) adr.push(/^(A|AT)$/.test(plz[1]) ? 'Österreich' : 'Schweiz');
+    r.kunde.adresse = adr.join('\n'); delete r.kunde.zusatz;
+  } else {
+    const kz = zeilen.find((z) => /^(kunde|kundin|empfänger|rechnungsempfänger|rechnung an|angebot an|an|für|auftraggeber)\s*:?\s+\S/i.test(z));
+    if (kz) r.kunde.name = kz.replace(TXT_PRAEFIX, '').split(/[,;]\s+/)[0].trim();
+  }
+  // Bekannter Kunde aus den Kontakten
+  const bek = S.kunden.filter((k) => k.name && k.name.length >= 3 && klein.includes(k.name.toLowerCase())).sort((a, b) => b.name.length - a.name.length)[0];
+  if (bek && (!r.kunde.name || r.kunde.name.toLowerCase().includes(bek.name.toLowerCase()) || bek.name.toLowerCase().includes(r.kunde.name.toLowerCase()))) {
+    r.kunde.name = bek.name; r.kontakt = bek.name;
+    if (!r.kunde.adresse && bek.adresse) r.kunde.adresse = bek.adresse;
+    if (!r.kunde.email && bek.email) r.kunde.email = bek.email;
+    if (!r.kunde.ustid && bek.ustid) r.kunde.ustid = bek.ustid;
+  }
+  // Daten und Zahlungsziel
+  zeilen.forEach((z) => {
+    const d = txtDaten(z); if (!d.length) return;
+    if (/leistung|geliefert|lieferung|ausgeführt|erbracht|einsatz|termin am|am\s/i.test(z) && !r.leistungsdatum) r.leistungsdatum = d[d.length - 1];
+    else if (/fällig|zahlbar bis|zahlung bis|bezahlen bis|spätestens/i.test(z)) r.faellig = d[0];
+    else if (/rechnungsdatum|^datum|angebotsdatum/i.test(z)) r.datum = d[0];
+    else if (!r.leistungsdatum && !txtBetraege(z).length) r.leistungsdatum = d[0];
+  });
+  const mz = alles.match(/leistungszeitraum\s*:?\s*(januar|februar|märz|april|mai|juni|juli|august|september|oktober|november|dezember)\s*(\d{4})?/i);
+  if (mz && !r.leistungsdatum) { const y = mz[2] || heute().slice(0, 4), m = TXT_MONATE.indexOf(mz[1].toLowerCase()); r.leistungsdatum = iso(new Date(Number(y), m + 1, 0, 12)); r.hinweise.push(`Leistungszeitraum ${mz[1]} ${y}: als Leistungsdatum steht der Monatsletzte.`); }
+  const ohneSk = zeilen.map((z) => z.replace(/\d+(?:[.,]\d+)?\s?%\s*skonto[^,;]*?\d{1,3}\s*tage[n]?/i, ' ').replace(/skonto[^,;]*?\d{1,3}\s*tage[n]?/i, ' ')).join('\n');
+  const zt = ohneSk.match(/(\d{1,3})\s*tage\s*(netto|zahlungsziel|ziel)/i) || ohneSk.match(/(?:zahlbar|zahlung|zahlungsziel|bezahlen|überweisen)[^\n]{0,30}?(\d{1,3})\s*tage/i);
+  if (zt) r.zielTage = Number(zt[1]);
+  if (/sofort\s*(zahlbar|fällig)|zahlbar\s*sofort|ohne abzug sofort/i.test(alles)) r.zielTage = 0;
+  const sk = alles.match(/(\d+(?:[.,]\d+)?)\s?%\s*skonto[^\n]{0,40}?(\d{1,3})\s*tage/i) || alles.match(/skonto[^\n]{0,20}?(\d+(?:[.,]\d+)?)\s?%[^\n]{0,40}?(\d{1,3})\s*tage/i);
+  if (sk) { r.skontoProz = txtZahl(sk[1]); r.skontoTage = Number(sk[2]); }
+  // Positionen: Zeilen mit Geldbetrag, die keine Summe, Steuer- oder Bankzeile sind
+  zeilen.forEach((z, i) => {
+    if ([...benutzt].some((b) => teile[b].z === i) && !txtBetraege(z).length) return;
+    if (/^(gesamt|summe|zwischensumme|total|netto|brutto|endbetrag|rechnungsbetrag|mwst|ust|umsatzsteuer|mehrwertsteuer|skonto|iban|bic|bank|konto|tel|telefon|fax)\b/i.test(z)) return;
+    if (/\b(gesamtbetrag|gesamtsumme|summe|insgesamt zu zahlen|zu zahlen)\b/i.test(z) && !/\b(je|à|pro|stück|stk|std|stunden?)\b/i.test(z)) return;
+    if (/skonto|zahlbar|zahlungsziel|überweisen/i.test(z) && !/\b(je|à)\b/i.test(z)) return;
+    const b = txtBetraege(z); if (!b.length) return;
+    let rest = z, menge = 1, einheit = '', preis = null, ges = null;
+    const mq = z.match(/(?:^|\s|-)(\d+(?:[.,]\d+)?)\s*(x|×|stk\.?|stück|std\.?|stunden?|h|tage?|pauschal|psch\.?|monate?|km|m²|qm|m2|m|meter|kg|l|liter|mal)(?=\s|$|[.,:;)])/i);
+    const vorne = !mq && z.match(/^(\d+(?:[.,]\d+)?)\s+(?=[A-Za-zÄÖÜäöü])/);
+    if (mq && !b.some((x) => mq.index >= x.pos - 1 && mq.index < x.ende - 1)) { menge = txtZahl(mq[1]); einheit = txtEinheit(mq[2].replace(/\.$/, '')); rest = rest.replace(mq[0], ' '); }
+    else if (vorne && txtZahl(vorne[1]) < 10000 && !b.some((x) => x.pos === 0)) { menge = txtZahl(vorne[1]); rest = rest.replace(vorne[0], ' '); }
+    if (!einheit && /\bpauschal|\bpauschale\b|\bpsch\b/i.test(z)) einheit = 'pauschal';
+    if (!einheit && /\b(stunden?|std)\b/i.test(z)) einheit = 'Std.';
+    const ep = b.find((x) => /(je|à|a|pro|einzelpreis|ep|stundensatz|zu)\s*:?\s*$/i.test(z.slice(Math.max(0, x.pos - 16), x.pos)) || /^\s*(\/|pro|je)\s*(std|stunde|stück|stk|tag|h|monat|km)/i.test(z.slice(x.ende, x.ende + 12)));
+    const gs = b.find((x) => x !== ep && /(=|gesamt|zusammen|insgesamt|summe)\s*:?\s*$/i.test(z.slice(Math.max(0, x.pos - 14), x.pos)));
+    if (ep) preis = ep.wert;
+    if (gs) ges = gs.wert;
+    if (preis == null && ges == null) {
+      if (b.length >= 2 && menge > 1) {
+        const [x, y] = b.slice(-2).map((q) => q.wert);
+        if (Math.abs(x * menge - y) < 0.02) { preis = x; ges = y; } else if (Math.abs(y * menge - x) < 0.02) { preis = y; ges = x; } else { preis = x; r.hinweise.push(`„${z}“: zwei Beträge, als Einzelpreis steht ${eur(x)}.`); }
+      } else preis = b[b.length - 1].wert;
+    }
+    if (preis == null && ges != null) preis = r2(ges / (menge || 1));
+    if (ges != null && Math.abs(r2(preis * menge) - ges) > 0.02) r.hinweise.push(`„${z}“: ${String(menge).replace('.', ',')} × ${eur(preis)} ergibt nicht ${eur(ges)}. Bitte prüfen.`);
+    for (const x of b) rest = rest.replace(x.roh, ' ');
+    const ustM = z.match(/\b(19|7|0)\s?%/); const satz = ohneSteuer ? 0 : ustM && !/rabatt|skonto|nachlass/i.test(z.slice(ustM.index, ustM.index + 15)) ? Number(ustM[1]) : satzAlle;
+    const rab = z.match(/(\d+(?:[.,]\d+)?)\s?%\s*(rabatt|nachlass)|(rabatt|nachlass)\s*:?\s*(\d+(?:[.,]\d+)?)\s?%/i);
+    rest = rest.replace(/(^|\s)(à|x|×|@|a)(?=\s|$)/gi, ' ').replace(/\b(je|pro|einzelpreis|ep|stundensatz|gesamt|zusammen|insgesamt|netto|brutto|zzgl\.?|inkl\.?|mwst\.?|ust\.?)\b/gi, ' ').replace(/\d+(?:[.,]\d+)?\s?%\s*(rabatt|nachlass)?|(rabatt|nachlass)\s*:?/gi, ' ').replace(/\b(19|7|0)\s?%/g, ' ')
+      .replace(/^\s*(pos(ition)?\.?\s*\d+\s*[.:)]?|\d+[.)]|[-–•*·])\s+/i, '').replace(/(\s*,)+\s*(?=,|$)/g, '').replace(/[\s=:@|/,–-]+$/g, '').replace(/^[\s=:,|–-]+/g, '').replace(/\s+/g, ' ').trim();
+    if (einheit === 'pauschal') rest = rest.replace(/\s*\bpauschal(e)?\b\s*/i, ' ').trim();
+    if (!rest) rest = 'Leistung';
+    let pr = preis;
+    if (r.brutto && satz) pr = r2(preis / (1 + satz / 100));
+    const p = { text: rest, menge, einheit: einheit || 'Stk.', preis: pr, ust: satz, rabatt: rab ? txtZahl(rab[1] || rab[4]) : 0 };
+    const art = S.artikel.find((a) => a.name && (a.name.toLowerCase() === rest.toLowerCase() || (rest.length >= 4 && a.name.toLowerCase().includes(rest.toLowerCase())) || (a.name.length >= 4 && rest.toLowerCase().includes(a.name.toLowerCase()))));
+    if (art) { p.artikelId = art.id; if (!einheit && art.einheit) p.einheit = art.einheit; if (!ustM && !ohneSteuer) p.ust = num(art.ust); }
+    r.positionen.push(p);
+  });
+  // Rabatt in eigener Zeile: „10 % Rabatt auf Fotobuch“ oder auf alles
+  zeilen.forEach((z) => {
+    if (txtBetraege(z).length) return;
+    const m = z.match(/(\d+(?:[.,]\d+)?)\s?%\s*(?:rabatt|nachlass)(?:\s+auf\s+(.+))?/i); if (!m || !r.positionen.length) return;
+    const w = txtZahl(m[1]), ziel = (m[2] || '').replace(/^(die|den|das|alle?s?)\s+/i, '').trim().toLowerCase();
+    const treffer = ziel && !/^(alles|gesamt|alle positionen|summe)$/.test(ziel) ? r.positionen.filter((p) => p.text.toLowerCase().includes(ziel) || ziel.includes(p.text.toLowerCase())) : r.positionen;
+    if (treffer.length) treffer.forEach((p) => { p.rabatt = w; }); else r.hinweise.push(`„${z}“: keine passende Position gefunden, Rabatt bitte selbst eintragen.`);
+  });
+  // Hinweistext
+  const hz = zeilen.find((z) => /^(hinweis|bemerkung|text|anmerkung|notiz)\s*:/i.test(z)); if (hz) r.hinweis = hz.replace(/^[^:]+:\s*/, '');
+  return r;
+}
+/* Ergebnis ins offene Formular übernehmen */
+function txtFuellen() {
+  const ta = $('#txtIn'); if (!ta || !edit) return;
+  const text = ta.value.trim();
+  if (!text) { toast('Erst Text einfügen'); return; }
+  readEditor();
+  const r = textAuslesen(text, edit.typ), auto = [], ok = [], d = edit;
+  const setK = (k, v, feld, t) => { if (v) { d.kunde[k] = v; auto.push(feld); if (t) ok.push(t); } };
+  setK('name', r.kunde.name, 'k_name', 'Kunde'); setK('adresse', r.kunde.adresse, 'k_adresse', 'Anschrift'); setK('email', r.kunde.email, 'k_email', 'E-Mail'); setK('ustid', r.kunde.ustid, 'k_ustid', 'USt-IdNr.');
+  if (r.datum) { d.datum = r.datum; auto.push('datum'); ok.push('Datum'); }
+  if (r.leistungsdatum && d.typ !== 'angebot') { d.leistungsdatum = r.leistungsdatum; auto.push('leistungsdatum'); ok.push('Leistungsdatum'); }
+  if (d.typ !== 'angebot') {
+    if (r.faellig) { d.faellig = r.faellig; auto.push('faellig'); ok.push('Zahlbar bis'); }
+    else if (r.zielTage != null) { d.faellig = plusTage(d.datum || heute(), r.zielTage); auto.push('faellig'); ok.push(r.zielTage ? `Zahlungsziel ${r.zielTage} Tage` : 'zahlbar sofort'); }
+    if (r.skontoProz) { d.skontoProz = r.skontoProz; d.skontoTage = r.skontoTage; auto.push('skontoProz', 'skontoTage'); ok.push('Skonto'); }
+  }
+  if (r.hinweis) { d.hinweis = r.hinweis; auto.push('hinweis'); }
+  if (r.positionen.length) {
+    const leer = d.positionen.every((p) => !String(p.text).trim() && !num(p.preis));
+    if (d.ku || d.rc) r.positionen.forEach((p) => { p.ust = 0; });
+    d.positionen = (leer ? [] : d.positionen).concat(r.positionen);
+    ok.push(`${r.positionen.length} Position${r.positionen.length > 1 ? 'en' : ''}`);
+  }
+  const fehlt = [];
+  if (!r.kunde.name) fehlt.push('Kunde');
+  if (!r.kunde.adresse) fehlt.push('Anschrift');
+  if (!r.positionen.length) fehlt.push('Positionen mit Preis');
+  txtStand = { id: d.id, offen: true, text, auto, posAb: r.positionen.length ? d.positionen.length - r.positionen.length : -1,
+    erg: `<div class="card" style="margin:8px 0 0;background:var(--soft);border:0"><p class="small" style="margin:0"><b>${ok.length ? 'Ausgefüllt: ' + ok.join(', ') + '.' : 'Nichts erkannt.'}</b> Die Felder mit blauem Rand kommen aus deinem Text, bitte prüfen.</p>
+      ${fehlt.length ? `<p class="small" style="margin:4px 0 0">Nicht gefunden: ${fehlt.join(', ')}. Bitte selbst eintragen.</p>` : ''}
+      ${r.brutto ? '<p class="small" style="margin:4px 0 0">Die Preise standen mit Umsatzsteuer (brutto) im Text. Im Formular stehen sie ohne (netto). Durchs Runden kann die Summe um ein paar Cent abweichen, bitte vergleichen.</p>' : ''}
+      ${r.kontakt ? `<p class="small" style="margin:4px 0 0">„${esc(r.kontakt)}“ ist schon in deinen Kontakten, fehlende Angaben kommen von dort.</p>` : ''}
+      ${r.hinweise.map((h) => `<p class="small" style="margin:4px 0 0;color:var(--warn)">${esc(h)}</p>`).join('')}</div>` };
+  vEditor();
+}
+/* Nach dem Zeichnen: Textfeld füllen, erkannte Felder markieren */
+function txtNachZeichnen() {
+  if (!txtStand || !edit || txtStand.id !== edit.id || !$('#txtIn')) return;
+  $('#txtIn').value = txtStand.text || '';
+  if (txtStand.erg) $('#txtErg').innerHTML = txtStand.erg;
+  const f = $('#edForm');
+  for (const n of txtStand.auto || []) if (f.elements[n]) f.elements[n].classList.add('auto');
+  if (txtStand.posAb >= 0) [...f.querySelectorAll('.pos')].slice(txtStand.posAb).forEach((p) => p.querySelectorAll('input:not([type=hidden]),select').forEach((x) => x.classList.add('auto')));
 }
 
 /* Angebot / Rechnung bearbeiten */
@@ -3865,6 +4060,11 @@ function vEditor() {
     <datalist id="kunden">${S.kunden.map((k) => `<option value="${esc(k.name)}">`).join('')}</datalist>
     <datalist id="artikel">${S.artikel.map((a) => `<option value="${esc(a.name)}">${esc(eur(num(a.preis)) + ' je ' + a.einheit)}</option>`).join('')}</datalist>
     <datalist id="einheiten"><option value="Stk."><option value="Std."><option value="Tag"><option value="pauschal"><option value="Monat"><option value="km"></datalist>
+    ${d.neu && !gut ? `<details class="card" id="txtBox" style="margin-top:0;margin-bottom:12px"${txtStand && txtStand.id === d.id && txtStand.offen ? ' open' : ''}><summary><b>Schneller: Text einfügen, die App füllt aus</b></summary>
+      <p class="small muted" style="margin:6px 0">Kopier hier rein, was ${isRe ? 'auf die Rechnung' : 'ins Angebot'} soll, zum Beispiel aus einer E-Mail, einer WhatsApp oder deinen Notizen: Kunde mit Anschrift, Leistungen mit Menge und Preis, Datum, Zahlungsziel. Die App füllt die Felder unten aus. Du prüfst danach alles und änderst, was nicht stimmt.</p>
+      <textarea id="txtIn" rows="6" placeholder="Beispiel:&#10;Bäckerei Sonnenschein GmbH&#10;Hauptstraße 5, 75175 Pforzheim&#10;3 Std. Beratung à 85 €&#10;Webseite pauschal 1.200 €&#10;2x Flyer A5 je 45,50 €&#10;Leistung am 12.11.2026, zahlbar in 14 Tagen"></textarea>
+      <div class="btns"><button type="button" class="primary" data-act="txt-fuell">Felder ausfüllen</button></div>
+      <div id="txtErg"></div></details>` : ''}
     ${gut ? `<div class="card" style="margin-top:0;background:var(--soft);border:0"><b>Korrektur zur Rechnung ${esc(orig ? orig.nr : '')}</b><p class="small" style="margin:4px 0 0">Die Positionen stehen mit Minus-Menge da. Lösch alles, was richtig war, und lass nur stehen, was du gutschreiben willst, z. B. eine Position ganz oder mit kleinerer Menge. Der offene Betrag der Rechnung sinkt um diese Summe.</p></div>` : ''}
     ${isRe && !gut ? `<div class="filters" role="group" style="margin-bottom:6px">${[['', 'Rechnung'], ['abschlag', 'Abschlagsrechnung'], ['schluss', 'Schlussrechnung']].map(([k, t]) => `<button type="button" class="chip" data-act="re-art" data-k="${k}" aria-pressed="${(d.art || (istSchluss(d) || d.artSchluss ? 'schluss' : '')) === k}">${t}</button>`).join('')}</div>
       ${d.art === 'abschlag' ? '<p class="small muted" style="margin:0 0 8px">Eine Abzahlung vor oder während der Arbeit. Später ziehst du sie in der Schlussrechnung ab. Umsatzsteuer fällt bei Abschlägen erst an, wenn das Geld da ist.</p>' : ''}` : ''}
@@ -3907,6 +4107,7 @@ function vEditor() {
     <button data-act="save-doc">${isRe ? 'Als Entwurf speichern' : 'Speichern'}</button>
     ${isRe ? `<button class="primary" data-act="stellen" id="btnStellen"${allOk ? '' : ' disabled'}>${gut ? 'Korrektur stellen' : docTitel(d) + ' stellen'}</button>` : ''}
   </div>`);
+  txtNachZeichnen();
 }
 function befrKey(d) { return hat0(d) ? 'j' + (d.befreiung || '') : 'n'; }
 function befrHtml(d) {
@@ -6014,6 +6215,8 @@ const ACT = {
   close: closeDlg,
   'new-an': () => { edit = Object.assign(neuesDoc('angebot'), { neu: true }); vEditor(); },
   'new-re': () => { edit = Object.assign(neuesDoc('rechnung'), { neu: true }); vEditor(); },
+  'new-re-text': () => { edit = Object.assign(neuesDoc('rechnung'), { neu: true }); txtStand = { id: edit.id, offen: true, text: '' }; vEditor(); const t = $('#txtIn'); if (t) t.focus(); },
+  'txt-fuell': () => txtFuellen(),
   'new-be': () => vBeleg(null),
   'new-ext': vExtern,
   'open-an': (el) => vDetailAn(el.dataset.id),
