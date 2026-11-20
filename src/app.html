@@ -257,7 +257,7 @@ const REGISTER_RF = ['ek', 'ohg', 'ug', 'gmbh'];
 function leer() {
   return {
     v: 2,
-    firma: { name: '', inhaber: '', strasse: '', plz: '', ort: '', steuernr: '', bundesland: '', ustid: '', email: '', tel: '', iban: '', bic: '', bank: '', rechtsform: '', registergericht: '', registernr: '', logo: '', kleinunternehmer: false, gruendung: '', gewinnart: '', turnus: 'monat', dauerfrist: false, zahlungsziel: 14, angebotTage: 30, basiszins: 1.27, skontoProz: '', skontoTage: '', nummern: {} },
+    firma: { name: '', inhaber: '', strasse: '', plz: '', ort: '', steuernr: '', bundesland: '', ustid: '', email: '', tel: '', iban: '', bic: '', bank: '', kontoinhaber: '', rechtsform: '', registergericht: '', registernr: '', logo: '', kleinunternehmer: false, gruendung: '', gewinnart: '', turnus: 'monat', dauerfrist: false, zahlungsziel: 14, angebotTage: 30, basiszins: 1.27, skontoProz: '', skontoTage: '', nummern: {}, layout: {} },
     angebote: [], rechnungen: [], belege: [], kunden: [], lieferanten: [], bank: [], vorlagen: [], artikel: [], lager: [], anlagen: [], regeln: [], abschluesse: {}, zaehler: {}, letzteSicherung: null,
     steuer: { versteuerung: 'soll', hebesatz: 400, berater: false, svz: 0, vzEst: 0, vzGew: 0, erledigt: {}, ruecklageIst: '', kalVorher: 3, kalRe: true, skr: '03', beraterNr: '', mandantNr: '' },
     est: {}, modus: ''
@@ -2132,6 +2132,7 @@ function vStart() {
   const z = ustZeitraum();
   const todos = [];
 
+  if (!S.beispiel && !lay().gewaehlt && (S.firma.name || S.rechnungen.length)) todos.push({ c: 'warn', t: 'Aussehen deiner Rechnungen wählen', s: 'Fünf Vorlagen zur Auswahl. Oder eine alte Rechnung hineinziehen, dann sehen die neuen genauso aus und die Nummern laufen weiter.', act: 'lw-oeffnen', b: 'Auswählen' });
   if (!S.firma.name || !S.firma.rechtsform) todos.push({ c: 'warn', t: 'Firmendaten und Rechtsform eintragen', s: 'Ohne sie fehlen Pflichtangaben auf Rechnungen.', act: 'tab', k: 'firma', b: 'Jetzt eintragen' });
   for (const r of ueber.filter(mahnenFaellig).slice(0, 5)) todos.push({ c: 'bad', t: `${esc(r.kunde.name || 'Kunde')} zahlt ${eur(offenBetrag(r))} nicht`, s: `Rechnung ${esc(r.nr)}, fällig seit ${dat(r.faellig)}.${mahnStufe(r) ? ` ${MAHN[mahnStufe(r)].t} vom ${dat(letzteMahnung(r).datum)} ist abgelaufen.` : ''} Zahlung prüfen, dann ${MAHN[mahnStufe(r) + 1].t} schicken.`, act: 'mahnen', id: r.id, b: mahnStufe(r) ? 'Mahnen' : 'Erinnern' });
   for (const r of ueber.filter((x) => !mahnenFaellig(x) && mahnStufe(x) && tageBis(letzteMahnung(x).frist) >= 0).slice(0, 3)) todos.push({ c: 'warn', t: `Warten auf Zahlung von ${esc(r.kunde.name || 'Kunde')}`, s: `${MAHN[mahnStufe(r)].t} zu ${esc(r.nr)} läuft bis ${dat(letzteMahnung(r).frist)}. Danach erinnert dich die App an den nächsten Schritt.`, act: 'open-re', id: r.id, b: 'Öffnen' });
@@ -2813,9 +2814,15 @@ function vFirma() {
       ${inp('ustid', 'USt-IdNr. (falls vorhanden)')}
       ${inp('email', 'E-Mail', 'type="email"')} ${inp('tel', 'Telefon', 'type="tel"')}
       ${inp('iban', 'IBAN')} ${inp('bic', 'BIC')} ${inp('bank', 'Bank')}
+      ${inp('kontoinhaber', 'Kontoinhaber (falls anders als Firmenname)', `placeholder="${esc(f.name || 'wie Firmenname')}"`)}
+      ${f.iban && !ibanOk(f.iban) ? '<p class="small full" style="margin:0;color:var(--bad)"><b>Diese IBAN stimmt nicht.</b> Die Prüfziffer passt nicht oder die Länge ist falsch. Bitte mit dem Kontoauszug vergleichen, sonst kommt Geld nicht an und der QR-Code auf der Rechnung fehlt.</p>' : ''}
+      <p class="small muted full" style="margin:0">Der Name muss genau so lauten wie bei deiner Bank. Banken vergleichen bei Überweisungen den Namen mit der IBAN und warnen deine Kunden, wenn er nicht passt.</p>
       ${REGISTER_RF.includes(f.rechtsform) ? `${inp('registergericht', 'Registergericht', 'placeholder="z. B. Amtsgericht München"')} ${inp('registernr', 'Registernummer', 'placeholder="z. B. HRB 123456"')}` : ''}
       <div class="full"><label>Logo für Angebote und Rechnungen (optional)<input type="file" id="logoIn" accept="image/png,image/jpeg,image/webp,image/svg+xml"></label>
         ${f.logo ? `<img class="logo-prev" src="${esc(f.logo)}" alt="Dein Logo"><button type="button" class="danger" data-act="logo-del">Logo entfernen</button>` : ''}</div>
+      <div class="full" style="margin-top:6px"><b>Aussehen der Rechnungen</b>
+        <p class="small muted" style="margin:2px 0 6px">${(() => { const L = lay(); return `Vorlage „${LAYOUTS[L.vorlage].t}“, Farbe <span style="display:inline-block;width:12px;height:12px;border-radius:3px;vertical-align:-1px;background:${L.farbe}"></span>, Schrift ${L.schrift === 'serif' ? 'mit' : 'ohne'} Serifen, Logo ${L.logo === 'mitte' ? 'in der Mitte' : L.logo}, Überweisungs-QR-Code ${L.qr ? 'an' : 'aus'}.`; })()}</p>
+        <button type="button" data-act="lw-oeffnen">Aussehen ändern oder alte Rechnung übernehmen</button></div>
     </div>
     <p class="small muted" style="margin-top:6px">Auf der Rechnung muss die Steuernummer oder die USt-IdNr. stehen.${REGISTER_RF.includes(f.rechtsform) ? ' Registergericht und Registernummer gehören bei deiner Rechtsform auf jeden Geschäftsbrief.' : ''}</p>
     <p class="small">${hb('steuernummer', 'Noch keine Steuernummer?')} ${hb('ustid', 'USt-IdNr. beantragen')}</p>
@@ -4114,7 +4121,7 @@ function fussHtml() {
   return `<div class="fuss">${fussSpalten().map((col) => `<div>${col.map(esc).join('<br>')}</div>`).join('')}</div>`;
 }
 function druckMahnung(r, m) {
-  const f = S.firma, s = summen(r), M = MAHN[m.stufe];
+  const f = S.firma, s = summen(r), M = MAHN[m.stufe], L = lay();
   const absender = [f.name, f.strasse, [f.plz, f.ort].join(' ')].filter((x) => x && x.trim()).join(' · ');
   const frueher = (r.mahnungen || []).filter((x) => x !== m && x.stufe < m.stufe);
   /* Gebühren früherer Mahnungen bleiben offen und werden mitgeführt */
@@ -4126,7 +4133,7 @@ function druckMahnung(r, m) {
     2: `leider konnten wir für unsere Rechnung ${esc(r.nr)} vom ${dat(r.datum)}, fällig am ${dat(r.faellig)}, trotz ${frueher.length ? 'unserer Zahlungserinnerung vom ' + dat(frueher[frueher.length - 1].datum) : 'Fälligkeit'} noch keinen Zahlungseingang feststellen. Sie befinden sich seit dem ${dat(plusTage(r.faellig, 1))} in Zahlungsverzug.</p><p>Bitte überweisen Sie den unten genannten Gesamtbetrag bis spätestens <b>${dat(m.frist)}</b>.`,
     3: `trotz ${frueher.length > 1 ? 'Zahlungserinnerung und Mahnung' : 'unserer Mahnung'} ist unsere Rechnung ${esc(r.nr)} vom ${dat(r.datum)}, fällig am ${dat(r.faellig)}, weiterhin unbezahlt.</p><p>Wir fordern Sie letztmalig auf, den unten genannten Gesamtbetrag bis zum <b>${dat(m.frist)}</b> zu überweisen. Geht die Zahlung bis dahin nicht ein, werden wir die Forderung ohne weitere Ankündigung gerichtlich geltend machen (gerichtliches Mahnverfahren). Die dadurch entstehenden Kosten gehen zu Ihren Lasten.`
   }[m.stufe];
-  $('#druck').innerHTML = `
+  $('#druck').innerHTML = layHuelle(L, `${layKopf(f, L)}
     <div class="kopf"><div><div class="absender">${esc(absender)}</div><div style="white-space:pre-line"><b>${esc(r.kunde.name)}</b>\n${esc(r.kunde.adresse)}</div></div>
     <table class="meta"><tr><td>Datum</td><td>${dat(m.datum)}</td></tr><tr><td>Rechnungsnr.</td><td><b>${esc(r.nr)}</b></td></tr><tr><td>Rechnungsdatum</td><td>${dat(r.datum)}</td></tr><tr><td>Fällig seit</td><td>${dat(r.faellig)}</td></tr></table></div>
     <h1>${M.t}</h1>
@@ -4139,8 +4146,9 @@ function druckMahnung(r, m) {
     ${num(m.pauschale) ? `<div><span>Verzugspauschale § 288 Abs. 5 BGB</span><span>${eur(m.pauschale)}</span></div>` : ''}
     <div class="g"><span>Offener Gesamtbetrag</span><span>${eur(gesamt)}</span></div></div>
     <p>${f.iban ? `Bitte überweisen Sie auf ${f.bank ? esc(f.bank) + ', ' : ''}IBAN ${esc(f.iban)}${f.bic ? ', BIC ' + esc(f.bic) : ''}, Verwendungszweck ${esc(r.nr)}.` : `Bitte geben Sie bei der Zahlung die Rechnungsnummer ${esc(r.nr)} an.`}</p>
+    ${qrZahlungHtml(r.nr, gesamt, L)}
     <p>Mit freundlichen Grüßen<br>${esc(f.inhaber || f.name)}</p>
-    ${fussHtml()}`;
+    ${fussHtml()}`);
   const altT = document.title; document.title = (r.nr + '_' + M.t).replace(/[^\w-]+/g, '_');
   window.print();
   setTimeout(() => { document.title = altT; }, 500);
@@ -4665,6 +4673,500 @@ function vMail(k, id) {
 async function mailVerschickt() { mailDoc.d.versendetAm = heute(); if (!mailDoc.d.kunde.email && $('#mailForm')) mailDoc.d.kunde.email = $('#mailForm').elements.an.value.trim(); await save(); render(); }
 const mailFelder = () => { const f = $('#mailForm').elements; return { an: f.an.value.trim(), betreff: f.betreff.value, text: f.text.value }; };
 
+/* ---------- QR-Code (eigener kleiner Baustein, keine Fremd-Bibliothek) ----------
+   Byte-Modus, Fehlerkorrektur M (so verlangt es der GiroCode), Version 1 bis 40 automatisch.
+   Aufbau nach ISO/IEC 18004, Ablauf wie im bekannten Generator von Project Nayuki. */
+const QR_ECC_M = [0, 10, 16, 26, 18, 24, 16, 18, 22, 22, 26, 30, 22, 22, 24, 24, 28, 28, 26, 26, 26, 26, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28];
+const QR_BLK_M = [0, 1, 1, 1, 2, 2, 4, 4, 4, 5, 5, 5, 8, 9, 9, 10, 10, 11, 13, 14, 16, 17, 17, 18, 20, 21, 23, 25, 26, 28, 29, 31, 33, 35, 37, 38, 40, 43, 45, 47, 49];
+function qrRohModule(v) {
+  let r = (16 * v + 128) * v + 64;
+  if (v >= 2) { const n = Math.floor(v / 7) + 2; r -= (25 * n - 10) * n - 55; if (v >= 7) r -= 36; }
+  return r;
+}
+const qrDatenWorte = (v) => Math.floor(qrRohModule(v) / 8) - QR_ECC_M[v] * QR_BLK_M[v];
+function qrMal(x, y) { let z = 0; for (let i = 7; i >= 0; i--) { z = (z << 1) ^ ((z >>> 7) * 0x11d); z ^= ((y >>> i) & 1) * x; } return z & 255; }
+function qrRsTeiler(n) {
+  const r = new Array(n).fill(0); r[n - 1] = 1; let w = 1;
+  for (let i = 0; i < n; i++) { for (let j = 0; j < n; j++) { r[j] = qrMal(r[j], w); if (j + 1 < n) r[j] ^= r[j + 1]; } w = qrMal(w, 2); }
+  return r;
+}
+function qrRsRest(daten, teiler) {
+  const r = new Array(teiler.length).fill(0);
+  for (const b of daten) { const f = b ^ r.shift(); r.push(0); teiler.forEach((t, i) => { r[i] ^= qrMal(t, f); }); }
+  return r;
+}
+/* Liefert ein Feld von Zeilen mit true = dunkel */
+function qrMatrix(text, festeMaske) {
+  const bytes = [...new TextEncoder().encode(text)];
+  let v = 1;
+  for (; v <= 40; v++) if (4 + (v < 10 ? 8 : 16) + bytes.length * 8 <= qrDatenWorte(v) * 8) break;
+  if (v > 40) throw new Error('Text zu lang für einen QR-Code');
+  const kap = qrDatenWorte(v) * 8, bits = [];
+  const put = (wert, n) => { for (let i = n - 1; i >= 0; i--) bits.push((wert >>> i) & 1); };
+  put(4, 4); put(bytes.length, v < 10 ? 8 : 16); for (const b of bytes) put(b, 8);
+  put(0, Math.min(4, kap - bits.length)); put(0, (8 - bits.length % 8) % 8);
+  for (let p = 0xec; bits.length < kap; p ^= 0xec ^ 0x11) put(p, 8);
+  const daten = []; for (let i = 0; i < bits.length; i += 8) daten.push(parseInt(bits.slice(i, i + 8).join(''), 2));
+  // In Blöcke teilen, Fehlerkorrektur anhängen, verschränken
+  const nb = QR_BLK_M[v], ecl = QR_ECC_M[v], roh = Math.floor(qrRohModule(v) / 8), kurz = nb - roh % nb, kl = Math.floor(roh / nb), teiler = qrRsTeiler(ecl), bl = [];
+  for (let i = 0, k = 0; i < nb; i++) {
+    const d = daten.slice(k, k + kl - ecl + (i < kurz ? 0 : 1)); k += d.length;
+    const e = qrRsRest(d, teiler); if (i < kurz) d.push(0); bl.push(d.concat(e));
+  }
+  const worte = [];
+  for (let i = 0; i < bl[0].length; i++) bl.forEach((b, j) => { if (i !== kl - ecl || j >= kurz) worte.push(b[i]); });
+  // Feste Muster
+  const n = v * 4 + 17, M = Array.from({ length: n }, () => new Array(n).fill(false)), F = Array.from({ length: n }, () => new Array(n).fill(false));
+  const fix = (x, y, d) => { M[y][x] = d; F[y][x] = true; };
+  for (let i = 0; i < n; i++) { fix(6, i, i % 2 === 0); fix(i, 6, i % 2 === 0); }
+  const finder = (cx, cy) => { for (let dy = -4; dy <= 4; dy++) for (let dx = -4; dx <= 4; dx++) { const x = cx + dx, y = cy + dy, d = Math.max(Math.abs(dx), Math.abs(dy)); if (x >= 0 && x < n && y >= 0 && y < n) fix(x, y, d !== 2 && d !== 4); } };
+  finder(3, 3); finder(n - 4, 3); finder(3, n - 4);
+  if (v > 1) {
+    const na = Math.floor(v / 7) + 2, schritt = Math.floor((v * 8 + na * 3 + 5) / (na * 4 - 4)) * 2, pos = [6];
+    for (let p = n - 7; pos.length < na; p -= schritt) pos.splice(1, 0, p);
+    pos.forEach((a, i) => pos.forEach((b, j) => {
+      if ((i === 0 && j === 0) || (i === 0 && j === na - 1) || (i === na - 1 && j === 0)) return;
+      for (let dy = -2; dy <= 2; dy++) for (let dx = -2; dx <= 2; dx++) fix(a + dx, b + dy, Math.max(Math.abs(dx), Math.abs(dy)) !== 1);
+    }));
+  }
+  const format = (maske) => {
+    const d = (0 << 3) | maske; let r = d; for (let i = 0; i < 10; i++) r = (r << 1) ^ ((r >>> 9) * 0x537);
+    const b = ((d << 10) | r) ^ 0x5412, bit = (i) => ((b >>> i) & 1) === 1;
+    for (let i = 0; i <= 5; i++) fix(8, i, bit(i));
+    fix(8, 7, bit(6)); fix(8, 8, bit(7)); fix(7, 8, bit(8));
+    for (let i = 9; i < 15; i++) fix(14 - i, 8, bit(i));
+    for (let i = 0; i < 8; i++) fix(n - 1 - i, 8, bit(i));
+    for (let i = 8; i < 15; i++) fix(8, n - 15 + i, bit(i));
+    fix(8, n - 8, true);
+  };
+  format(0);
+  if (v >= 7) {
+    let r = v; for (let i = 0; i < 12; i++) r = (r << 1) ^ ((r >>> 11) * 0x1f25);
+    const b = (v << 12) | r;
+    for (let i = 0; i < 18; i++) { const d = ((b >>> i) & 1) === 1, a = n - 11 + i % 3, c = Math.floor(i / 3); fix(a, c, d); fix(c, a, d); }
+  }
+  // Daten im Zickzack eintragen
+  let i = 0;
+  for (let re = n - 1; re >= 1; re -= 2) {
+    if (re === 6) re = 5;
+    for (let s = 0; s < n; s++) for (let j = 0; j < 2; j++) {
+      const x = re - j, hoch = ((re + 1) & 2) === 0, y = hoch ? n - 1 - s : s;
+      if (!F[y][x] && i < worte.length * 8) { M[y][x] = ((worte[i >>> 3] >>> (7 - (i & 7))) & 1) === 1; i++; }
+    }
+  }
+  const MASKEN = [(x, y) => (x + y) % 2 === 0, (x, y) => y % 2 === 0, (x) => x % 3 === 0, (x, y) => (x + y) % 3 === 0, (x, y) => (Math.floor(x / 3) + Math.floor(y / 2)) % 2 === 0, (x, y) => x * y % 2 + x * y % 3 === 0, (x, y) => (x * y % 2 + x * y % 3) % 2 === 0, (x, y) => ((x + y) % 2 + x * y % 3) % 2 === 0];
+  const maskiere = (k) => { for (let y = 0; y < n; y++) for (let x = 0; x < n; x++) if (!F[y][x] && MASKEN[k](x, y)) M[y][x] = !M[y][x]; };
+  const strafe = () => {
+    let p = 0, dunkel = 0;
+    const linie = (get) => {
+      for (let a = 0; a < n; a++) {
+        let lauf = 1;
+        for (let b = 1; b <= n; b++) { if (b < n && get(a, b) === get(a, b - 1)) lauf++; else { if (lauf >= 5) p += lauf - 2; lauf = 1; } }
+        for (let b = 0; b + 11 <= n; b++) {
+          const s = []; for (let k = 0; k < 11; k++) s.push(get(a, b + k) ? 1 : 0); const t = s.join('');
+          if (t === '10111010000' || t === '00001011101') p += 40;
+        }
+      }
+    };
+    linie((a, b) => M[a][b]); linie((a, b) => M[b][a]);
+    for (let y = 0; y < n - 1; y++) for (let x = 0; x < n - 1; x++) { const c = M[y][x]; if (c === M[y][x + 1] && c === M[y + 1][x] && c === M[y + 1][x + 1]) p += 3; }
+    for (const z of M) for (const c of z) if (c) dunkel++;
+    return p + (Math.ceil(Math.abs(dunkel * 20 - n * n * 10) / (n * n)) - 1) * 10;
+  };
+  let best = 0, min = Infinity;
+  for (let k = 0; k < 8; k++) { maskiere(k); format(k); const p = strafe(); if (p < min) { min = p; best = k; } maskiere(k); }
+  if (festeMaske >= 0) best = festeMaske;
+  maskiere(best); format(best);
+  return M;
+}
+/* QR-Code als SVG; Rand = 4 Module (Ruhezone) */
+function qrSvg(text, mm) {
+  const M = qrMatrix(text), n = M.length, w = n + 8; let d = '';
+  M.forEach((z, y) => z.forEach((c, x) => { if (c) d += `M${x + 4} ${y + 4}h1v1h-1z`; }));
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${w} ${w}" width="${mm}mm" height="${mm}mm" shape-rendering="crispEdges" role="img" aria-label="QR-Code für die Überweisung"><rect width="${w}" height="${w}" fill="#fff"/><path d="${d}" fill="#000"/></svg>`;
+}
+
+/* ---------- IBAN und GiroCode (EPC-QR-Code für SEPA-Überweisungen) ---------- */
+const IBAN_LAENGE = { AD: 24, AT: 20, BE: 16, BG: 22, CH: 21, CY: 28, CZ: 24, DE: 22, DK: 18, EE: 20, ES: 24, FI: 18, FR: 27, GB: 22, GI: 23, GR: 27, HR: 21, HU: 28, IE: 22, IS: 26, IT: 27, LI: 21, LT: 20, LU: 20, LV: 21, MC: 27, MT: 31, NL: 18, NO: 15, PL: 28, PT: 25, RO: 24, SE: 24, SI: 19, SK: 24, SM: 27, VA: 22 };
+const ibanRein = (s) => String(s || '').replace(/\s+/g, '').toUpperCase();
+/* Prüft Länge (für SEPA-Länder) und Prüfziffer (Modulo 97) */
+function ibanOk(s) {
+  const i = ibanRein(s);
+  if (!/^[A-Z]{2}\d{2}[A-Z0-9]{11,30}$/.test(i)) return false;
+  if (IBAN_LAENGE[i.slice(0, 2)] && IBAN_LAENGE[i.slice(0, 2)] !== i.length) return false;
+  const z = (i.slice(4) + i.slice(0, 4)).replace(/[A-Z]/g, (c) => String(c.charCodeAt(0) - 55));
+  let r = 0; for (const c of z) r = (r * 10 + Number(c)) % 97;
+  return r === 1;
+}
+const ibanSchoen = (s) => ibanRein(s).replace(/(.{4})/g, '$1 ').trim();
+/* Inhalt nach EPC069-12 Version 002 (UTF-8). Liefert null, wenn etwas fehlt oder nicht passt. */
+function giroCode({ name, iban, bic, betrag, zweck }) {
+  const i = ibanRein(iban), b = Math.round(Number(betrag) * 100) / 100;
+  const nm = String(name || '').replace(/\s+/g, ' ').trim().slice(0, 70);
+  if (!nm || !ibanOk(i) || !(b >= 0.01 && b <= 999999999.99)) return null;
+  const bc = String(bic || '').replace(/\s+/g, '').toUpperCase();
+  const zw = String(zweck || '').replace(/\s+/g, ' ').trim().slice(0, 140);
+  return ['BCD', '002', '1', 'SCT', /^[A-Z]{6}[A-Z0-9]{2}([A-Z0-9]{3})?$/.test(bc) ? bc : '', nm, i, 'EUR' + b.toFixed(2), '', '', zw].join('\n');
+}
+
+/* ---------- Aussehen der Rechnungen: fünf Vorlagen, Farbe, Schrift, Lage des Logos ----------
+   S.firma.layout = { vorlage, farbe, schrift: 'sans' | 'serif', logo: 'links' | 'mitte' | 'rechts', qr, gewaehlt, gefragt } */
+const LAYOUTS = {
+  klassisch: { t: 'Klassisch', s: 'Wie ein Geschäftsbrief: Logo rechts, schwarze Schrift, klare Linien.', farbe: '#1f2937', schrift: 'sans', logo: 'rechts' },
+  modern: { t: 'Modern', s: 'Titel und Tabellenkopf in deiner Farbe, Summe farbig hervorgehoben.', farbe: '#2563eb', schrift: 'sans', logo: 'rechts' },
+  balken: { t: 'Farbbalken', s: 'Kräftiger Balken oben mit Firmenname und Logo.', farbe: '#0f766e', schrift: 'sans', logo: 'links' },
+  schlicht: { t: 'Schlicht', s: 'Viel Weißraum, feine graue Linien, ruhig und zurückhaltend.', farbe: '#6b7280', schrift: 'sans', logo: 'links' },
+  elegant: { t: 'Elegant', s: 'Schrift mit Serifen, Logo in der Mitte, wie Briefpapier.', farbe: '#7c2d12', schrift: 'serif', logo: 'mitte' }
+};
+const LAYOUT_FARBEN = ['#1f2937', '#2563eb', '#0f766e', '#15803d', '#b91c1c', '#c2410c', '#7c2d12', '#6d28d9', '#be185d', '#6b7280'];
+const SCHRIFTEN = { sans: 'system-ui,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif', serif: 'Georgia,Cambria,"Times New Roman",Times,serif' };
+function lay(x) {
+  const l = Object.assign({}, x || S.firma.layout || {}), k = LAYOUTS[l.vorlage] ? l.vorlage : 'klassisch', v = LAYOUTS[k];
+  return { vorlage: k, farbe: /^#[0-9a-f]{6}$/i.test(l.farbe || '') ? l.farbe : v.farbe, schrift: SCHRIFTEN[l.schrift] ? l.schrift : v.schrift, logo: ['links', 'mitte', 'rechts'].includes(l.logo) ? l.logo : v.logo, qr: l.qr !== false, gewaehlt: !!l.gewaehlt, gefragt: !!l.gefragt };
+}
+const LAYOUT_CSS = `#druck .rd{-webkit-print-color-adjust:exact;print-color-adjust:exact}
+#druck .lz{display:flex;margin:0 0 5mm}#druck .lz.l-links{justify-content:flex-start}#druck .lz.l-mitte{justify-content:center}#druck .lz.l-rechts{justify-content:flex-end}#druck .lz .logo{margin:0}
+#druck .zqr{display:flex;gap:4mm;align-items:center;margin:5mm 0;break-inside:avoid;page-break-inside:avoid}#druck .zqr svg{flex:none}#druck .zqr div{font-size:8.5pt;color:#333;max-width:95mm}
+#druck .L-modern h1{color:var(--ak);font-size:20pt}#druck .L-modern table.p th{background:var(--ak);color:#fff;border-bottom:0}
+#druck .L-modern .sum .g{background:var(--ak);color:#fff;border-top:0;padding:2mm;margin-top:2mm}#druck .L-modern .fuss{border-top:.8mm solid var(--ak)}
+#druck .band{background:var(--ak);color:#fff;margin:0 0 8mm;padding:6mm 7mm;display:flex;align-items:center;justify-content:space-between;gap:8mm;border-radius:1mm}
+#druck .band .bn{font-size:17pt;font-weight:700}#druck .band .bs{font-size:8.5pt;opacity:.9;margin-top:1mm}#druck .band .logo{max-height:18mm;max-width:55mm;background:#fff;padding:1.5mm;border-radius:1mm;margin:0}
+#druck .L-balken h1{color:var(--ak)}#druck .L-balken table.p th{border-bottom:.6mm solid var(--ak)}#druck .L-balken .sum .g{border-top-color:var(--ak);color:var(--ak)}
+#druck .L-schlicht{color:#222}#druck .L-schlicht h1{font-size:11pt;font-weight:600;letter-spacing:.25em;text-transform:uppercase;color:var(--ak);margin-bottom:8mm}
+#druck .L-schlicht table.p th{font-weight:500;color:#666;font-size:8.5pt;text-transform:uppercase;letter-spacing:.06em;border-bottom:.2mm solid #ccc}#druck .L-schlicht table.p td{border-bottom:.2mm solid #eee;padding:2.5mm 1mm}
+#druck .L-schlicht .sum .g{border-top:.2mm solid #999;font-weight:600}#druck .L-schlicht .fuss{border-top:.2mm solid #ddd;color:#777}#druck .L-schlicht .absender{text-decoration:none;color:#888}
+#druck .L-elegant h1{text-align:center;font-weight:400;font-size:20pt;letter-spacing:.08em;color:var(--ak);border-top:.3mm solid var(--ak);border-bottom:.3mm solid var(--ak);padding:2mm 0}
+#druck .L-elegant table.p th{border-bottom:1mm double var(--ak);font-weight:600}#druck .L-elegant .sum .g{border-top:1mm double var(--ak)}#druck .L-elegant .fuss{text-align:center;border-top:.3mm solid var(--ak)}`;
+document.head.insertAdjacentHTML('beforeend', `<style>${LAYOUT_CSS}
+.lwgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:10px;margin:10px 0}
+.lwk{display:grid;gap:4px;text-align:left;padding:8px;font-weight:500}.lwk[aria-pressed="true"]{outline:3px solid var(--accent);outline-offset:-1px}.lwk b{font-size:14px}.lwk span{font-size:12px;line-height:1.3}
+.lwmini,.lwgross{position:relative;width:100%;aspect-ratio:210/297;overflow:hidden;background:#fff;border:1px solid var(--line);border-radius:6px}
+.lwmini iframe,.lwgross iframe{position:absolute;left:0;top:0;width:794px;height:1123px;border:0;transform-origin:0 0;pointer-events:none;background:#fff}
+.lwgross{max-width:420px}
+.swatch{width:30px;height:30px;border-radius:50%;border:2px solid var(--line);padding:0}.swatch[aria-pressed="true"]{outline:3px solid var(--accent);outline-offset:1px}
+.altbild{position:relative;max-width:420px;touch-action:none;user-select:none;cursor:crosshair;border:1px solid var(--line);border-radius:6px;overflow:hidden;background:#fff}
+.altbild img{display:block;width:100%;pointer-events:none}.altbild .rahmen{position:absolute;border:2px solid #e11d48;background:rgba(225,29,72,.12)}
+.altlogo{max-height:50px;max-width:200px;background:#fff;border:1px solid var(--line);border-radius:6px;padding:3px}
+</style>`);
+
+/* Kopf mit Logo (oder Farbbalken) für Rechnung, Angebot und Mahnung */
+function layKopf(f, L) {
+  if (L.vorlage === 'balken') {
+    const lg = f.logo ? `<img class="logo" src="${esc(f.logo)}" alt="">` : '';
+    const txt = `<div><div class="bn">${esc(f.name)}</div><div class="bs">${esc([f.strasse, [f.plz, f.ort].join(' ').trim(), f.email].filter((x) => x && x.trim()).join(' · '))}</div></div>`;
+    return `<div class="band">${L.logo === 'rechts' ? txt + lg : lg + txt}</div>`;
+  }
+  return f.logo ? `<div class="lz l-${L.logo}"><img class="logo" src="${esc(f.logo)}" alt=""></div>` : '';
+}
+const layHuelle = (L, inhalt) => `<div class="rd L-${L.vorlage}" style="--ak:${L.farbe};font-family:${esc(SCHRIFTEN[L.schrift])}">${inhalt}</div>`;
+/* Überweisungs-QR-Code (GiroCode) für Rechnung und Mahnung. Leer, wenn er aus ist oder IBAN/Betrag nicht passen. */
+function qrZahlungText(nr, betrag) {
+  const f = S.firma;
+  return giroCode({ name: f.kontoinhaber || f.name, iban: f.iban, bic: f.bic, betrag, zweck: 'Rechnung ' + nr });
+}
+function qrZahlungHtml(nr, betrag, L) {
+  if (!L.qr) return '';
+  const t = qrZahlungText(nr, betrag); if (!t) return '';
+  return `<div class="zqr">${qrSvg(t, 30)}<div><b>Bequem bezahlen:</b> Scannen Sie den Code mit Ihrer Banking-App. Empfänger, IBAN, Betrag (${eur(betrag)}) und Verwendungszweck sind dann schon ausgefüllt. Sie müssen die Überweisung nur noch bestätigen.</div></div>`;
+}
+
+/* ---------- Auswahl-Fenster: Vorlage wählen, alte Rechnung übernehmen ---------- */
+const MUSTER_FIRMA = { name: 'Deine Firma', inhaber: 'Vorname Nachname', strasse: 'Hauptstraße 1', plz: '12345', ort: 'Musterstadt', email: 'info@deine-firma.de', tel: '0123 456789', steuernr: '12/345/67890', iban: 'DE89 3704 0044 0532 0130 00', bic: 'COBADEFFXXX', bank: 'Musterbank' };
+let lw = null;
+function musterRechnung(nr) {
+  const z = num(S.firma.zahlungsziel) || 14, u = ku() ? 0 : 19;
+  return { id: 'muster', typ: 'rechnung', status: 'entwurf', nr: nr || naechsteNrVorschau(), datum: heute(), leistungsdatum: heute(), faellig: plusTage(heute(), z), rc: '', hinweis: '', ku: ku(),
+    kunde: { name: 'Beispiel Kunde GmbH', adresse: 'Musterweg 5\n10115 Berlin', ustid: '' },
+    positionen: [{ text: 'Beratung und Konzept', menge: 4, einheit: 'Std.', preis: 85, ust: u, rabatt: 0 }, { text: 'Umsetzung Webseite', menge: 1, einheit: 'Pausch.', preis: 1200, ust: u, rabatt: 0 }] };
+}
+/* Welche Nummer die nächste Rechnung bekäme, ohne sie zu vergeben */
+function naechsteNrVorschau() {
+  const fmt = nrFormat('RE'), j = heute().slice(0, 4), vergeben = vergebeneNr();
+  let n = (S.zaehler.RE || {})[nrKey('RE', j, fmt)] || 0, nr;
+  do { n++; nr = nrBau(fmt, heute(), n); } while (vergeben.has(nr) && n < 1e6);
+  return nr;
+}
+/* Ganze Vorschau-Seite (für ein iframe) mit Musterrechnung */
+function lwDoc(cfg) {
+  const alt = S.firma, a = lw && lw.alt;
+  S.firma = Object.assign({}, alt, alt.name ? {} : MUSTER_FIRMA, a && a.logoNehmen && a.logo ? { logo: a.logo } : {}, a && a.ibanNehmen && a.iban ? { iban: a.iban } : {});
+  try {
+    const nr = a && a.weiter ? a.weiter.nr : '';
+    return archivDoc('Vorschau', druckHtml(musterRechnung(nr), 'Rechnung', '', cfg), '').replace('</style>', 'body{padding-top:12mm}</style>');
+  } finally { S.firma = alt; }
+}
+function lwSkaliere() { for (const fr of document.querySelectorAll('.lwmini iframe, .lwgross iframe')) { const w = fr.parentElement.clientWidth; if (w) fr.style.transform = `scale(${w / 794})`; } }
+window.addEventListener('resize', lwSkaliere);
+function vLayoutWahl(start) {
+  const L = lay();
+  lw = { vorlage: L.vorlage, farbe: L.farbe, schrift: L.schrift, logo: L.logo, qr: L.qr, start: !!start, alt: null };
+  openDlg(`${head(start ? 'Wie sollen deine Rechnungen aussehen?' : 'Aussehen der Rechnungen')}<form id="lwForm" class="dlg-body" autocomplete="off">
+    <p style="margin-top:0">Such dir eine Vorlage aus. Du kannst sie jederzeit im Reiter <b>Firma</b> unter „Aussehen der Rechnungen“ wieder ändern. Schon gestellte Rechnungen bleiben, wie sie sind.</p>
+    <div class="card drop" id="altZone" style="margin:10px 0">
+      <b>Du hast schon Rechnungen aus einem anderen Programm?</b>
+      <p class="small muted" style="margin:4px 0 8px">Zieh eine alte Rechnung (PDF oder Foto) hier hinein oder wähl sie aus. Die App übernimmt dein Logo, deine Farbe, die Schriftart und die Anordnung, die am nächsten dran ist, und zählt deine Rechnungsnummern weiter.</p>
+      <div class="btns"><button type="button" data-act="alt-wahl">Alte Rechnung wählen</button></div>
+      <input type="file" id="altIn" accept="application/pdf,image/png,image/jpeg,image/webp" hidden>
+      <div id="altErg"></div>
+    </div>
+    <h3>Vorlagen</h3>
+    <div class="lwgrid">${Object.entries(LAYOUTS).map(([k, v]) => `<button type="button" class="lwk" data-act="lw-vorlage" data-k="${k}" aria-pressed="false"><div class="lwmini"><iframe tabindex="-1" aria-hidden="true" data-v="${k}"></iframe></div><b>${v.t}</b><span class="muted">${v.s}</span></button>`).join('')}</div>
+    <h3>Feinheiten</h3>
+    <div class="grid2">
+      <div><span class="small">Farbe</span><div style="display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-top:4px">${LAYOUT_FARBEN.map((c) => `<button type="button" class="swatch" data-act="lw-farbe" data-k="${c}" style="background:${c}" aria-label="Farbe ${c}" aria-pressed="false"></button>`).join('')}<input type="color" id="lwFarbe" aria-label="Eigene Farbe" style="width:44px;height:32px;padding:0"></div></div>
+      <label>Schrift<select id="lwSchrift"><option value="sans">Ohne Serifen (modern, z. B. wie Arial)</option><option value="serif">Mit Serifen (klassisch, z. B. wie Times)</option></select></label>
+      <label>Logo<select id="lwLogo"><option value="links">links</option><option value="mitte">in der Mitte</option><option value="rechts">rechts</option></select></label>
+      <label class="check full"><input type="checkbox" id="lwQr"> Überweisungs-QR-Code auf jede Rechnung</label>
+      <p class="small muted full" style="margin:0">Dein Kunde scannt den Code mit seiner Banking-App. Dann sind Empfänger, IBAN, Betrag und Rechnungsnummer schon eingetragen. Abschicken muss er die Überweisung selbst, automatisch abbuchen kann der Code nichts.${S.firma.iban && !ibanOk(S.firma.iban) ? ' <b style="color:var(--bad)">Deine IBAN im Reiter Firma stimmt nicht, deshalb fehlt der Code noch.</b>' : !S.firma.iban ? ' Der Code erscheint, sobald deine IBAN im Reiter Firma steht.' : ''}</p>
+    </div>
+    <h3>So sieht deine Rechnung aus</h3>
+    <div class="lwgross"><iframe id="lwGross" tabindex="-1" aria-hidden="true"></iframe></div>
+    <p class="small muted">Die Vorschau zeigt eine Musterrechnung${S.firma.name ? ' mit deinen Firmendaten' : ''}. Das PDF mit E-Rechnung sieht gleich aus.</p>
+  </form><div class="dlg-foot"><button data-act="${start ? 'lw-spaeter' : 'close'}">${start ? 'Später' : 'Abbrechen'}</button><button class="primary" data-act="lw-save">Übernehmen</button></div>`);
+  for (const fr of document.querySelectorAll('.lwmini iframe')) { const k = fr.dataset.v, v = LAYOUTS[k]; fr.srcdoc = lwDoc({ vorlage: k, farbe: v.farbe, schrift: v.schrift, logo: v.logo, qr: true }); }
+  lwZeig();
+}
+/* Zustand → Bedienelemente und große Vorschau */
+function lwZeig() {
+  if (!lw || !$('#lwForm')) return;
+  for (const b of document.querySelectorAll('.lwk')) b.setAttribute('aria-pressed', String(b.dataset.k === lw.vorlage));
+  for (const b of document.querySelectorAll('.swatch')) b.setAttribute('aria-pressed', String(b.dataset.k.toLowerCase() === lw.farbe.toLowerCase()));
+  $('#lwFarbe').value = lw.farbe; $('#lwSchrift').value = lw.schrift; $('#lwLogo').value = lw.logo; $('#lwQr').checked = lw.qr;
+  $('#lwGross').srcdoc = lwDoc({ vorlage: lw.vorlage, farbe: lw.farbe, schrift: lw.schrift, logo: lw.logo, qr: lw.qr });
+  requestAnimationFrame(lwSkaliere);
+}
+function lwLies() {
+  if (!lw || !$('#lwForm')) return;
+  lw.farbe = $('#lwFarbe').value; lw.schrift = $('#lwSchrift').value; lw.logo = $('#lwLogo').value; lw.qr = $('#lwQr').checked;
+  const a = lw.alt;
+  if (a) {
+    if ($('#altLogo')) a.logoNehmen = $('#altLogo').checked;
+    if ($('#altIban')) a.ibanNehmen = $('#altIban').checked;
+    if ($('#altNr')) { a.nr = $('#altNr').value.trim(); a.muster = nrMusterAus(a.nr); a.weiter = altWeiter(a, a.nextEigen); altNrZeig(a); }
+  }
+}
+async function lwSave() {
+  lwLies();
+  const a = lw.alt;
+  S.firma.layout = { vorlage: lw.vorlage, farbe: lw.farbe, schrift: lw.schrift, logo: lw.logo, qr: lw.qr, gewaehlt: true, gefragt: true };
+  const extra = [];
+  if (a) {
+    if (a.logoNehmen && a.logo) { S.firma.logo = a.logo; extra.push('Logo'); }
+    if (a.ibanNehmen && a.iban) { S.firma.iban = ibanSchoen(a.iban); extra.push('IBAN'); }
+    if (a.muster && a.weiter) {
+      S.firma.nummern.RE = a.muster.fmt === NR_ARTEN.RE[1] ? '' : a.muster.fmt;
+      S.zaehler.RE = S.zaehler.RE || {};
+      if (a.muster.key !== 'fort' && a.muster.key !== heute().slice(0, 4)) S.zaehler.RE[a.muster.key] = Math.max(S.zaehler.RE[a.muster.key] || 0, a.muster.n);
+      S.zaehler.RE[nrKey('RE', heute().slice(0, 4), a.muster.fmt)] = a.weiter.n - 1;
+      extra.push('Rechnungsnummern');
+    }
+  }
+  await save(); closeDlg(); render();
+  toast(`Aussehen gespeichert${extra.length ? ', dazu ' + extra.join(', ') : ''}`);
+}
+
+/* ---------- Alte Rechnung lesen: Seite als Bild, Text, Schrift ---------- */
+function pdfZeilen(tc) {
+  let text = '', zeile = [], y = null;
+  for (const it of tc.items) {
+    if (y !== null && Math.abs(it.transform[5] - y) > 3) { text += zeile.join(' ') + '\n'; zeile = []; }
+    zeile.push(it.str); y = it.transform[5];
+    if (it.hasEOL) { text += zeile.join(' ') + '\n'; zeile = []; y = null; }
+  }
+  return text + zeile.join(' ') + '\n';
+}
+const istSerifName = (n) => !/sans|grotesk|gothic/i.test(n) && /times|georgia|garamond|cambria|palatino|baskerville|bodoni|antiqua|minion|caslon|didot|century|bookman|constantia|merriweather|playfair|lora|crimson|serif/i.test(n);
+async function altSeite(file) {
+  const istPdf = file.type === 'application/pdf' || /\.pdf$/i.test(file.name);
+  const c = document.createElement('canvas');
+  if (istPdf) {
+    const pdfjs = await ladePdfJs();
+    const doc = await pdfjs.getDocument({ data: new Uint8Array(await file.arrayBuffer()), isEvalSupported: false }).promise;
+    try {
+      const page = await doc.getPage(1), v1 = page.getViewport({ scale: 1 }), vp = page.getViewport({ scale: 1100 / v1.width });
+      c.width = Math.round(vp.width); c.height = Math.round(vp.height);
+      const g = c.getContext('2d'); g.fillStyle = '#fff'; g.fillRect(0, 0, c.width, c.height);
+      await page.render({ canvasContext: g, viewport: vp }).promise;
+      const tc = await page.getTextContent();
+      const zaehl = { serif: 0, sans: 0 }, namen = {};
+      for (const it of tc.items) {
+        const n = it.str.replace(/\s/g, '').length; if (!n) continue;
+        let name = ''; try { const fo = page.commonObjs.has(it.fontName) ? page.commonObjs.get(it.fontName) : null; name = fo && fo.name ? String(fo.name).replace(/^[A-Z]{6}\+/, '') : ''; } catch (e) {}
+        const fam = (tc.styles[it.fontName] || {}).fontFamily || '';
+        const serif = name ? istSerifName(name) : fam === 'serif';
+        zaehl[serif ? 'serif' : 'sans'] += n; if (name) namen[name] = (namen[name] || 0) + n;
+      }
+      let text = pdfZeilen(tc);
+      for (let i = 2; i <= Math.min(doc.numPages, 2); i++) text += pdfZeilen(await (await doc.getPage(i)).getTextContent());
+      const haupt = Object.entries(namen).sort((a, b) => b[1] - a[1])[0];
+      const hatText = text.replace(/\s/g, '').length > 40;
+      if (!hatText) { try { text = await ocrText(c); } catch (e) { text = ''; } }
+      return { c, text, serif: hatText ? zaehl.serif > zaehl.sans : null, schriftName: haupt ? haupt[0].replace(/[-,](Bold|Regular|Italic|Medium|Light|Semibold|MT|PS).*$/i, '').replace(/MT$|PSMT$/, '') : '', quelle: hatText ? 'pdf' : 'scan' };
+    } finally { doc.destroy(); }
+  }
+  const bild = await new Promise((res, rej) => { const img = new Image(), url = URL.createObjectURL(file); img.onload = () => { URL.revokeObjectURL(url); res(img); }; img.onerror = () => { URL.revokeObjectURL(url); rej(new Error('bild')); }; img.src = url; });
+  const k = Math.min(1, 1400 / Math.max(bild.naturalWidth, bild.naturalHeight));
+  c.width = Math.round(bild.naturalWidth * k); c.height = Math.round(bild.naturalHeight * k);
+  const g = c.getContext('2d'); g.fillStyle = '#fff'; g.fillRect(0, 0, c.width, c.height); g.drawImage(bild, 0, 0, c.width, c.height);
+  let text = ''; try { text = await ocrText(c); } catch (e) {}
+  return { c, text, serif: null, schriftName: '', quelle: 'foto' };
+}
+/* Farbe, Farbbalken, farbiger Tabellenkopf und vermutliches Logo aus dem Seitenbild */
+function altAnalyse(c) {
+  const w = 220, h = Math.max(1, Math.round(c.height * w / c.width));
+  const k = document.createElement('canvas'); k.width = w; k.height = h;
+  const g = k.getContext('2d'); g.drawImage(c, 0, 0, w, h);
+  const px = g.getImageData(0, 0, w, h).data;
+  const hsv = (i) => { const r = px[i], gg = px[i + 1], b = px[i + 2], mx = Math.max(r, gg, b), mn = Math.min(r, gg, b); return { v: mx / 255, s: mx ? (mx - mn) / mx : 0, r, g: gg, b }; };
+  const leer = (p) => p.v > 0.9 && p.s < 0.12;
+  // 1. Häufigste kräftige Farbe
+  const eimer = new Map();
+  for (let i = 0; i < px.length; i += 4) {
+    const p = hsv(i); if (p.s < 0.3 || p.v < 0.2 || p.v > 0.98) continue;
+    const key = (p.r >> 5) * 64 + (p.g >> 5) * 8 + (p.b >> 5), e = eimer.get(key) || { n: 0, r: 0, g: 0, b: 0 };
+    e.n++; e.r += p.r; e.g += p.g; e.b += p.b; eimer.set(key, e);
+  }
+  const top = [...eimer.values()].sort((a, b) => b.n - a.n)[0];
+  const hex = (r, gg, b) => '#' + [r, gg, b].map((x) => Math.round(x).toString(16).padStart(2, '0')).join('');
+  let farbe = top && top.n >= w * h * 0.002 ? hex(top.r / top.n, top.g / top.n, top.b / top.n) : '';
+  // 2. Farbbalken oben: Zeilen, die fast ganz gefüllt sind
+  const voll = (y) => { let n = 0, r = 0, gg = 0, b = 0; for (let x = 0; x < w; x++) { const p = hsv((y * w + x) * 4); if (!leer(p)) { n++; r += p.r; gg += p.g; b += p.b; } } return n / w > 0.85 ? { r: r / n, g: gg / n, b: b / n } : null; };
+  let bandVon = -1, bandBis = -1, bandF = null;
+  for (let y = 0; y < h * 0.22; y++) { const v = voll(y); if (v) { if (bandVon < 0) { bandVon = y; bandF = v; } bandBis = y; } else if (bandVon >= 0 && y - bandBis > 1) break; }
+  const band = bandVon >= 0 && (bandBis - bandVon + 1) >= h * 0.03;
+  if (band && bandF) farbe = hex(bandF.r, bandF.g, bandF.b);
+  // 3. Farbiger Tabellenkopf: eine Zeile in der Seitenmitte, die zu über der Hälfte in der Hauptfarbe gefüllt ist
+  let tabKopf = false;
+  if (farbe) {
+    const fr = parseInt(farbe.slice(1, 3), 16), fg = parseInt(farbe.slice(3, 5), 16), fb = parseInt(farbe.slice(5, 7), 16);
+    for (let y = Math.round(h * 0.25); y < h * 0.8 && !tabKopf; y++) { let n = 0; for (let x = 0; x < w; x++) { const i = (y * w + x) * 4; if (Math.abs(px[i] - fr) + Math.abs(px[i + 1] - fg) + Math.abs(px[i + 2] - fb) < 90) n++; } if (n / w > 0.5) tabKopf = true; }
+  }
+  // 4. Logo vermuten: farbige Fläche im oberen Drittel (außerhalb eines Balkens), Raster aus 4×4-Pixel-Zellen
+  let logo = null;
+  if (!band) {
+    const Z = 4, cw = Math.ceil(w / Z), ch = Math.ceil(h * 0.33 / Z), tinte = new Uint8Array(cw * ch), bunt = new Uint16Array(cw * ch);
+    for (let y = 0; y < ch * Z && y < h; y++) for (let x = 0; x < w; x++) { const p = hsv((y * w + x) * 4), z = Math.floor(y / Z) * cw + Math.floor(x / Z); if (!leer(p)) tinte[z] = 1; if (p.s > 0.3 && p.v > 0.2 && p.v < 0.98) bunt[z]++; }
+    const gesehen = new Uint8Array(cw * ch); let best = null;
+    for (let s = 0; s < cw * ch; s++) {
+      if (!tinte[s] || gesehen[s]) continue;
+      const st = [s]; gesehen[s] = 1; let x0 = cw, y0 = ch, x1 = 0, y1 = 0, b = 0, n = 0;
+      while (st.length) {
+        const q = st.pop(), qx = q % cw, qy = (q - qx) / cw; n++; b += bunt[q];
+        x0 = Math.min(x0, qx); x1 = Math.max(x1, qx); y0 = Math.min(y0, qy); y1 = Math.max(y1, qy);
+        for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) { const nx = qx + dx, ny = qy + dy, nq = ny * cw + nx; if (nx >= 0 && ny >= 0 && nx < cw && ny < ch && tinte[nq] && !gesehen[nq]) { gesehen[nq] = 1; st.push(nq); } }
+      }
+      const breite = (x1 - x0 + 1) / cw;
+      if (b >= 6 && breite < 0.6 && (!best || b > best.b)) best = { b, x0, y0, x1, y1 };
+    }
+    if (best) logo = { x: Math.max(0, best.x0 * Z / w - 0.01), y: Math.max(0, best.y0 * Z / h - 0.005), w: Math.min(1, (best.x1 - best.x0 + 1) * Z / w + 0.02), h: Math.min(0.4, (best.y1 - best.y0 + 1) * Z / h + 0.01) };
+  }
+  return { farbe, band, tabKopf, logo };
+}
+/* Ausschnitt (Anteile der Seite) als Logo-Bild, höchstens 600 × 200 Pixel */
+function altLogoAus(c, box) {
+  if (!box || box.w < 0.01 || box.h < 0.005) return '';
+  const sx = Math.round(box.x * c.width), sy = Math.round(box.y * c.height), sw = Math.max(1, Math.round(box.w * c.width)), sh = Math.max(1, Math.round(box.h * c.height));
+  const z = Math.min(1, 600 / sw, 200 / sh), o = document.createElement('canvas');
+  o.width = Math.max(1, Math.round(sw * z)); o.height = Math.max(1, Math.round(sh * z));
+  const g = o.getContext('2d'); g.fillStyle = '#fff'; g.fillRect(0, 0, o.width, o.height); g.drawImage(c, sx, sy, sw, sh, 0, 0, o.width, o.height);
+  return o.toDataURL('image/png');
+}
+/* Letzte Rechnungsnummer im Text finden */
+function altNummer(text) {
+  const m = String(text || '').match(/(?:rechnungs?\s?-?\s?(?:nummer|nr\.?)|rechnung\s+(?:nr\.?|#)|invoice\s+(?:number|no\.?|#))\s*[:#.]?\s*([A-Z0-9][A-Z0-9\-/._#]{0,24}\d)/i);
+  return m ? m[1] : '';
+}
+/* Aus einer Nummer wie RE-2026-0042 den Aufbau RE-{JJJJ}-{NNNN} und die Zahl 42 machen */
+function nrMusterAus(nr) {
+  nr = String(nr || '').trim(); const m = nr.match(/^(.*?)(\d+)(\D*)$/); if (!m || nr.length > 30) return null;
+  let [, vor, ziff, nach] = m, jahr = '';
+  vor = vor.replace(/(^|\D)(20\d{2})(\D?)(0[1-9]|1[0-2])?(?=\D|$)/, (x, a, j, t, mo) => { jahr = j; return a + '{JJJJ}' + (mo ? t + '{MM}' : t); });
+  if (!jahr && ziff.length >= 7 && /^20\d\d/.test(ziff)) { jahr = ziff.slice(0, 4); vor += '{JJJJ}'; ziff = ziff.slice(4); }
+  const jj = Number(heute().slice(2, 4));
+  if (!jahr) vor = vor.replace(/(^|\D)(\d{2})(?=\D|$)/, (x, a, y) => { if (Number(y) > jj || Number(y) < jj - 5) return x; jahr = '20' + y; return a + '{JJ}'; });
+  const fmt = vor + '{' + 'N'.repeat(Math.min(ziff.length, 9)) + '}' + nach;
+  if (/[^\w{}\-/.#]/.test(fmt.replace(/\{(JJJJ|JJ|MM|N+)\}/g, ''))) return null;
+  return { fmt, n: parseInt(ziff, 10), key: jahr || 'fort', jahr };
+}
+/* Nächste Nummer: gleiches Jahr oder ohne Jahr → weiterzählen; neues Jahr → wieder bei 1 */
+function altWeiter(a, eingabe) {
+  if (!a.muster) return null;
+  const jetzt = heute().slice(0, 4), gleich = a.muster.key === 'fort' || a.muster.key === jetzt;
+  const n = eingabe != null && Math.round(num(eingabe)) >= 1 ? Math.round(num(eingabe)) : gleich ? a.muster.n + 1 : 1;
+  return { n, nr: nrBau(a.muster.fmt, heute(), n), gleich };
+}
+function altNrZeig(a) {
+  const v = $('#altNrV'); if (!v) return;
+  if (!a.nr) { v.innerHTML = 'Trag die letzte Nummer ein, dann zählt die App ab da weiter.'; return; }
+  if (!a.muster) { v.innerHTML = '<span style="color:var(--bad)">Aus dieser Nummer kann die App keinen Aufbau ableiten. Am Ende muss eine Zahl stehen, erlaubt sind Buchstaben, Zahlen und - / . #</span>'; return; }
+  const ne = $('#altNext'); if (ne && document.activeElement !== ne) ne.value = a.weiter.n;
+  v.innerHTML = `Aufbau wie bisher: <b>${esc(a.muster.fmt)}</b> (JJJJ = Jahr, N = laufende Zahl). Deine nächste Rechnung bekommt die Nummer <b>${esc(a.weiter.nr)}</b>.${a.muster.jahr && !a.weiter.gleich ? ` Weil die alte Nummer aus ${esc(a.muster.jahr)} ist, beginnt ${heute().slice(0, 4)} wieder bei 1.` : ''}`;
+}
+async function altLesen(file) {
+  const erg = $('#altErg'); if (!erg || !file || !lw) return;
+  if (!/pdf|^image\//.test(file.type) && !/\.(pdf|png|jpe?g|webp)$/i.test(file.name)) { erg.innerHTML = '<p class="small" style="color:var(--bad)">Bitte eine PDF-Datei oder ein Foto der Rechnung nehmen.</p>'; return; }
+  erg.innerHTML = '<p class="small"><span class="spin"></span> Rechnung wird angesehen … Beim ersten Mal lädt die App dafür ein Programm nach, das braucht Internet. Die Rechnung selbst verlässt dein Gerät nicht.</p>';
+  let s;
+  try { s = await altSeite(file); }
+  catch (e) { console.error(e); erg.innerHTML = `<p class="small" style="color:var(--bad)">${navigator.onLine === false ? 'Zum ersten Mal braucht das Internet. Bitte mit Internet noch einmal versuchen.' : 'Diese Datei konnte nicht gelesen werden. Ist es ein PDF oder Foto einer Rechnung?'}</p>`; return; }
+  if (!$('#altErg')) return;
+  const an = altAnalyse(s.c), nr = altNummer(s.text);
+  const ibans = [...new Set((String(s.text).toUpperCase().match(/\b[A-Z]{2}\d{2}(?: ?[A-Z0-9]{4}){3,7}(?: ?[A-Z0-9]{1,3})?\b/g) || []).map(ibanRein))].filter(ibanOk);
+  const iban = ibans.find((i) => i !== ibanRein(S.firma.iban)) || '';
+  const a = { c: s.c, bild: s.c.toDataURL('image/jpeg', 0.8), box: an.logo, logo: altLogoAus(s.c, an.logo), farbe: an.farbe, band: an.band, serif: s.serif, schriftName: s.schriftName, quelle: s.quelle, nr, iban, ibanNehmen: !!iban && !S.firma.iban };
+  a.logoNehmen = !!a.logo; a.muster = nrMusterAus(nr); a.weiter = altWeiter(a);
+  lw.alt = a;
+  // Vorschlag: was am nächsten dran ist
+  const mitte = an.logo && Math.abs(an.logo.x + an.logo.w / 2 - 0.5) < 0.1;
+  lw.vorlage = an.band ? 'balken' : an.tabKopf ? 'modern' : s.serif && mitte ? 'elegant' : 'klassisch';
+  if (an.farbe) lw.farbe = an.farbe;
+  if (s.serif !== null) lw.schrift = s.serif ? 'serif' : 'sans';
+  if (an.logo) { const mx = an.logo.x + an.logo.w / 2; lw.logo = mx < 0.4 ? 'links' : mx > 0.6 ? 'rechts' : 'mitte'; }
+  const erkannt = [
+    `Anordnung: am ähnlichsten ist <b>${LAYOUTS[lw.vorlage].t}</b>${an.band ? ' (farbiger Balken oben)' : ''}`,
+    an.farbe ? `Farbe: <span style="display:inline-block;width:14px;height:14px;border-radius:3px;vertical-align:-2px;background:${an.farbe}"></span> ${an.farbe}` : 'Farbe: keine kräftige Farbe gefunden, die Rechnung ist eher schwarz-weiß',
+    s.serif === null ? 'Schrift: bei Fotos und Scans nicht erkennbar, bitte unten selbst wählen' : `Schrift: ${s.serif ? 'mit Serifen' : 'ohne Serifen'}${s.schriftName ? ` (auf der alten Rechnung: ${esc(s.schriftName)})` : ''}`,
+    an.logo ? `Logo: ${lw.logo === 'mitte' ? 'in der Mitte' : lw.logo}, rot umrandet im Bild` : 'Logo: nicht sicher gefunden. Zieh im Bild einen Rahmen um dein Logo, falls es eins gibt.'
+  ];
+  erg.innerHTML = `<div style="margin-top:12px">
+    <p class="small" style="margin:0 0 6px"><b>Das hat die App erkannt</b> (bitte prüfen):</p>
+    <ul class="small" style="margin:0 0 10px;padding-left:20px">${erkannt.map((x) => `<li>${x}</li>`).join('')}</ul>
+    <div class="altbild" id="altBild"><img src="${a.bild}" alt="Deine alte Rechnung"><div class="rahmen" id="altRahmen" hidden></div></div>
+    <p class="small muted" style="margin:4px 0 8px">Rahmen passt nicht? Zieh mit Maus oder Finger einen neuen Rahmen um dein Logo.</p>
+    <label class="check"><input type="checkbox" id="altLogo"${a.logoNehmen ? ' checked' : ''}${a.logo ? '' : ' disabled'}> Dieses Logo übernehmen <img id="altLogoBild" class="altlogo" alt="" ${a.logo ? `src="${a.logo}"` : 'hidden'}></label>
+    <div class="grid2" style="margin-top:10px">
+      <label>Letzte Rechnungsnummer${nr ? ' (gefunden)' : ''}<input id="altNr" value="${esc(nr)}" placeholder="z. B. RE-2026-0042"></label>
+      <label>Nächste laufende Zahl<input id="altNext" inputmode="numeric" value="${a.weiter ? a.weiter.n : ''}"></label>
+      <p class="small full" id="altNrV" style="margin:0"></p>
+    </div>
+    ${iban ? `<label class="check" style="margin-top:8px"><input type="checkbox" id="altIban"${a.ibanNehmen ? ' checked' : ''}> IBAN von der alten Rechnung übernehmen: ${esc(ibanSchoen(iban))}${S.firma.iban ? ` (bisher eingetragen: ${esc(S.firma.iban)})` : ''}</label>` : ''}
+    <details style="margin-top:8px"><summary class="small">Was geht automatisch, was nicht?</summary><p class="small muted" style="margin:6px 0 0">Automatisch: Logo (aus dem Bild ausgeschnitten), Hauptfarbe, ob die Schrift Serifen hat, die ähnlichste Anordnung und das Weiterzählen der Nummern. Nicht möglich: deine alte Rechnung millimetergenau nachbauen, eigene Hausschriften übernehmen oder Texte und Abstände 1:1 kopieren. Die Pflichtangaben stehen immer an derselben Stelle. Ein ausgeschnittenes Logo ist oft etwas unscharf. Wenn du dein Logo als Datei hast, lade es lieber im Reiter Firma hoch.</p></details>
+  </div>`;
+  altRahmenZeig(); altNrZeig(a); lwZeig();
+  altRahmenZiehen($('#altBild'));
+}
+function altRahmenZeig() {
+  const a = lw && lw.alt, r = $('#altRahmen'); if (!a || !r) return;
+  if (!a.box) { r.hidden = true; return; }
+  Object.assign(r.style, { left: a.box.x * 100 + '%', top: a.box.y * 100 + '%', width: a.box.w * 100 + '%', height: a.box.h * 100 + '%' }); r.hidden = false;
+}
+function altRahmenZiehen(el) {
+  if (!el) return;
+  let start = null;
+  const punkt = (e) => { const b = el.getBoundingClientRect(); return { x: Math.min(1, Math.max(0, (e.clientX - b.left) / b.width)), y: Math.min(1, Math.max(0, (e.clientY - b.top) / b.height)) }; };
+  el.addEventListener('pointerdown', (e) => { start = punkt(e); el.setPointerCapture(e.pointerId); e.preventDefault(); });
+  el.addEventListener('pointermove', (e) => { if (!start) return; const p = punkt(e); lw.alt.box = { x: Math.min(start.x, p.x), y: Math.min(start.y, p.y), w: Math.abs(p.x - start.x), h: Math.abs(p.y - start.y) }; altRahmenZeig(); });
+  const ende = () => {
+    if (!start) return; start = null; const a = lw.alt;
+    if (!a.box || a.box.w < 0.02 || a.box.h < 0.01) return;
+    a.logo = altLogoAus(a.c, a.box); a.logoNehmen = true;
+    const cb = $('#altLogo'), im = $('#altLogoBild'); if (cb) { cb.disabled = false; cb.checked = true; } if (im) { im.src = a.logo; im.hidden = false; }
+    const mx = a.box.x + a.box.w / 2; lw.logo = mx < 0.4 ? 'links' : mx > 0.6 ? 'rechts' : 'mitte';
+    lwZeig();
+  };
+  el.addEventListener('pointerup', ende); el.addEventListener('pointercancel', ende);
+}
+
 /* ---------- Druck / PDF ---------- */
 /* modus: '' Angebot/Rechnung, 'ab' Auftragsbestätigung, 'ls' Lieferschein (ohne Preise) */
 function druck(d, titel, modus) { druckZeig(druckHtml(d, titel, modus), (modus === 'ls' ? d.ls.nr : modus === 'ab' ? d.ab.nr : d.nr) || titel); }
@@ -4674,8 +5176,8 @@ function druckZeig(html, name) {
   window.print();
   setTimeout(() => { document.title = alt; }, 500);
 }
-function druckHtml(d, titel, modus) {
-  const f = S.firma, s = summen(d), sv = istSchluss(d) ? summenVoll(d) : s, ls = modus === 'ls', ab = modus === 'ab';
+function druckHtml(d, titel, modus, layCfg) {
+  const L = lay(layCfg), f = S.firma, s = summen(d), sv = istSchluss(d) ? summenVoll(d) : s, ls = modus === 'ls', ab = modus === 'ab';
   const absender = [f.name, f.strasse, [f.plz, f.ort].join(' ')].filter((x) => x && x.trim()).join(' · ');
   const isRe = d.typ !== 'angebot' && !modus, rab = hatRabatt(d) && !ls;
   const bez = d.typ === 'angebot' ? 'Angebot' : 'Rechnung';
@@ -4687,9 +5189,9 @@ function druckHtml(d, titel, modus) {
     : `<tr><th>Pos.</th><th>Beschreibung</th><th class="r">Menge</th><th class="r">Einzelpreis</th>${rab ? '<th class="r">Rabatt</th>' : ''}${d.ku ? '' : '<th class="r">USt</th>'}<th class="r">Betrag</th></tr>`;
   const zeile = (p, i) => ls ? `<tr><td>${i + 1}</td><td>${esc(p.text)}</td><td class="r">${String(p.menge).replace('.', ',')} ${esc(p.einheit)}</td></tr>`
     : `<tr><td>${i + 1}</td><td>${esc(p.text)}</td><td class="r">${String(p.menge).replace('.', ',')} ${esc(p.einheit)}</td><td class="r">${eur(num(p.preis))}</td>${rab ? `<td class="r">${num(p.rabatt) ? String(p.rabatt).replace('.', ',') + ' %' : ''}</td>` : ''}${d.ku ? '' : `<td class="r">${num(p.ust)} %</td>`}<td class="r">${eur(posNetto(p))}</td></tr>`;
-  return `
+  return layHuelle(L, `${layKopf(f, L)}
     <div class="kopf"><div><div class="absender">${esc(absender)}</div><div style="white-space:pre-line"><b>${esc(d.kunde.name)}</b>\n${esc(d.kunde.adresse)}${d.kunde.ustid && !ls ? '\nUSt-IdNr.: ' + esc(d.kunde.ustid) : ''}</div></div>
-    <div>${f.logo ? `<img class="logo" src="${esc(f.logo)}" alt="">` : ''}<table class="meta">${nrZeilen}
+    <div><table class="meta">${nrZeilen}
     ${f.steuernr && !ls ? `<tr><td>Steuernr.</td><td>${esc(f.steuernr)}</td></tr>` : ''}${f.ustid && !ls ? `<tr><td>USt-IdNr.</td><td>${esc(f.ustid)}</td></tr>` : ''}</table></div></div>
     <h1>${titel}</h1>
     ${ab ? '<p>Sehr geehrte Damen und Herren,</p><p>vielen Dank für Ihren Auftrag. Wir bestätigen ihn wie folgt:</p>' : ''}
@@ -4704,9 +5206,10 @@ function druckHtml(d, titel, modus) {
     ${RC[d.rc] ? `<p>${RC[d.rc].hinweis}</p>` : ''}
     ${befreiungText(d) && !ls ? `<p>${esc(befreiungText(d))}</p>` : ''}
     ${isRe && d.typ !== 'gutschrift' && d.faellig ? `<p>Bitte überweisen Sie den Betrag bis zum ${dat(d.faellig)} unter Angabe der Rechnungsnummer${f.iban ? ' auf das unten genannte Konto' : ''}.${hatSkonto(d) ? ' ' + skontoText(d) : ''}</p>` : ''}
+    ${isRe && d.typ !== 'gutschrift' ? qrZahlungHtml(d.nr, s.brutto, L) : ''}
     ${ab ? `<p>Die Rechnung erhalten Sie nach Erbringung der Leistung.${d.ab.text ? '' : ' Bei Fragen melden Sie sich gern.'}</p>${d.ab.text ? `<p style="white-space:pre-line">${esc(d.ab.text)}</p>` : ''}<p>Mit freundlichen Grüßen<br>${esc(f.inhaber || f.name)}</p>` : ''}`}
     ${d.hinweis && !modus ? `<p style="white-space:pre-line">${esc(d.hinweis)}</p>` : ''}
-    ${fussHtml()}`;
+    ${fussHtml()}`);
 }
 
 /* ---------- Feste Kopien: so, wie die Rechnung beim Stellen aussah ----------
@@ -4717,7 +5220,7 @@ const DRUCK_CSS = `@page{size:A4;margin:18mm 16mm}body{font-family:system-ui,-ap
 #druck .kopf{display:flex;justify-content:space-between;gap:10mm;margin-bottom:12mm}#druck .meta td{padding:0 0 1mm 6mm}#druck .logo{display:block;max-height:22mm;max-width:60mm;margin:0 0 4mm auto}
 #druck h1{font-size:16pt;margin:0 0 6mm}#druck table.p{width:100%;border-collapse:collapse;margin:4mm 0}#druck table.p th,#druck table.p td{border-bottom:.3mm solid #999;padding:2mm 1mm;text-align:left}
 #druck table.p .r{text-align:right}#druck .sum{margin-left:auto;width:75mm}#druck .sum div{display:flex;justify-content:space-between;padding:.8mm 0}
-#druck .sum .g{font-weight:700;border-top:.4mm solid #000;margin-top:1mm;padding-top:1.5mm}#druck .fuss{margin-top:14mm;font-size:8.5pt;color:#333;display:grid;grid-template-columns:repeat(3,1fr);gap:6mm;border-top:.3mm solid #999;padding-top:3mm}`;
+#druck .sum .g{font-weight:700;border-top:.4mm solid #000;margin-top:1mm;padding-top:1.5mm}#druck .fuss{margin-top:14mm;font-size:8.5pt;color:#333;display:grid;grid-template-columns:repeat(3,1fr);gap:6mm;border-top:.3mm solid #999;padding-top:3mm}` + LAYOUT_CSS;
 const archivCache = {};
 const archivDoc = (titel, inhalt, am) => `<!doctype html><html lang="de"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${esc(titel)}</title><style>${DRUCK_CSS}</style></head><body><div id="druck"><!--inhalt-->${inhalt}<!--/inhalt--></div><!-- Feste Kopie aus dem Steuer-Cockpit, abgelegt am ${am} --></body></html>`;
 const archivInhalt = (doc) => { const a = doc.indexOf('<!--inhalt-->'), b = doc.lastIndexOf('<!--/inhalt-->'); return a >= 0 && b > a ? doc.slice(a + 13, b) : doc; };
@@ -4945,6 +5448,19 @@ const PDF_FONTS = {
   normal: ['https://cdn.jsdelivr.net/npm/@fontsource/source-sans-3@5.0.12/files/source-sans-3-latin-400-normal.woff', 'sha384-rBcRLtsNSx5Lvm+uF2Wk9hOqZ7kLUFnOCLT4FeCT88WiI1Qy4L9tc6q5rX8Acadc'],
   fett: ['https://cdn.jsdelivr.net/npm/@fontsource/source-sans-3@5.0.12/files/source-sans-3-latin-700-normal.woff', 'sha384-bUNdssLxlXNUcj1i+m/+ZdtElbdELYn7ELUGr8cJ2YXxVVqQ8xzi1FTUbQ507HSj']
 };
+/* Schrift mit Serifen fürs PDF, nur geladen, wenn die Vorlage sie braucht */
+const PDF_SERIF = {
+  normal: ['https://cdn.jsdelivr.net/npm/@fontsource/source-serif-4@5.0.12/files/source-serif-4-latin-400-normal.woff', 'sha384-rRjpZqm03+wxFvFZ3AAE2TkLMnhgywYGQQ1a1OtmZWg4cq3hXSXTUXsy9EJUxDNR'],
+  fett: ['https://cdn.jsdelivr.net/npm/@fontsource/source-serif-4@5.0.12/files/source-serif-4-latin-700-normal.woff', 'sha384-PopyThltU4CTvY3E4UFEZgrAmtdpp+RyEi026qZQInrBH+rc0Y7iJC/kgK8D++5V']
+};
+let serifBereit = null;
+function ladeSerif() {
+  if (!serifBereit) {
+    serifBereit = (async () => { const fonts = {}; for (const [k, [url, integrity]] of Object.entries(PDF_SERIF)) { const r = await fetch(url, { integrity, mode: 'cors' }); if (!r.ok) throw new Error('Schrift'); fonts[k] = new Uint8Array(await r.arrayBuffer()); } return fonts; })();
+    serifBereit.catch(() => { serifBereit = null; });
+  }
+  return serifBereit;
+}
 let pdfBereit = null;
 function ladePdfLibs() {
   if (pdfBereit) return pdfBereit;
@@ -4987,12 +5503,14 @@ function logoFlach(dataUrl) {
   });
 }
 async function zugferdPdf(r) {
-  const fonts = await ladePdfLibs();
+  const fonts0 = await ladePdfLibs(), LY = lay(), V = LY.vorlage;
+  const fonts = LY.schrift === 'serif' ? await ladeSerif().catch(() => fonts0) : fonts0;
   const { PDFDocument, rgb, PDFName, PDFString, PDFHexString, PDFArray } = window.PDFLib;
   const doc = await PDFDocument.create({ updateMetadata: false });
   doc.registerFontkit(window.fontkit);
   const fN = await doc.embedFont(fonts.normal, { subset: true }), fB = await doc.embedFont(fonts.fett, { subset: true });
   const f = S.firma, s = summen(r), sv = istSchluss(r) ? summenVoll(r) : s, titel = docTitel(r), rab = hatRabatt(r), grau = rgb(0.33, 0.33, 0.33);
+  const ak = rgb(parseInt(LY.farbe.slice(1, 3), 16) / 255, parseInt(LY.farbe.slice(3, 5), 16) / 255, parseInt(LY.farbe.slice(5, 7), 16) / 255), weiss = rgb(1, 1, 1);
   const W = 595.28, H = 841.89, L = 56, R = W - 50, FUSS = 92;
   const breite = (t, sz, fo) => (fo || fN).widthOfTextAtSize(t, sz);
   const umbruch = (t, sz, max, fo) => {
@@ -5012,7 +5530,23 @@ async function zugferdPdf(r) {
   // Kopf: Absender, Anschrift, Logo, Nummern
   const logo = await logoFlach(f.logo);
   let rechtsY = H - 50;
-  if (logo) { const im = await doc.embedJpg(logo.bytes), z = Math.min(170 / logo.w, 62 / logo.h, 1); pg.drawImage(im, { x: R - logo.w * z, y: H - 50 - logo.h * z, width: logo.w * z, height: logo.h * z }); rechtsY -= logo.h * z + 12; }
+  if (V === 'balken') {
+    const bh = 74, by = H - 28 - bh; let tx = L + 8;
+    pg.drawRectangle({ x: L - 8, y: by, width: R - L + 16, height: bh, color: ak });
+    if (logo) {
+      const im = await doc.embedJpg(logo.bytes), z = Math.min(150 / logo.w, 48 / logo.h, 1), lw2 = logo.w * z, lh = logo.h * z, lx = LY.logo === 'rechts' ? R - 4 - lw2 : L + 4;
+      pg.drawRectangle({ x: lx - 4, y: by + (bh - lh) / 2 - 4, width: lw2 + 8, height: lh + 8, color: weiss });
+      pg.drawImage(im, { x: lx, y: by + (bh - lh) / 2, width: lw2, height: lh });
+      if (LY.logo !== 'rechts') tx = lx + lw2 + 18;
+    }
+    text(f.name || '', tx, by + bh / 2 + 3, { size: 16, font: fB, color: weiss });
+    text([f.strasse, [f.plz, f.ort].join(' ').trim(), f.email].filter((q) => q && q.trim()).join(' · '), tx, by + bh / 2 - 13, { size: 8, color: weiss });
+  } else if (logo) {
+    const im = await doc.embedJpg(logo.bytes), z = Math.min(170 / logo.w, 62 / logo.h, 1), lw2 = logo.w * z, lh = logo.h * z;
+    const lx = LY.logo === 'links' ? L : LY.logo === 'mitte' ? (W - lw2) / 2 : R - lw2;
+    pg.drawImage(im, { x: lx, y: H - 50 - lh, width: lw2, height: lh });
+    if (LY.logo === 'rechts') rechtsY -= lh + 12;
+  }
   const absender = [f.name, f.strasse, [f.plz, f.ort].join(' ')].filter((q) => q && q.trim()).join(' · ');
   text(absender, L, H - 128, { size: 7.5, color: grau }); pg.drawLine({ start: { x: L, y: H - 130 }, end: { x: L + breite(absender, 7.5), y: H - 130 }, thickness: 0.4, color: grau });
   let ay = H - 146; text(r.kunde.name, L, ay, { font: fB }); ay -= 13;
@@ -5022,13 +5556,24 @@ async function zugferdPdf(r) {
   let my = Math.min(rechtsY, H - 128); const mx = R - 190;
   for (const [k2, v, fett] of meta) { text(k2, mx, my, { color: grau }); text(v, R, my, { rechts: true, font: fett ? fB : fN }); my -= 13; }
   y = Math.min(ay, my) - 26;
-  text(titel, L, y, { size: 17, font: fB }); y -= 22;
+  if (V === 'elegant') {
+    pg.drawLine({ start: { x: L, y: y + 21 }, end: { x: R, y: y + 21 }, thickness: 0.6, color: ak });
+    text(titel, (W - breite(titel, 19)) / 2, y, { size: 19, color: ak });
+    pg.drawLine({ start: { x: L, y: y - 8 }, end: { x: R, y: y - 8 }, thickness: 0.6, color: ak }); y -= 34;
+  } else if (V === 'schlicht') { text(titel.toUpperCase().split('').join(' '), L, y, { size: 11, font: fB, color: ak }); y -= 26; }
+  else { text(titel, L, y, { size: V === 'modern' ? 19 : 17, font: fB, color: V === 'klassisch' ? undefined : ak }); y -= 22; }
   if (r.stornoVon) { const o = S.rechnungen.find((q) => q.id === r.stornoVon) || {}; text(`${r.teil ? 'Korrektur' : 'Stornorechnung'} zur Rechnung ${o.nr || ''} vom ${dat(o.datum)}.`, L, y); y -= 18; }
   // Positionen
   const sp = [{ t: 'Pos.', w: 26 }, { t: 'Beschreibung', w: 0 }, { t: 'Menge', w: 62, r: 1 }, { t: 'Einzelpreis', w: 66, r: 1 }].concat(rab ? [{ t: 'Rabatt', w: 40, r: 1 }] : [], r.ku ? [] : [{ t: 'USt', w: 34, r: 1 }], [{ t: 'Betrag', w: 70, r: 1 }]);
   sp[1].w = R - L - sp.reduce((q, c) => q + c.w, 0);
   let xx = L; for (const c of sp) { c.x = xx; xx += c.w; }
-  const kopfTabelle = () => { for (const c of sp) text(c.t, c.r ? c.x + c.w - 2 : c.x + 2, y, { font: fB, size: 9, rechts: !!c.r }); y -= 6; pg.drawLine({ start: { x: L, y }, end: { x: R, y }, thickness: 0.6, color: grau }); y -= 13; };
+  const kopfTabelle = () => {
+    if (V === 'modern') pg.drawRectangle({ x: L, y: y - 5, width: R - L, height: 16, color: ak });
+    for (const c of sp) text(c.t, c.r ? c.x + c.w - 2 : c.x + 2, y, { font: V === 'schlicht' ? fN : fB, size: V === 'schlicht' ? 8 : 9, rechts: !!c.r, color: V === 'modern' ? weiss : V === 'schlicht' ? grau : undefined });
+    y -= 6;
+    if (V === 'modern') y -= 2; else pg.drawLine({ start: { x: L, y }, end: { x: R, y }, thickness: V === 'schlicht' ? 0.4 : V === 'klassisch' ? 0.6 : 1, color: V === 'klassisch' ? grau : V === 'schlicht' ? rgb(0.8, 0.8, 0.8) : ak });
+    y -= 13;
+  };
   kopfTabelle();
   r.positionen.forEach((p, i) => {
     const zeilen = umbruch(p.text, 9.5, sp[1].w - 8);
@@ -5043,7 +5588,12 @@ async function zugferdPdf(r) {
   if (istSchluss(r)) { for (const a2 of r.abzuege) sumZeilen.push([`Abzüglich Abschlag ${a2.nr}`, '−' + eur(a2.brutto)]); sumZeilen.push(['Noch zu zahlen', eur(s.brutto), true]); }
   platz(sumZeilen.length * 14 + 10); y -= 4;
   const sx = R - 220;
-  for (const [k2, v, fett] of sumZeilen) { if (fett) { pg.drawLine({ start: { x: sx, y: y + 10 }, end: { x: R, y: y + 10 }, thickness: 0.8 }); } text(k2, sx, y, { font: fett ? fB : fN }); text(v, R, y, { rechts: true, font: fett ? fB : fN }); y -= fett ? 17 : 14; }
+  for (const [k2, v, fett] of sumZeilen) {
+    const voll = fett && V === 'modern', col = voll ? weiss : fett && V === 'balken' ? ak : undefined;
+    if (voll) pg.drawRectangle({ x: sx - 4, y: y - 5, width: R - sx + 6, height: 17, color: ak });
+    else if (fett) pg.drawLine({ start: { x: sx, y: y + 10 }, end: { x: R, y: y + 10 }, thickness: 0.8, color: V === 'klassisch' ? rgb(0, 0, 0) : V === 'schlicht' ? grau : ak });
+    text(k2, sx, y, { font: fett ? fB : fN, color: col }); text(v, R, y, { rechts: true, font: fett ? fB : fN, color: col }); y -= fett ? (voll ? 20 : 17) : 14;
+  }
   y -= 8;
   // Hinweise
   const abs = [];
@@ -5052,10 +5602,22 @@ async function zugferdPdf(r) {
   if (r.typ !== 'gutschrift' && r.faellig) abs.push(`Bitte überweisen Sie den Betrag bis zum ${dat(r.faellig)} unter Angabe der Rechnungsnummer${f.iban ? ' auf das unten genannte Konto' : ''}.${hatSkonto(r) ? ' ' + skontoText(r) : ''}`);
   if (r.hinweis) abs.push(r.hinweis);
   for (const a2 of abs) { const z = umbruch(a2, 9.5, R - L); platz(z.length * 13 + 6); for (const l of z) { text(l, L, y); y -= 13; } y -= 6; }
+  // Überweisungs-QR-Code (GiroCode)
+  const qrT = r.typ !== 'gutschrift' && LY.qr ? qrZahlungText(r.nr, s.brutto) : null;
+  if (qrT) {
+    const QM = qrMatrix(qrT), gr = 85, m = gr / (QM.length + 8);
+    platz(gr + 8);
+    const x0 = L, y0 = y - gr + 8;
+    pg.drawRectangle({ x: x0, y: y0, width: gr, height: gr, color: weiss });
+    QM.forEach((z, yy) => { let a = -1; for (let xx = 0; xx <= z.length; xx++) { if (xx < z.length && z[xx]) { if (a < 0) a = xx; } else if (a >= 0) { pg.drawRectangle({ x: x0 + (a + 4) * m, y: y0 + gr - (yy + 5) * m, width: (xx - a) * m, height: m, color: rgb(0, 0, 0) }); a = -1; } } });
+    const zl = umbruch(`Bequem bezahlen: Scannen Sie den Code mit Ihrer Banking-App. Empfänger, IBAN, Betrag (${eur(s.brutto)}) und Verwendungszweck sind dann schon ausgefüllt. Sie müssen die Überweisung nur noch bestätigen.`, 8.5, Math.min(270, R - L - gr - 14));
+    zl.forEach((l, i) => text(l, x0 + gr + 10, y0 + gr / 2 + zl.length * 5.5 - 8 - i * 11, { size: 8.5, color: grau }));
+    y = y0 - 10;
+  }
   // Fuß auf jeder Seite
   const spalten = fussSpalten(), bw = (R - L) / 3;
   seiten.forEach((p2, i) => {
-    p2.drawLine({ start: { x: L, y: FUSS - 4 }, end: { x: R, y: FUSS - 4 }, thickness: 0.4, color: grau });
+    p2.drawLine({ start: { x: L, y: FUSS - 4 }, end: { x: R, y: FUSS - 4 }, thickness: V === 'modern' ? 2 : 0.4, color: V === 'modern' || V === 'elegant' || V === 'balken' ? ak : grau });
     spalten.forEach((col, c) => col.forEach((l, j) => p2.drawText(l, { x: L + c * bw, y: FUSS - 16 - j * 10, size: 7.5, font: fN, color: grau })));
     if (seiten.length > 1) p2.drawText(`Seite ${i + 1} von ${seiten.length}`, { x: R - breite(`Seite ${i + 1} von ${seiten.length}`, 7.5), y: 30, size: 7.5, font: fN, color: grau });
   });
@@ -5601,6 +6163,12 @@ const ACT = {
     S.firma.rechtsform = el.dataset.k; S.firma.kleinunternehmer = kuEl ? kuEl.checked : false;
     await save(); closeDlg(); tab = 'firma'; render(); toast('Rechtsform übernommen');
   },
+  'lw-oeffnen': () => vLayoutWahl(false),
+  'lw-vorlage': (el) => { const v = LAYOUTS[el.dataset.k]; if (!v || !lw) return; lwLies(); lw.vorlage = el.dataset.k; if (!lw.alt) Object.assign(lw, { farbe: v.farbe, schrift: v.schrift, logo: v.logo }); lwZeig(); },
+  'lw-farbe': (el) => { if (!lw) return; lwLies(); lw.farbe = el.dataset.k; lwZeig(); },
+  'lw-save': () => lwSave(),
+  'lw-spaeter': async () => { S.firma.layout = Object.assign({}, S.firma.layout, { gefragt: true }); await save(); closeDlg(); render(); toast('Du findest die Vorlagen im Reiter Firma'); },
+  'alt-wahl': () => { const i = $('#altIn'); if (i) i.click(); },
   'logo-del': async () => { leseFirma(); S.firma.logo = ''; await save(); render(); toast('Logo entfernt'); },
   kontakte: (el) => vKontakte(el.dataset.k),
   artikel: () => { if (edit && $('#edForm')) { if (!confirm('Den Entwurf verlassen? Nicht gespeicherte Änderungen gehen verloren.')) return; } vArtikelListe(); },
@@ -5729,7 +6297,7 @@ const ACT = {
   'regel-del': async (el) => { if (!confirm('Regel löschen? Schon zugeordnete Buchungen bleiben so.')) return; S.regeln = (S.regeln || []).filter((r) => r.id !== el.dataset.id); await save(); render(); vRegeln(); },
   'regel-los': async () => { const n = regelnAnwenden(S.bank); await save(); render(); vRegeln(); toast(`${n} Buchung${n === 1 ? '' : 'en'} zugeordnet`); },
   'speicher-fest': async () => { const ok = await speicherFest(); render(); toast(ok ? 'Der Browser behält die Daten jetzt dauerhaft.' : 'Der Browser hat abgelehnt. Lege die App auf den Home-Bildschirm und sichere regelmäßig.'); },
-  modus: async (el) => { S.modus = el.dataset.k; await save(); tab = 'start'; closeDlg(); render(); window.scrollTo(0, 0); toast(privat() ? 'Nur private Steuererklärung' : 'Mit Firma'); },
+  modus: async (el) => { S.modus = el.dataset.k; await save(); tab = 'start'; closeDlg(); render(); window.scrollTo(0, 0); toast(privat() ? 'Nur private Steuererklärung' : 'Mit Firma'); if (!privat() && !lay().gefragt) vLayoutWahl(true); },
   'est-open': () => { tab = 'est'; closeDlg(); render(); window.scrollTo(0, 0); },
   'est-go': async (el) => { estDaten().schritt = el.dataset.k; await save(); render(); window.scrollTo(0, 0); },
   'est-jahr': (el) => { estJahr = Number(el.dataset.k); estDaten().schritt = 'start'; render(); },
@@ -5773,6 +6341,11 @@ document.addEventListener('input', (e) => {
     }
   }
   if (e.target.closest('#edForm')) refreshEditor();
+  if (e.target.closest('#lwForm') && lw) {
+    if (e.target.id === 'altNext' && lw.alt) lw.alt.nextEigen = e.target.value;
+    if (e.target.id === 'altNr' && lw.alt) lw.alt.nextEigen = null;
+    if (['lwFarbe', 'altNr', 'altNext'].includes(e.target.id)) { lwLies(); lwZeig(); }
+  }
   if (e.target.closest('#beForm')) calcVst();
   if (e.target.name === 'lieferant' && e.target.closest('#beForm')) {
     const l = S.lieferanten.find((x) => x.name.toLowerCase() === e.target.value.trim().toLowerCase());
@@ -5805,13 +6378,15 @@ document.addEventListener('change', async (e) => {
   if (e.target.id === 'bwaJahr' || e.target.id === 'bwaMon') { filter[e.target.id] = e.target.value; if (e.target.id === 'bwaJahr') filter.bwaMon = ''; vBwa(); return; }
   if (e.target.closest('#stForm')) { saveSteuer(); return; }
   if (e.target.id === 'fileIn') { pendingFile = e.target.files[0] || null; zeigeDatei(pendingFile); }
+  if (e.target.id === 'altIn' && e.target.files[0]) { altLesen(e.target.files[0]); return; }
+  if (e.target.closest('#lwForm')) { lwLies(); lwZeig(); return; }
   if (e.target.id === 'logoIn' && e.target.files[0]) {
     try { const logo = await logoVerkleinern(e.target.files[0]); leseFirma(); S.firma.logo = logo; await save(); render(); toast('Logo gespeichert'); }
     catch (err) { console.error(err); toast('Dieses Bild konnte nicht gelesen werden.'); }
   }
   if (e.target.closest('#firmaForm') && ['rechtsform', 'kleinunternehmer', 'gewinnart', 'turnus', 'dauerfrist', 'versteuerung', 'gruendung'].includes(e.target.name)) { saveFirma(false); }
 });
-document.addEventListener('submit', (e) => { if (e.target.id === 'firmaForm') { e.preventDefault(); saveFirma(true); } });
+document.addEventListener('submit', (e) => { if (e.target.id === 'firmaForm') { e.preventDefault(); saveFirma(true); } if (e.target.id === 'lwForm') e.preventDefault(); });
 function leseFirma() {
   const f = $('#firmaForm'); if (!f) return;
   for (const k of Object.keys(S.firma)) {
@@ -5836,12 +6411,13 @@ function logoVerkleinern(file) {
     img.src = url;
   });
 }
-document.addEventListener('dragover', (e) => { if (!e.dataTransfer || ![...e.dataTransfer.types].includes('Files')) return; e.preventDefault(); const z = $('#dropZone'); if (z && !dlg.open) z.classList.add('on'); });
-document.addEventListener('dragleave', (e) => { if (!e.relatedTarget) { const z = $('#dropZone'); if (z) z.classList.remove('on'); } });
+document.addEventListener('dragover', (e) => { if (!e.dataTransfer || ![...e.dataTransfer.types].includes('Files')) return; e.preventDefault(); const z = $('#dropZone'); if (z && !dlg.open) z.classList.add('on'); const a = $('#altZone'); if (a) a.classList.add('on'); });
+document.addEventListener('dragleave', (e) => { if (!e.relatedTarget) { const z = $('#dropZone'); if (z) z.classList.remove('on'); const a = $('#altZone'); if (a) a.classList.remove('on'); } });
 document.addEventListener('drop', (e) => {
   if (!e.dataTransfer || !e.dataTransfer.files.length) return;
   e.preventDefault(); const z = $('#dropZone'); if (z) z.classList.remove('on');
   const js = [...e.dataTransfer.files].find((f) => /\.json$/i.test(f.name) || f.type === 'application/json');
+  if ($('#altZone')) { $('#altZone').classList.remove('on'); altLesen(e.dataTransfer.files[0]); return; }
   if (js && !$('#fileIn')) { sicherungLesen(js); return; }
   if (dlg.open) { if ($('#fileIn')) { pendingFile = e.dataTransfer.files[0]; zeigeDatei(pendingFile); } return; }
   if (tab === 'est') { const s = estDaten().schritt; estDateien(UNTERLAGEN[s] ? s : 'person', e.dataTransfer.files).catch((err) => { console.error(err); toast('Die Dateien konnten nicht gespeichert werden.'); }); return; }
