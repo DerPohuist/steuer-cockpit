@@ -3964,6 +3964,11 @@ function txtNachZeichnen() {
   if (txtStand.posAb >= 0) [...f.querySelectorAll('.pos')].slice(txtStand.posAb).forEach((p) => p.querySelectorAll('input:not([type=hidden]),select').forEach((x) => x.classList.add('auto')));
 }
 
+/* Vorschlag für die nächste Kundennummer: höchste reine Zahl aus Kontakten und Rechnungen plus 1 */
+function kundenNrVorschlag() {
+  const nrs = S.kunden.map((k) => k.nr).concat(S.rechnungen.map((r) => r.kunde && r.kunde.nr), S.angebote.map((a) => a.kunde && a.kunde.nr)).filter((n) => /^\d{1,9}$/.test(String(n || ''))).map(Number);
+  return nrs.length ? 'z. B. ' + (Math.max(...nrs) + 1) : 'z. B. 10001';
+}
 /* Angebot / Rechnung bearbeiten */
 let edit = null;
 function neuesDoc(typ) {
@@ -3974,7 +3979,8 @@ function neuesDoc(typ) {
     gueltigBis: typ === 'angebot' ? plusTage(t, num(S.firma.angebotTage) || 30) : '',
     kunde: { name: '', adresse: '', ustid: '', email: '', leitweg: '', land: '' },
     positionen: [{ text: '', menge: 1, einheit: 'Stk.', preis: 0, ust: 19 }],
-    hinweis: '', status: typ === 'rechnung' ? 'entwurf' : 'offen', ku: ku(),
+    hinweis: lay().vorlage === 'rahmen' && typ === 'rechnung' ? 'Vielen Dank für die gute Zusammenarbeit.' : '', status: typ === 'rechnung' ? 'entwurf' : 'offen', ku: ku(),
+    einleitung: lay().vorlage === 'rahmen' ? `Sehr geehrte Damen und Herren,\n\nhier kurz die Aufstellung der ${typ === 'angebot' ? 'angebotenen' : 'abzurechnenden'} Leistungen und Summen:` : '',
     skontoProz: typ === 'rechnung' ? num(S.firma.skontoProz) : 0, skontoTage: typ === 'rechnung' ? num(S.firma.skontoTage) : 0
   };
 }
@@ -3993,7 +3999,8 @@ function readEditor() {
   const f = $('#edForm'); if (!f) return;
   const g = (n) => (f.elements[n] ? f.elements[n].value : '');
   Object.assign(edit, { datum: g('datum'), leistungsdatum: g('leistungsdatum'), faellig: g('faellig'), gueltigBis: g('gueltigBis'), hinweis: g('hinweis'), rc: edit.ku ? '' : g('rc') });
-  edit.kunde = { name: g('k_name').trim(), adresse: g('k_adresse').trim(), ustid: g('k_ustid').trim(), email: g('k_email').trim(), leitweg: g('k_leitweg').trim(), land: g('k_land').trim().toUpperCase() };
+  edit.einleitung = g('einleitung');
+  edit.kunde = { name: g('k_name').trim(), nr: g('k_nr').trim(), adresse: g('k_adresse').trim(), ustid: g('k_ustid').trim(), email: g('k_email').trim(), leitweg: g('k_leitweg').trim(), land: g('k_land').trim().toUpperCase() };
   edit.positionen = [...f.querySelectorAll('.pos')].map((p) => ({
     text: p.querySelector('[name=p_text]').value, menge: num(p.querySelector('[name=p_menge]').value), einheit: p.querySelector('[name=p_einheit]').value,
     preis: num(p.querySelector('[name=p_preis]').value), ust: edit.ku || edit.rc ? 0 : num(p.querySelector('[name=p_ust]').value),
@@ -4072,6 +4079,7 @@ function vEditor() {
     <div class="grid2">
       <label>Kunde<input name="k_name" list="kunden" value="${esc(d.kunde.name)}" placeholder="Firmen- oder Personenname"></label>
       <label>E-Mail (optional)<input name="k_email" type="email" value="${esc(d.kunde.email)}"></label>
+      <label>Kundennummer (optional)<input name="k_nr" value="${esc(d.kunde.nr || '')}" placeholder="${esc(kundenNrVorschlag())}"></label>
       <label class="full">Anschrift<textarea name="k_adresse" rows="2" placeholder="Straße Nr.&#10;PLZ Ort">${esc(d.kunde.adresse)}</textarea></label>
       <label>USt-IdNr. des Kunden${RC[d.rc] && RC[d.rc].idPflicht ? '' : ' (optional)'}<input name="k_ustid" value="${esc(d.kunde.ustid)}"></label>
       ${RC[d.rc] && d.rc !== 'inland13b' ? `<label>Land des Kunden (2 Buchstaben, z. B. AT, CH, US)<input name="k_land" maxlength="2" value="${esc(d.kunde.land)}" placeholder="${esc(ustLand(d.kunde.ustid))}"></label>` : ''}
@@ -4088,6 +4096,7 @@ function vEditor() {
         : `<label>Gültig bis<input type="date" name="gueltigBis" value="${esc(d.gueltigBis)}"></label>`}
     </div>
     <h3>Was?</h3>
+    <label>Text über den Positionen (optional)<textarea name="einleitung" rows="3" placeholder="z. B. Sehr geehrter Herr Benz, hier die Aufstellung der Leistungen:">${esc(d.einleitung || '')}</textarea></label>
     <div id="posList">${d.positionen.map(posHtml).join('')}</div>
     <div class="btns" style="margin-top:0"><button type="button" data-act="pos-add">+ Position</button>
     ${S.artikel.length ? `<select id="artPick" aria-label="Aus der Artikelliste einfügen" style="width:auto"><option value="">+ Aus der Artikelliste …</option>${S.artikel.slice().sort((a, b) => a.name.localeCompare(b.name, 'de')).map((a) => `<option value="${a.id}">${esc(a.name)} · ${eur(num(a.preis))}</option>`).join('')}</select>` : '<button type="button" data-act="artikel">Artikelliste anlegen</button>'}</div>
@@ -5017,7 +5026,8 @@ const LAYOUTS = {
   modern: { t: 'Modern', s: 'Titel und Tabellenkopf in deiner Farbe, Summe farbig hervorgehoben.', farbe: '#2563eb', schrift: 'sans', logo: 'rechts' },
   balken: { t: 'Farbbalken', s: 'Kräftiger Balken oben mit Firmenname und Logo.', farbe: '#0f766e', schrift: 'sans', logo: 'links' },
   schlicht: { t: 'Schlicht', s: 'Viel Weißraum, feine graue Linien, ruhig und zurückhaltend.', farbe: '#6b7280', schrift: 'sans', logo: 'links' },
-  elegant: { t: 'Elegant', s: 'Schrift mit Serifen, Logo in der Mitte, wie Briefpapier.', farbe: '#7c2d12', schrift: 'serif', logo: 'mitte' }
+  elegant: { t: 'Elegant', s: 'Schrift mit Serifen, Logo in der Mitte, wie Briefpapier.', farbe: '#7c2d12', schrift: 'serif', logo: 'mitte' },
+  rahmen: { t: 'Mit Rahmen', s: 'Anschrift rechts oben, Kopfdaten im Kasten, Tabelle mit Linien, Beträge inklusive Umsatzsteuer.', farbe: '#000000', schrift: 'sans', logo: 'links' }
 };
 const LAYOUT_FARBEN = ['#1f2937', '#2563eb', '#0f766e', '#15803d', '#b91c1c', '#c2410c', '#7c2d12', '#6d28d9', '#be185d', '#6b7280'];
 const SCHRIFTEN = { sans: 'system-ui,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif', serif: 'Georgia,Cambria,"Times New Roman",Times,serif' };
@@ -5025,6 +5035,13 @@ function lay(x) {
   const l = Object.assign({}, x || S.firma.layout || {}), k = LAYOUTS[l.vorlage] ? l.vorlage : 'klassisch', v = LAYOUTS[k];
   return { vorlage: k, farbe: /^#[0-9a-f]{6}$/i.test(l.farbe || '') ? l.farbe : v.farbe, schrift: SCHRIFTEN[l.schrift] ? l.schrift : v.schrift, logo: ['links', 'mitte', 'rechts'].includes(l.logo) ? l.logo : v.logo, qr: l.qr !== false, gewaehlt: !!l.gewaehlt, gefragt: !!l.gefragt };
 }
+const RAHMEN_CSS = `#druck .L-rahmen{font-size:10pt;line-height:1.35}#druck .L-rahmen p{margin:0 0 3.5mm}
+#druck .rk{display:flex;justify-content:space-between;align-items:flex-start;gap:10mm;margin-bottom:12mm}#druck .rk .logo{margin:0;max-height:28mm;max-width:70mm}#druck .rk .ra{text-align:right;line-height:1.45}
+#druck .L-rahmen .absender{text-decoration:underline;font-size:7.5pt;margin-bottom:5mm}#druck .rem{font-weight:700;line-height:1.35;min-height:28mm;margin-bottom:6mm;padding-left:1mm;white-space:pre-line}
+#druck .rbox{display:flex;align-items:center;border:.35mm solid #000;background:#f2f2f2;padding:2mm 3mm;gap:7mm;margin-bottom:7mm}#druck .rbox .rti{font-size:15pt;font-weight:700;flex:1}#druck .rbox .rf{text-align:right;font-weight:700;font-size:9.5pt;line-height:1.35;white-space:nowrap}
+#druck table.rt2{width:100%;border-collapse:collapse;margin:2mm 0 4mm}#druck table.rt2 th,#druck table.rt2 td{border:.35mm solid #000;padding:2mm;vertical-align:top;text-align:left}#druck table.rt2 th{background:#f2f2f2}
+#druck table.rt2 .r{text-align:right}#druck table.rt2 .c{text-align:center}#druck table.rt2 td.b{font-weight:700}#druck table.rt2 tr.g td{background:#f2f2f2;font-weight:700;padding:2.5mm 2mm}
+#druck .rfuss{margin-top:14mm;display:grid;grid-template-columns:repeat(3,1fr);gap:6mm;font-size:7.5pt;font-weight:700;line-height:1.3}`;
 const LAYOUT_CSS = `#druck .rd{-webkit-print-color-adjust:exact;print-color-adjust:exact}
 #druck .lz{display:flex;margin:0 0 5mm}#druck .lz.l-links{justify-content:flex-start}#druck .lz.l-mitte{justify-content:center}#druck .lz.l-rechts{justify-content:flex-end}#druck .lz .logo{margin:0}
 #druck .zqr{display:flex;gap:4mm;align-items:center;margin:5mm 0;break-inside:avoid;page-break-inside:avoid}#druck .zqr svg{flex:none}#druck .zqr div{font-size:8.5pt;color:#333;max-width:95mm}
@@ -5037,7 +5054,7 @@ const LAYOUT_CSS = `#druck .rd{-webkit-print-color-adjust:exact;print-color-adju
 #druck .L-schlicht table.p th{font-weight:500;color:#666;font-size:8.5pt;text-transform:uppercase;letter-spacing:.06em;border-bottom:.2mm solid #ccc}#druck .L-schlicht table.p td{border-bottom:.2mm solid #eee;padding:2.5mm 1mm}
 #druck .L-schlicht .sum .g{border-top:.2mm solid #999;font-weight:600}#druck .L-schlicht .fuss{border-top:.2mm solid #ddd;color:#777}#druck .L-schlicht .absender{text-decoration:none;color:#888}
 #druck .L-elegant h1{text-align:center;font-weight:400;font-size:20pt;letter-spacing:.08em;color:var(--ak);border-top:.3mm solid var(--ak);border-bottom:.3mm solid var(--ak);padding:2mm 0}
-#druck .L-elegant table.p th{border-bottom:1mm double var(--ak);font-weight:600}#druck .L-elegant .sum .g{border-top:1mm double var(--ak)}#druck .L-elegant .fuss{text-align:center;border-top:.3mm solid var(--ak)}`;
+#druck .L-elegant table.p th{border-bottom:1mm double var(--ak);font-weight:600}#druck .L-elegant .sum .g{border-top:1mm double var(--ak)}#druck .L-elegant .fuss{text-align:center;border-top:.3mm solid var(--ak)}` + RAHMEN_CSS;
 document.head.insertAdjacentHTML('beforeend', `<style>${LAYOUT_CSS}
 .lwgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:10px;margin:10px 0}
 .lwk{display:grid;gap:4px;text-align:left;padding:8px;font-weight:500}.lwk[aria-pressed="true"]{outline:3px solid var(--accent);outline-offset:-1px}.lwk b{font-size:14px}.lwk span{font-size:12px;line-height:1.3}
@@ -5052,6 +5069,7 @@ document.head.insertAdjacentHTML('beforeend', `<style>${LAYOUT_CSS}
 
 /* Kopf mit Logo (oder Farbbalken) für Rechnung, Angebot und Mahnung */
 function layKopf(f, L) {
+  if (L.vorlage === 'rahmen') return rahmenKopf(f);
   if (L.vorlage === 'balken') {
     const lg = f.logo ? `<img class="logo" src="${esc(f.logo)}" alt="">` : '';
     const txt = `<div><div class="bn">${esc(f.name)}</div><div class="bs">${esc([f.strasse, [f.plz, f.ort].join(' ').trim(), f.email].filter((x) => x && x.trim()).join(' · '))}</div></div>`;
@@ -5059,7 +5077,7 @@ function layKopf(f, L) {
   }
   return f.logo ? `<div class="lz l-${L.logo}"><img class="logo" src="${esc(f.logo)}" alt=""></div>` : '';
 }
-const layHuelle = (L, inhalt) => `<div class="rd L-${L.vorlage}" style="--ak:${L.farbe};font-family:${esc(SCHRIFTEN[L.schrift])}">${inhalt}</div>`;
+const layHuelle = (L, inhalt) => `<div class="rd L-${L.vorlage}" style="--ak:${L.farbe};font-family:${esc(L.vorlage === 'rahmen' && L.schrift === 'sans' ? RAHMEN_SCHRIFT : SCHRIFTEN[L.schrift])}">${inhalt}</div>`;
 /* Überweisungs-QR-Code (GiroCode) für Rechnung und Mahnung. Leer, wenn er aus ist oder IBAN/Betrag nicht passen. */
 function qrZahlungText(nr, betrag) {
   const f = S.firma;
@@ -5069,6 +5087,140 @@ function qrZahlungHtml(nr, betrag, L) {
   if (!L.qr) return '';
   const t = qrZahlungText(nr, betrag); if (!t) return '';
   return `<div class="zqr">${qrSvg(t, 30)}<div><b>Bequem bezahlen:</b> Scannen Sie den Code mit Ihrer Banking-App. Empfänger, IBAN, Betrag (${eur(betrag)}) und Verwendungszweck sind dann schon ausgefüllt. Sie müssen die Überweisung nur noch bestätigen.</div></div>`;
+}
+
+/* ---------- Vorlage „Mit Rahmen“: Absender rechts oben, Kopfdaten im Kasten, Tabelle mit Linien, Beträge inkl. Umsatzsteuer ---------- */
+const RAHMEN_SCHRIFT = 'Arial,"Liberation Sans",Arimo,Helvetica,sans-serif';
+
+const rahmenAdresse = (f) => [f.name, f.strasse, [f.plz, f.ort].join(' ').trim(), f.tel && 'Tel.: ' + f.tel, f.email].filter((x) => x && String(x).trim()).map(String);
+const rahmenKopf = (f) => `<div class="rk"><div>${f.logo ? `<img class="logo" src="${esc(f.logo)}" alt="">` : ''}</div><div class="ra">${rahmenAdresse(f).map(esc).join('<br>')}</div></div>`;
+function rahmenFuss(f) {
+  return [rahmenAdresse(f),
+    [f.ustid && 'USt-IdNr.: ' + f.ustid, f.steuernr && 'Steuernummer: ' + f.steuernr, REGISTER_RF.includes(f.rechtsform) && f.registergericht, REGISTER_RF.includes(f.rechtsform) && f.registernr],
+    [(f.iban || f.bank) && (f.kontoinhaber || f.name), f.inhaber, f.bank, f.iban && 'IBAN: ' + f.iban, f.bic && 'BIC: ' + f.bic]]
+    .map((c) => c.filter((x) => x && String(x).trim()).map(String));
+}
+/* Daten für Kasten, Tabelle und Fußnote, gemeinsam für Druck und PDF */
+function rahmenDaten(d, titel) {
+  const s = summen(d), sv = istSchluss(d) ? summenVoll(d) : s, isRe = d.typ !== 'angebot', brutto = !d.ku && !RC[d.rc], rab = hatRabatt(d);
+  const faktor = (p) => brutto ? 1 + num(p.ust) / 100 : 1;
+  const felder = [[isRe ? 'Rechnungsnr.:' : 'Angebotsnr.:', d.nr || 'Entwurf']].concat(d.kunde.nr ? [['Kundennr.:', d.kunde.nr]] : [], [['Datum:', dat(d.datum)]], isRe ? [['Lieferdatum:', dat(d.leistungsdatum || d.datum)]] : d.gueltigBis ? [['Gültig bis:', dat(d.gueltigBis)]] : []);
+  const zeilen = d.positionen.map((p, i) => ({ nr: String(i + 1), text: p.text, menge: `${String(p.menge).replace('.', ',')}${p.einheit && !/^(stk\.?|stück)$/i.test(p.einheit) ? ' ' + p.einheit : ''}`, rabatt: num(p.rabatt) ? String(p.rabatt).replace('.', ',') + ' %' : '', einzel: eurZahl(r2(num(p.preis) * faktor(p))), gesamt: eurZahl(r2(posNetto(p) * faktor(p))) }));
+  const saetze = Object.keys(sv.proSatz).filter((k) => Number(k) > 0).sort((a, b) => b - a);
+  const texte = [];
+  if (brutto && saetze.length) texte.push(`* Im Gesamtbetrag von ${eur(sv.brutto)} (Netto: ${eur(sv.netto)}) sind ${saetze.map((k) => `USt ${k} % (${eur(r2(sv.proSatz[k] * k / 100))})`).join(' und ')} enthalten.`);
+  else if (brutto) texte.push('* Der Gesamtbetrag enthält keine Umsatzsteuer.');
+  if (d.ku) texte.push(KU_HINWEIS);
+  if (RC[d.rc]) texte.push(RC[d.rc].hinweis);
+  if (befreiungText(d)) texte.push(befreiungText(d));
+  if (isRe && d.typ !== 'gutschrift') {
+    const z = !d.faellig || d.faellig <= d.datum ? 'Zahlbar sofort, rein netto.' : `Zahlbar bis zum ${dat(d.faellig)} ohne Abzug.`;
+    if (texte.length) texte[0] += ' ' + z; else texte.push(z);
+    if (hatSkonto(d)) texte.push(skontoText(d));
+  }
+  if (d.stornoVon) { const o = S.rechnungen.find((x) => x.id === d.stornoVon) || {}; texte.unshift(`${d.teil ? 'Korrektur' : 'Stornorechnung'} zur Rechnung ${o.nr || ''} vom ${dat(o.datum)}.`); }
+  const summenZ = [[brutto ? 'Gesamtbetrag*' : 'Gesamtbetrag', eurZahl(sv.brutto)]];
+  if (istSchluss(d)) { for (const a of d.abzuege) summenZ.push([`Abzüglich Abschlagsrechnung ${a.nr} vom ${dat(a.datum)}`, '−' + eurZahl(a.brutto)]); summenZ.push(['Noch zu zahlen', eurZahl(s.brutto)]); }
+  return { titel, felder, zeilen, rab, texte, summenZ, zahl: s.brutto, isRe };
+}
+const eurZahl = (v) => Number(v).toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+function rahmenHtml(d, titel, L) {
+  const f = S.firma, R = rahmenDaten(d, titel);
+  const absender = [f.name, f.strasse, [f.plz, f.ort].join(' ').trim()].filter((x) => x && x.trim()).join(', ');
+  return layHuelle(L, `${rahmenKopf(f)}
+    <div class="absender">${esc(absender)}</div>
+    <div class="rem">${esc(d.kunde.name)}\n${esc(d.kunde.adresse)}${d.kunde.ustid ? '\nUSt-IdNr.: ' + esc(d.kunde.ustid) : ''}</div>
+    <div class="rbox"><div class="rti">${esc(titel)}</div>${R.felder.map(([k, v]) => `<div class="rf">${esc(k)}<br>${esc(v)}</div>`).join('')}</div>
+    ${d.einleitung ? `<p style="white-space:pre-line">${esc(d.einleitung)}</p>` : ''}
+    <table class="rt2"><tr><th class="c">Pos.</th><th>Bezeichnung</th><th class="r">Menge</th>${R.rab ? '<th class="r">Rabatt</th>' : ''}<th class="r">Einzel €</th><th class="r">Gesamt €</th></tr>
+    ${R.zeilen.map((z) => `<tr><td class="c">${z.nr}</td><td class="b">${esc(z.text)}</td><td class="r">${esc(z.menge)}</td>${R.rab ? `<td class="r">${z.rabatt}</td>` : ''}<td class="r">${z.einzel}</td><td class="r">${z.gesamt}</td></tr>`).join('')}
+    ${R.summenZ.map(([k, v]) => `<tr class="g"><td colspan="${R.rab ? 5 : 4}">${esc(k)}</td><td class="r">${v}</td></tr>`).join('')}</table>
+    ${R.texte.map((t) => `<p>${esc(t)}</p>`).join('')}
+    ${R.isRe && d.typ !== 'gutschrift' ? qrZahlungHtml(d.nr, R.zahl, L) : ''}
+    ${d.hinweis ? `<p style="white-space:pre-line">${esc(d.hinweis)}</p>` : ''}
+    <div class="rfuss">${rahmenFuss(f).map((c) => `<div>${c.map(esc).join('<br>')}</div>`).join('')}</div>`);
+}
+/* PDF-Seiten für „Mit Rahmen“ (Arimo = gleiche Maße wie Arial) */
+const PDF_ARIMO = {
+  normal: ['https://cdn.jsdelivr.net/npm/@fontsource/arimo@5.0.12/files/arimo-latin-400-normal.woff', 'sha384-hJqjlyb4qhsmvaMI8deor75b1/8liW0p9ziBf0tf7O5kOem1Pwgzl2EZ6suuLSbl'],
+  fett: ['https://cdn.jsdelivr.net/npm/@fontsource/arimo@5.0.12/files/arimo-latin-700-normal.woff', 'sha384-VfhG2yhAtfc2XAYPoIRxh3w3/gJoHkZ6/XRLNz1LCdX/aA/3b4XkikZh09Bf1BIt']
+};
+let arimoBereit = null;
+function ladeArimo() {
+  if (!arimoBereit) {
+    arimoBereit = (async () => { const fonts = {}; for (const [k, [url, integrity]] of Object.entries(PDF_ARIMO)) { const r = await fetch(url, { integrity, mode: 'cors' }); if (!r.ok) throw new Error('Schrift'); fonts[k] = new Uint8Array(await r.arrayBuffer()); } return fonts; })();
+    arimoBereit.catch(() => { arimoBereit = null; });
+  }
+  return arimoBereit;
+}
+async function rahmenPdf(doc, r, LY, fN, fB) {
+  const { rgb } = window.PDFLib, f = S.firma, R = rahmenDaten(r, docTitel(r)), schwarz = rgb(0, 0, 0), grau = rgb(0.949, 0.949, 0.949);
+  const W = 595.28, H = 841.89, L = 56, RR = W - 50, FUSS = 96;
+  const sauber = (t) => String(t == null ? '' : t).replace(/[\u00a0\u202f]/g, ' '); // Arimo hat kein brauchbares geschütztes Leerzeichen
+  const br = (t, sz, fo) => (fo || fN).widthOfTextAtSize(sauber(t), sz);
+  const umbruch = (t, sz, max, fo) => { const out = []; for (const a of sauber(t).split('\n')) { let z = ''; for (const w of a.split(' ')) { const v = z ? z + ' ' + w : w; if (br(v, sz, fo) > max && z) { out.push(z); z = w; } else z = v; } out.push(z); } return out; };
+  const seiten = []; let pg, y;
+  const txt = (t, x, yy, o = {}) => pg.drawText(sauber(t), { x: o.rechts ? x - br(t, o.size || 10, o.font) : o.mitte ? x - br(t, o.size || 10, o.font) / 2 : x, y: yy, size: o.size || 10, font: o.font || fN, color: schwarz });
+  const rahmen = (x, yy, w, h, fill) => pg.drawRectangle({ x, y: yy, width: w, height: h, borderColor: schwarz, borderWidth: 0.9, color: fill || undefined });
+  const neueSeite = () => { pg = doc.addPage([W, H]); seiten.push(pg); y = H - 60; };
+  neueSeite();
+  // Kopf: Logo links, Anschrift rechts
+  const logo = await logoFlach(f.logo);
+  if (logo) { const im = await doc.embedJpg(logo.bytes), z = Math.min(200 / logo.w, 80 / logo.h, 1); pg.drawImage(im, { x: L, y: H - 36 - logo.h * z, width: logo.w * z, height: logo.h * z }); }
+  rahmenAdresse(f).forEach((l, i) => txt(l, RR, H - 50 - i * 14, { rechts: true, size: 10 }));
+  const abs = [f.name, f.strasse, [f.plz, f.ort].join(' ').trim()].filter((x) => x && x.trim()).join(', ');
+  txt(abs, L, H - 168, { size: 7 }); pg.drawLine({ start: { x: L, y: H - 170 }, end: { x: L + br(abs, 7), y: H - 170 }, thickness: 0.4, color: schwarz });
+  let ay = H - 192; for (const l of [r.kunde.name].concat(String(r.kunde.adresse || '').split('\n'), r.kunde.ustid ? ['USt-IdNr.: ' + r.kunde.ustid] : [])) { if (l) { txt(l, L + 3, ay, { font: fB }); ay -= 13; } }
+  // Kasten
+  const by = Math.min(ay - 18, H - 300), bh = 34;
+  rahmen(L, by, RR - L, bh, grau);
+  txt(R.titel, L + 8, by + 11, { font: fB, size: 15 });
+  let fx = RR - 8;
+  for (const [k, v] of R.felder.slice().reverse()) { const w = Math.max(br(k, 9.5, fB), br(v, 9.5, fB)); txt(k, fx, by + 20, { font: fB, size: 9.5, rechts: true }); txt(v, fx, by + 7, { font: fB, size: 9.5, rechts: true }); fx -= w + 26; }
+  y = by - 26;
+  // Tabelle
+  const sp = [{ t: 'Pos.', w: 34, c: 1 }, { t: 'Bezeichnung', w: 0 }, { t: 'Menge', w: 52, r: 1 }].concat(R.rab ? [{ t: 'Rabatt', w: 46, r: 1 }] : [], [{ t: 'Einzel €', w: 72, r: 1 }, { t: 'Gesamt €', w: 78, r: 1 }]);
+  sp[1].w = RR - L - sp.reduce((q, c) => q + c.w, 0); let xx = L; for (const c of sp) { c.x = xx; xx += c.w; }
+  let tabelleOffen = false;
+  const zelleText = (c, t, yy, fo) => txt(t, c.c ? c.x + c.w / 2 : c.r ? c.x + c.w - 5 : c.x + 5, yy, { font: fo, rechts: !!c.r, mitte: !!c.c });
+  const kopfZeile = () => { const h = 22; for (const c of sp) rahmen(c.x, y - h, c.w, h, grau); for (const c of sp) zelleText(c, c.t, y - 15, fB); y -= h; };
+  const absatz = (t, o = {}) => { for (const l of umbruch(t, 10, RR - L, o.font)) { platz(14); txt(l, L, y, o); y -= 14; } y -= 6; };
+  const platz = (h) => { if (y - h < FUSS + 14) { neueSeite(); if (tabelleOffen) kopfZeile(); } };
+  if (r.einleitung) absatz(r.einleitung);
+  platz(60); kopfZeile(); tabelleOffen = true;
+  for (const z of R.zeilen) {
+    const zl = umbruch(z.text, 10, sp[1].w - 10, fB), h = Math.max(28, zl.length * 13 + 15);
+    platz(h);
+    for (const c of sp) rahmen(c.x, y - h, c.w, h);
+    const werte = [z.nr, null, z.menge].concat(R.rab ? [z.rabatt] : [], [z.einzel, z.gesamt]);
+    werte.forEach((v, j) => { if (v != null) zelleText(sp[j], v, y - 16, fN); });
+    zl.forEach((l, j) => txt(l, sp[1].x + 5, y - 16 - j * 13, { font: fB }));
+    y -= h;
+  }
+  for (const [k, v] of R.summenZ) {
+    const h = 26, last = sp[sp.length - 1]; platz(h);
+    rahmen(L, y - h, last.x - L, h, grau); rahmen(last.x, y - h, last.w, h, grau);
+    txt(k, L + 5, y - 17, { font: fB }); txt(v, last.x + last.w - 5, y - 17, { font: fB, rechts: true }); y -= h;
+  }
+  tabelleOffen = false; y -= 18;
+  for (const t of R.texte) absatz(t);
+  // QR-Code
+  const qrT = R.isRe && r.typ !== 'gutschrift' && LY.qr ? qrZahlungText(r.nr, R.zahl) : null;
+  if (qrT) {
+    const QM = qrMatrix(qrT), gr = 85, m = gr / (QM.length + 8); platz(gr + 8);
+    const x0 = L, y0 = y - gr + 8;
+    QM.forEach((z, yy) => { let a = -1; for (let q = 0; q <= z.length; q++) { if (q < z.length && z[q]) { if (a < 0) a = q; } else if (a >= 0) { pg.drawRectangle({ x: x0 + (a + 4) * m, y: y0 + gr - (yy + 5) * m, width: (q - a) * m, height: m, color: schwarz }); a = -1; } } });
+    const zl = umbruch(`Bequem bezahlen: Scannen Sie den Code mit Ihrer Banking-App. Empfänger, IBAN, Betrag (${eur(R.zahl)}) und Verwendungszweck sind dann schon ausgefüllt. Sie müssen die Überweisung nur noch bestätigen.`, 8.5, 270);
+    zl.forEach((l, i) => txt(l, x0 + gr + 10, y0 + gr / 2 + zl.length * 5.5 - 8 - i * 11, { size: 8.5 }));
+    y = y0 - 12;
+  }
+  if (r.hinweis) absatz(r.hinweis);
+  // Fuß auf jeder Seite
+  const sps = rahmenFuss(f), bw = (RR - L) / 3;
+  seiten.forEach((p2, i) => {
+    sps.forEach((col, c) => col.forEach((l, j) => p2.drawText(sauber(l), { x: L + c * bw, y: FUSS - 10 - j * 9.5, size: 7.5, font: fB, color: schwarz })));
+    const st = `Seite ${i + 1}/${seiten.length}`; p2.drawText(st, { x: W / 2 - br(st, 7.5, fB) / 2, y: 30, size: 7.5, font: fB, color: schwarz });
+  });
 }
 
 /* ---------- Auswahl-Fenster: Vorlage wählen, alte Rechnung übernehmen ---------- */
@@ -5242,6 +5394,10 @@ function altAnalyse(c) {
     const fr = parseInt(farbe.slice(1, 3), 16), fg = parseInt(farbe.slice(3, 5), 16), fb = parseInt(farbe.slice(5, 7), 16);
     for (let y = Math.round(h * 0.25); y < h * 0.8 && !tabKopf; y++) { let n = 0; for (let x = 0; x < w; x++) { const i = (y * w + x) * 4; if (Math.abs(px[i] - fr) + Math.abs(px[i + 1] - fg) + Math.abs(px[i + 2] - fb) < 90) n++; } if (n / w > 0.5) tabKopf = true; }
   }
+  // 3b. Hellgrau hinterlegte Zeilen (Kasten, Tabellenkopf) → Vorlage „Mit Rahmen“
+  let grauZeilen = 0;
+  for (let y = Math.round(h * 0.2); y < h * 0.85; y++) { let n = 0; for (let x = 0; x < w; x++) { const p = hsv((y * w + x) * 4); if (p.s < 0.06 && p.v > 0.86 && p.v < 0.975) n++; } if (n / w > 0.5) grauZeilen++; }
+  const grauKasten = grauZeilen >= 3;
   // 4. Logo vermuten: farbige Fläche im oberen Drittel (außerhalb eines Balkens), Raster aus 4×4-Pixel-Zellen
   let logo = null;
   if (!band) {
@@ -5261,7 +5417,7 @@ function altAnalyse(c) {
     }
     if (best) logo = { x: Math.max(0, best.x0 * Z / w - 0.01), y: Math.max(0, best.y0 * Z / h - 0.005), w: Math.min(1, (best.x1 - best.x0 + 1) * Z / w + 0.02), h: Math.min(0.4, (best.y1 - best.y0 + 1) * Z / h + 0.01) };
   }
-  return { farbe, band, tabKopf, logo };
+  return { farbe, band, tabKopf, logo, grauKasten };
 }
 /* Ausschnitt (Anteile der Seite) als Logo-Bild, höchstens 600 × 200 Pixel */
 function altLogoAus(c, box) {
@@ -5275,7 +5431,9 @@ function altLogoAus(c, box) {
 /* Letzte Rechnungsnummer im Text finden */
 function altNummer(text) {
   const m = String(text || '').match(/(?:rechnungs?\s?-?\s?(?:nummer|nr\.?)|rechnung\s+(?:nr\.?|#)|invoice\s+(?:number|no\.?|#))\s*[:#.]?\s*([A-Z0-9][A-Z0-9\-/._#]{0,24}\d)/i);
-  return m ? m[1] : '';
+  if (m) return m[1];
+  const z = String(text || '').match(/\b(?:RE|RG|RN|R|INV|AR)[-/._ ]?\d{2,}(?:[-/._]\d+)*\b/);
+  return z ? z[0].replace(/\s/g, '') : '';
 }
 /* Aus einer Nummer wie RE-2026-0042 den Aufbau RE-{JJJJ}-{NNNN} und die Zahl 42 machen */
 function nrMusterAus(nr) {
@@ -5319,7 +5477,7 @@ async function altLesen(file) {
   lw.alt = a;
   // Vorschlag: was am nächsten dran ist
   const mitte = an.logo && Math.abs(an.logo.x + an.logo.w / 2 - 0.5) < 0.1;
-  lw.vorlage = an.band ? 'balken' : an.tabKopf ? 'modern' : s.serif && mitte ? 'elegant' : 'klassisch';
+  lw.vorlage = an.band ? 'balken' : an.grauKasten ? 'rahmen' : an.tabKopf ? 'modern' : s.serif && mitte ? 'elegant' : 'klassisch';
   if (an.farbe) lw.farbe = an.farbe;
   if (s.serif !== null) lw.schrift = s.serif ? 'serif' : 'sans';
   if (an.logo) { const mx = an.logo.x + an.logo.w / 2; lw.logo = mx < 0.4 ? 'links' : mx > 0.6 ? 'rechts' : 'mitte'; }
@@ -5378,7 +5536,9 @@ function druckZeig(html, name) {
   setTimeout(() => { document.title = alt; }, 500);
 }
 function druckHtml(d, titel, modus, layCfg) {
-  const L = lay(layCfg), f = S.firma, s = summen(d), sv = istSchluss(d) ? summenVoll(d) : s, ls = modus === 'ls', ab = modus === 'ab';
+  const L0 = lay(layCfg);
+  if (L0.vorlage === 'rahmen' && !modus) return rahmenHtml(d, titel, L0);
+  const L = L0.vorlage === 'rahmen' ? Object.assign({}, L0, { vorlage: 'klassisch' }) : L0, f = S.firma, s = summen(d), sv = istSchluss(d) ? summenVoll(d) : s, ls = modus === 'ls', ab = modus === 'ab';
   const absender = [f.name, f.strasse, [f.plz, f.ort].join(' ')].filter((x) => x && x.trim()).join(' · ');
   const isRe = d.typ !== 'angebot' && !modus, rab = hatRabatt(d) && !ls;
   const bez = d.typ === 'angebot' ? 'Angebot' : 'Rechnung';
@@ -5397,6 +5557,7 @@ function druckHtml(d, titel, modus, layCfg) {
     <h1>${titel}</h1>
     ${ab ? '<p>Sehr geehrte Damen und Herren,</p><p>vielen Dank für Ihren Auftrag. Wir bestätigen ihn wie folgt:</p>' : ''}
     ${d.stornoVon ? `<p>${d.teil ? 'Korrektur' : 'Stornorechnung'} zur Rechnung ${esc((S.rechnungen.find((x) => x.id === d.stornoVon) || {}).nr || '')} vom ${dat((S.rechnungen.find((x) => x.id === d.stornoVon) || {}).datum)}.</p>` : ''}
+    ${d.einleitung && !modus ? `<p style="white-space:pre-line">${esc(d.einleitung)}</p>` : ''}
     <table class="p">${kopfP}${d.positionen.map(zeile).join('')}</table>
     ${ls ? `<p style="margin-top:14mm">Ware vollständig und in einwandfreiem Zustand erhalten:</p><div style="display:flex;gap:12mm;margin-top:14mm"><div style="flex:1;border-top:.3mm solid #000;padding-top:1mm;font-size:8.5pt">Datum</div><div style="flex:2;border-top:.3mm solid #000;padding-top:1mm;font-size:8.5pt">Name und Unterschrift</div></div>` : `
     <div class="sum"><div><span>Netto</span><span>${eur(sv.netto)}</span></div>
@@ -5705,7 +5866,7 @@ function logoFlach(dataUrl) {
 }
 async function zugferdPdf(r) {
   const fonts0 = await ladePdfLibs(), LY = lay(), V = LY.vorlage;
-  const fonts = LY.schrift === 'serif' ? await ladeSerif().catch(() => fonts0) : fonts0;
+  const fonts = LY.schrift === 'serif' ? await ladeSerif().catch(() => fonts0) : V === 'rahmen' ? await ladeArimo().catch(() => fonts0) : fonts0;
   const { PDFDocument, rgb, PDFName, PDFString, PDFHexString, PDFArray } = window.PDFLib;
   const doc = await PDFDocument.create({ updateMetadata: false });
   doc.registerFontkit(window.fontkit);
@@ -5723,6 +5884,8 @@ async function zugferdPdf(r) {
     }
     return out;
   };
+  if (V === 'rahmen') await rahmenPdf(doc, r, LY, fN, fB);
+  else {
   const seiten = []; let pg, y;
   const neueSeite = () => { pg = doc.addPage([W, H]); seiten.push(pg); y = H - 50; };
   const text = (t, x, yy, o = {}) => pg.drawText(String(t), { x: o.rechts ? x - breite(String(t), o.size || 9.5, o.font) : x, y: yy, size: o.size || 9.5, font: o.font || fN, color: o.color || rgb(0, 0, 0) });
@@ -5822,6 +5985,7 @@ async function zugferdPdf(r) {
     spalten.forEach((col, c) => col.forEach((l, j) => p2.drawText(l, { x: L + c * bw, y: FUSS - 16 - j * 10, size: 7.5, font: fN, color: grau })));
     if (seiten.length > 1) p2.drawText(`Seite ${i + 1} von ${seiten.length}`, { x: R - breite(`Seite ${i + 1} von ${seiten.length}`, 7.5), y: 30, size: 7.5, font: fN, color: grau });
   });
+  }
   // PDF/A-3: Metadaten, Farbprofil, eingebettete E-Rechnung
   const jetzt = new Date(), isoZ = jetzt.toISOString().replace(/\.\d+Z$/, 'Z'), titelText = `${titel} ${r.nr}`;
   doc.setTitle(titelText, { showInWindowTitleBar: true }); doc.setAuthor(f.name || ''); doc.setCreator('Steuer-Cockpit'); doc.setProducer('Steuer-Cockpit mit pdf-lib'); doc.setCreationDate(jetzt); doc.setModificationDate(jetzt);
@@ -6556,7 +6720,7 @@ document.addEventListener('input', (e) => {
   }
   if (e.target.name === 'k_name' && e.target.closest('#edForm')) {
     const k = S.kunden.find((x) => x.name === e.target.value);
-    if (k) { const f = $('#edForm'); if (!f.elements.k_adresse.value) f.elements.k_adresse.value = k.adresse || ''; if (!f.elements.k_ustid.value) f.elements.k_ustid.value = k.ustid || ''; if (!f.elements.k_email.value) f.elements.k_email.value = k.email || ''; if (f.elements.k_leitweg && !f.elements.k_leitweg.value) f.elements.k_leitweg.value = k.leitweg || ''; if (f.elements.k_land && !f.elements.k_land.value) f.elements.k_land.value = k.land || ''; refreshEditor(); }
+    if (k) { const f = $('#edForm'); if (!f.elements.k_adresse.value) f.elements.k_adresse.value = k.adresse || ''; if (!f.elements.k_ustid.value) f.elements.k_ustid.value = k.ustid || ''; if (!f.elements.k_email.value) f.elements.k_email.value = k.email || ''; if (f.elements.k_leitweg && !f.elements.k_leitweg.value) f.elements.k_leitweg.value = k.leitweg || ''; if (f.elements.k_land && !f.elements.k_land.value) f.elements.k_land.value = k.land || ''; if (f.elements.k_nr && !f.elements.k_nr.value) f.elements.k_nr.value = k.nr || ''; refreshEditor(); }
   }
 });
 document.addEventListener('change', async (e) => {
