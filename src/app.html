@@ -3766,6 +3766,7 @@ function vMenu() {
     <button data-act="new-be"><span class="ic">📷</span><span><span class="t">Beleg hochladen</span><span class="s">Foto oder PDF einer Eingangsrechnung, für Ausgaben und Vorsteuer.</span></span></button>
     ${lagerArtikel().length ? '<button data-act="lager-ein" data-id=""><span class="ic">📦</span><span><span class="t">Wareneingang buchen</span><span class="s">Neue Ware ins Lager, Bestand und Lagerwert stimmen dann wieder.</span></span></button>' : ''}
     <button data-act="vorlagen"><span class="ic">🔁</span><span><span class="t">Wiederkehrend</span><span class="s">Miete, Abos oder monatliche Kundenrechnungen automatisch anlegen.</span></span></button>
+    <button data-act="rp-datei"><span class="ic">📥</span><span><span class="t">Rechnungsdatei einspielen</span><span class="s">Fertige Rechnungen aus einer Datei (.json) übernehmen, mit Kunde und Nummer.</span></span></button>
     <button data-act="new-ext"><span class="ic">📂</span><span><span class="t">Vorhandene Rechnung hinterlegen</span><span class="s">Alte Ausgangsrechnung aus Word oder einem anderen Programm, damit dein Umsatz vollständig ist.</span></span></button>
   </div></div>`);
 }
@@ -6076,6 +6077,7 @@ async function sicherungLesen(file) {
   let j;
   try { j = JSON.parse(await file.text()); }
   catch (e) { return toast('Die Datei ist unvollständig oder beschädigt. Lade die Sicherung noch einmal vollständig herunter.'); }
+  if (j && j.app === 'steuer-cockpit' && j.art === 'rechnungen') return rePaketLesen(j);
   if (!j || j.app !== 'steuer-cockpit' || !j.state) return toast('Diese Datei ist keine Sicherung des Steuer-Cockpits.');
   sicherung = j;
   const a = zaehle(j.state), b = zaehle(S), nd = Object.keys(j.dateien || {}).length;
@@ -6106,6 +6108,64 @@ async function sicherungEinspielen() {
   await aufraeumen(); speicherFest();
   closeDlg(); tab = 'start'; render(); window.scrollTo(0, 0);
   toast(kaputt ? `Eingespielt. ${kaputt} Datei${kaputt > 1 ? 'en waren' : ' war'} beschädigt.` : 'Sicherung eingespielt');
+}
+/* ---------- Rechnungsdatei einspielen ----------
+   Eine Datei mit fertig gestellten Rechnungen (z. B. von Claude erstellt) kommt dazu, ohne den Rest zu ersetzen:
+   Rechnungen, Kunden, Zähler, auf Wunsch Firmendaten, Logo und Aussehen. Schon vorhandene Nummern werden übersprungen. */
+const RP_FELDER = { name: 'Firmenname', inhaber: 'Inhaber', strasse: 'Straße', plz: 'PLZ', ort: 'Ort', tel: 'Telefon', email: 'E-Mail', web: 'Webseite', ustid: 'USt-IdNr.', steuernr: 'Steuernummer', rechtsform: 'Rechtsform', registergericht: 'Registergericht', registernr: 'Registernummer', geschaeftsfuehrer: 'Geschäftsführer', bank: 'Bank', iban: 'IBAN', bic: 'BIC', kontoinhaber: 'Kontoinhaber', logo: 'Logo' };
+let rePaket = null;
+function rpFirmaAenderung(f) {
+  const L = [];
+  for (const k in RP_FELDER) if (f[k] != null && String(f[k]).trim() && String(f[k]) !== String(S.firma[k] || '')) L.push(RP_FELDER[k]);
+  if (f.layout && JSON.stringify(lay(f.layout)) !== JSON.stringify(lay(S.firma.layout))) L.push('Aussehen der Rechnungen');
+  return L;
+}
+function rpNummer(j) {
+  const nrs = (j.rechnungen || []).map((r) => r.nr).filter(Boolean).sort();
+  const m = nrs.length && nrMusterAus(nrs[nrs.length - 1]);
+  if (!m) return null;
+  const n2 = m.n + 1;
+  return { fmt: m.fmt, key: m.key, n: m.n, naechste: nrBau(m.fmt, heute(), m.key === 'fort' || m.key === heute().slice(0, 4) ? n2 : 1), anders: m.fmt !== nrFormat('RE') };
+}
+function rePaketLesen(j) {
+  if (!Array.isArray(j.rechnungen) || !j.rechnungen.length) return toast('In dieser Datei ist keine Rechnung.');
+  rePaket = j;
+  const da = vergebeneNr(), neu = j.rechnungen.filter((r) => !da.has(r.nr)), alt = j.rechnungen.filter((r) => da.has(r.nr));
+  const fa = j.firma ? rpFirmaAenderung(j.firma) : [], nr = rpNummer(j);
+  openDlg(`${head('Rechnungen einspielen')}<form id="rpForm" class="dlg-body" autocomplete="off">
+    <table class="tab">${j.rechnungen.map((r) => `<tr><td><b>${esc(r.nr)}</b><div class="small muted">${esc((r.kunde && r.kunde.name) || '')} · ${dat(r.datum)}</div></td><td style="text-align:right">${eur(summen(r).brutto)}<div class="small ${da.has(r.nr) ? 'muted' : ''}">${da.has(r.nr) ? 'schon da, wird übersprungen' : 'kommt dazu'}</div></td></tr>`).join('')}</table>
+    ${alt.length ? `<p class="small muted" style="margin-top:8px">Eine Nummer, die es bei dir schon gibt, nimmt die App nicht noch einmal, damit nichts doppelt ist.</p>` : ''}
+    ${fa.length ? `<label class="check" style="margin-top:12px"><input type="checkbox" name="firma" checked> Firmendaten aus der Datei übernehmen: ${esc(fa.join(', '))}</label>` : ''}
+    ${nr && nr.anders ? `<label class="check" style="margin-top:8px"><input type="checkbox" name="nummer" checked> Rechnungsnummern ab jetzt so weiterzählen, nächste Rechnung: <b>${esc(nr.naechste)}</b></label>` : ''}
+    <p class="small muted" style="margin-top:12px">Der Rest deiner Daten bleibt, wie er ist. Die Rechnungen kommen als gestellt und offen in deine Liste, die Kunden in deine Kontakte.</p>
+  </form>
+  <div class="dlg-foot"><button class="primary" data-act="rp-ok"${neu.length ? '' : ' disabled'}>${neu.length ? (neu.length === 1 ? '1 Rechnung einspielen' : neu.length + ' Rechnungen einspielen') : 'Nichts Neues'}</button></div>`);
+}
+async function rePaketEinspielen() {
+  const j = rePaket, f = $('#rpForm'); if (!j || !f) return;
+  const mitFirma = f.elements.firma ? f.elements.firma.checked : false, mitNr = f.elements.nummer ? f.elements.nummer.checked : false;
+  if (mitFirma && j.firma) {
+    for (const k in RP_FELDER) if (j.firma[k] != null && String(j.firma[k]).trim()) S.firma[k] = j.firma[k];
+    if (j.firma.layout) S.firma.layout = Object.assign({}, lay(j.firma.layout), { gewaehlt: true, gefragt: true });
+  }
+  const nr = rpNummer(j);
+  if (mitNr && nr) S.firma.nummern.RE = nr.fmt === NR_ARTEN.RE[1] ? '' : nr.fmt;
+  const da = vergebeneNr(), ids = new Set(S.rechnungen.map((r) => r.id)), rein = [];
+  S.zaehler.RE = S.zaehler.RE || {};
+  for (const r0 of j.rechnungen) {
+    if (!r0.nr || da.has(r0.nr)) continue;
+    const d = JSON.parse(JSON.stringify(r0));
+    if (!d.id || ids.has(d.id)) d.id = uid();
+    delete d.archiv; delete d.zahlungen; delete d.bezahltAm; delete d.mahnungen; delete d.ausAngebot;
+    d.typ = d.typ || 'rechnung'; d.status = 'offen'; d.gestelltAm = d.gestelltAm || d.datum || heute(); d.eingespielt = heute();
+    await archivRechnung(d);
+    merkeKunde(d.kunde); S.rechnungen.push(d); ids.add(d.id); da.add(d.nr); rein.push(d.nr);
+    const m = nrMusterAus(d.nr);
+    if (m && m.fmt === nrFormat('RE')) { const k = nrKey('RE', String(d.datum || heute()).slice(0, 4), m.fmt); S.zaehler.RE[k] = Math.max(S.zaehler.RE[k] || 0, m.n); }
+  }
+  protoNotiz(`Rechnungsdatei eingespielt: ${rein.join(', ') || 'nichts Neues'}`);
+  await save(); rePaket = null; closeDlg(); tab = 'rechnungen'; filter.re = 'offen'; render(); window.scrollTo(0, 0);
+  toast(rein.length ? `${rein.join(', ')} eingespielt. Nächste Nummer: ${naechsteNrVorschau()}` : 'Nichts Neues eingespielt');
 }
 // Dateien löschen, auf die weder der jetzige noch der aufgehobene Stand verweist
 async function aufraeumen() {
@@ -6623,6 +6683,8 @@ const ACT = {
   'datev-nur': () => datevLos(false),
   'datev-paket': () => datevLos(true),
   'restore-ok': sicherungEinspielen,
+  'rp-ok': rePaketEinspielen,
+  'rp-datei': restore,
   'vorher-zurueck': vorherZurueck,
   'vorher-weg': vorherWeg,
   paket: async (el) => { await paket(el.dataset.k); const y = Number(el.dataset.k); if (y < new Date().getFullYear()) { abDaten('J' + y).haken.paket = heute(); await save(); } },
