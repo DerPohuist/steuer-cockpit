@@ -283,7 +283,7 @@ function migriere() {
   }
   for (const l of S.lieferanten) if (!l.id) l.id = uid();
 }
-async function save() { protoMerke(); S.geaendert = new Date().toISOString(); await idbSet('state', S); }
+async function save() { protoMerke(); S.geaendert = new Date().toISOString(); await idbSet('state', S); if (!dauerhaft && !S.beispiel) speicherFest(); }
 
 /* ---------- Änderungsprotokoll: jede Änderung an gebuchten Daten bleibt nachvollziehbar (GoBD) ----------
    Beim Speichern vergleicht die App den neuen Stand mit dem letzten und schreibt auf, was neu, geändert oder gelöscht ist.
@@ -2153,6 +2153,7 @@ function vStart() {
   const abJ = new Date().getFullYear() - 1;
   if (new Date().getMonth() < 7 && abMonate(abJ).length && !abFertig('J' + abJ)) { const A = abStand('J' + abJ); todos.push({ c: 'warn', t: `Jahresabschluss ${abJ}`, s: `${A.n} von ${A.L.length} Schritten erledigt. Inventur, Anlagen und Unterlagen für die Steuererklärung.`, act: 'abschluss', k: 'J' + abJ, b: A.n ? 'Weitermachen' : 'Starten' }); }
   const hatDaten = S.rechnungen.length + S.angebote.length + S.belege.length > 0;
+  if (!hatDaten && !S.beispiel) todos.push({ c: 'warn', t: 'Hier ist noch nichts gespeichert', s: 'Das Cockpit speichert nur in dem Browser, in dem du etwas eingibst, nicht im Internet. Fehlt etwas, das du schon eingegeben hast? Dann öffne das Cockpit auf demselben Gerät im selben Browser, nicht im privaten Fenster und nicht über einen Link aus WhatsApp oder einer Mail-App. Oder spiel eine Sicherung ein.', act: 'restore', b: 'Sicherung einspielen' });
   if (hatDaten && (!S.letzteSicherung || tageBis(S.letzteSicherung) < -14)) todos.push({ c: 'warn', t: 'Sicherung herunterladen', s: S.letzteSicherung ? `Letzte Sicherung am ${dat(S.letzteSicherung)}.` : 'Deine Daten liegen nur in diesem Browser. Eine Sicherung schützt vor Verlust.', act: 'backup', b: 'Sichern' });
   if (!S.beispiel && !S.vdoku && S.rechnungen.filter((r) => r.status !== 'entwurf').length + S.belege.length >= 5) todos.push({ c: 'warn', t: 'Verfahrensdokumentation anlegen', s: 'Eine Seite, wie du Belege bekommst, buchst und aufhebst. Die App füllt das meiste vor, du beantwortest ein paar Fragen.', act: 'vdoku', b: 'Anlegen' });
   const R = hatDaten ? ruecklage() : null;
