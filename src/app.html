@@ -282,8 +282,9 @@ function migriere() {
     S.v = 2;
   }
   for (const l of S.lieferanten) if (!l.id) l.id = uid();
+  if (!S.profil) S.profil = uid(); // eigene Kennung dieses Cockpits, trennt Sicherungen verschiedener Personen
 }
-async function save() { protoMerke(); S.geaendert = new Date().toISOString(); await idbSet('state', S); if (!dauerhaft && !S.beispiel) speicherFest(); }
+async function save() { protoMerke(); S.geaendert = new Date().toISOString(); await idbSet('state', S); if (!dauerhaft && !S.beispiel) speicherFest(); drvPlane(); }
 
 /* ---------- Änderungsprotokoll: jede Änderung an gebuchten Daten bleibt nachvollziehbar (GoBD) ----------
    Beim Speichern vergleicht die App den neuen Stand mit dem letzten und schreibt auf, was neu, geändert oder gelöscht ist.
@@ -2085,7 +2086,9 @@ function vModusWahl() {
       <button class="primary" style="text-align:left;padding:12px 14px" data-act="modus" data-k="firma"><b>Für meine Firma</b><br><span class="small">Selbständig, Gewerbe, Freiberufler, GbR oder GmbH: Angebote, Rechnungen, Belege, Umsatzsteuer und Steuererklärung.</span></button>
       <button style="text-align:left;padding:12px 14px" data-act="modus" data-k="privat"><b>Nur private Steuererklärung</b><br><span class="small">Angestellt, in Rente, Elternzeit oder Studium: Schritt für Schritt zur Einkommensteuererklärung für ELSTER.</span></button>
     </div>
-    <p class="small muted" style="margin-top:8px">Du kannst später jederzeit umschalten.</p></div>`;
+    <p class="small muted" style="margin-top:8px">Du kannst später jederzeit umschalten.</p>
+    <p class="small" style="margin-top:12px"><b>Schon Daten auf einem anderen Gerät?</b> Dann hol sie dir zurück:</p>
+    <div class="btns">${G_CLIENT ? '<button data-act="drive-liste">Aus Google Drive holen</button>' : ''}<button data-act="restore">Sicherungsdatei einspielen</button></div></div>`;
 }
 function vStartPrivat() {
   const y0 = new Date().getFullYear(), j = estAktJahr();
@@ -2099,7 +2102,8 @@ function vStartPrivat() {
     kopf = `<div class="big">${R.saldo > 0 ? `<span class="pill warn">Nachzahlung</span> etwa ${eur(R.saldo)}` : `<span class="pill good">Erstattung</span> etwa ${eur(-R.saldo)}`}</div>
       <p class="small muted" style="margin-top:6px">Steuererklärung ${j}, Schritt ${i + 1} von ${L.length}: ${L[i][1]}. Grobe Schätzung nach deinen bisherigen Angaben.</p>`;
     rest = vPflicht(E, j, R);
-    if (!S.letzteSicherung || tageBis(S.letzteSicherung) < -14) rest += `<div class="card"><h2>Sicherung herunterladen</h2><p class="small muted">Deine Angaben und Unterlagen liegen nur in diesem Browser. ${S.letzteSicherung ? `Letzte Sicherung am ${dat(S.letzteSicherung)}.` : 'Eine Sicherung schützt vor Verlust.'}</p><div class="btns"><button data-act="backup">Sichern</button></div></div>`;
+    if (drvAn() && !S.beispiel && (!drvKontoPasst() || drv.abgelaufen)) rest += `<div class="card"><h2>Google Drive ${drvKontoPasst() ? '<span class="pill warn">Bitte neu anmelden</span>' : '<span class="pill bad">Anderes Konto</span>'}</h2><p class="small muted">Die automatische Sicherung ist pausiert. Mehr dazu in den Einstellungen.</p>${drvKontoPasst() ? '<div class="btns"><button data-act="drive-jetzt">Anmelden und sichern</button></div>' : ''}</div>`;
+    if (!sicherAm() || tageBis(sicherAm()) < -14) rest += `<div class="card"><h2>Sicherung herunterladen</h2><p class="small muted">Deine Angaben und Unterlagen liegen nur in diesem Browser. ${sicherAm() ? `Letzte Sicherung am ${dat(sicherAm())}.` : 'Eine Sicherung schützt vor Verlust.'}${G_CLIENT && !drvAn() ? ' Bequemer: in den Einstellungen mit Google Drive verbinden, dann sichert die App von selbst.' : ''}</p><div class="btns"><button data-act="backup">Sichern</button></div></div>`;
   }
   return `<h1>Deine Steuererklärung</h1>
   <div class="status">${kopf}<div class="btns" style="margin-top:10px"><button class="primary" data-act="est-open">${E ? 'Weitermachen' : 'Starten'}</button></div></div>
@@ -2154,7 +2158,8 @@ function vStart() {
   if (new Date().getMonth() < 7 && abMonate(abJ).length && !abFertig('J' + abJ)) { const A = abStand('J' + abJ); todos.push({ c: 'warn', t: `Jahresabschluss ${abJ}`, s: `${A.n} von ${A.L.length} Schritten erledigt. Inventur, Anlagen und Unterlagen für die Steuererklärung.`, act: 'abschluss', k: 'J' + abJ, b: A.n ? 'Weitermachen' : 'Starten' }); }
   const hatDaten = S.rechnungen.length + S.angebote.length + S.belege.length > 0;
   if (!hatDaten && !S.beispiel) todos.push({ c: 'warn', t: 'Hier ist noch nichts gespeichert', s: 'Das Cockpit speichert nur in dem Browser, in dem du etwas eingibst, nicht im Internet. Fehlt etwas, das du schon eingegeben hast? Dann öffne das Cockpit auf demselben Gerät im selben Browser, nicht im privaten Fenster und nicht über einen Link aus WhatsApp oder einer Mail-App. Oder spiel eine Sicherung ein.', act: 'restore', b: 'Sicherung einspielen' });
-  if (hatDaten && (!S.letzteSicherung || tageBis(S.letzteSicherung) < -14)) todos.push({ c: 'warn', t: 'Sicherung herunterladen', s: S.letzteSicherung ? `Letzte Sicherung am ${dat(S.letzteSicherung)}.` : 'Deine Daten liegen nur in diesem Browser. Eine Sicherung schützt vor Verlust.', act: 'backup', b: 'Sichern' });
+  if (drvAn() && !S.beispiel && (!drvKontoPasst() || drv.abgelaufen)) todos.push(drvKontoPasst() ? { c: 'warn', t: 'Google Drive: bitte neu anmelden', s: 'Die automatische Sicherung ist pausiert, weil Google die Anmeldung beendet hat.', act: 'drive-jetzt', b: 'Anmelden' } : { c: 'bad', t: 'Google Drive: anderes Konto', s: `Dieses Cockpit gehört zu ${esc(S.driveKonto)}. Die App sichert nicht, damit nichts vermischt wird.`, act: 'tab', k: 'firma', b: 'Ansehen' });
+  if (hatDaten && (!sicherAm() || tageBis(sicherAm()) < -14)) todos.push({ c: 'warn', t: 'Sicherung herunterladen', s: sicherAm() ? `Letzte Sicherung am ${dat(sicherAm())}.` : `Deine Daten liegen nur in diesem Browser. Eine Sicherung schützt vor Verlust.${G_CLIENT && !drvAn() ? ' Bequemer: im Reiter Firma mit Google Drive verbinden, dann sichert die App von selbst.' : ''}`, act: 'backup', b: 'Sichern' });
   if (!S.beispiel && !S.vdoku && S.rechnungen.filter((r) => r.status !== 'entwurf').length + S.belege.length >= 5) todos.push({ c: 'warn', t: 'Verfahrensdokumentation anlegen', s: 'Eine Seite, wie du Belege bekommst, buchst und aufhebst. Die App füllt das meiste vor, du beantwortest ein paar Fragen.', act: 'vdoku', b: 'Anlegen' });
   const R = hatDaten ? ruecklage() : null;
   if (R && R.c === 'bad') todos.push({ c: 'warn', t: `Steuer-Rücklage aufstocken: es fehlen ${eur(R.fehlt)}`, s: `Zurücklegen solltest du ${eur(R.soll)}, da sind ${eur(R.ist)}.` });
@@ -2624,8 +2629,8 @@ function abMonatSchritte(k) {
   const R = ruecklage();
   L.push({ id: 'rueck', t: 'Geld für Steuern zurücklegen', ok: R.c === 'good' || R.soll <= 0, manuell: true,
     s: `Zurücklegen solltest du ${eur(R.soll)}${R.ist != null && R.ist !== '' ? `, da sind ${eur(R.ist)}` : ''}. Den Stand des Rücklagen-Kontos trägst du in der Übersicht ein.`, act: 'ab-rueck', b: 'Eintragen' });
-  L.push({ id: 'sich', t: 'Sicherung herunterladen', ok: !!S.letzteSicherung && S.letzteSicherung > bis,
-    s: S.letzteSicherung ? `Letzte Sicherung am ${dat(S.letzteSicherung)}.` : 'Noch nie gesichert. Deine Daten liegen nur in diesem Browser.', act: 'backup', b: 'Sichern' });
+  L.push({ id: 'sich', t: 'Sicherung herunterladen', ok: !!sicherAm() && sicherAm() > bis,
+    s: sicherAm() ? `Letzte Sicherung am ${dat(sicherAm())}.` : 'Noch nie gesichert. Deine Daten liegen nur in diesem Browser.', act: 'backup', b: 'Sichern' });
   return L;
 }
 function abJahrSchritte(y) {
@@ -2661,8 +2666,8 @@ function abJahrSchritte(y) {
     s: D.haken.paket ? `Heruntergeladen am ${dat(D.haken.paket)}.` : `Jahrespaket als ZIP mit allen Listen und Belegen${S.steuer.berater ? ' und dem DATEV-Export' : ''}. Auch ohne Steuerberater gut fürs Archiv.`, act: 'ab-paket', k: String(y), b: 'Herunterladen' });
   if (!privat()) L.push({ id: 'est', t: `Einkommensteuererklärung ${y}`, ok: false, manuell: true,
     s: S.steuer.berater ? 'Macht dein Steuerberater, sobald er das Paket hat. Hak es ab, wenn es erledigt ist.' : 'Mit dem Assistenten im Reiter Steuern Schritt für Schritt. Hak es ab, wenn sie abgegeben ist.', act: 'est-open', b: 'Starten' });
-  L.push({ id: 'sich', t: 'Sicherung herunterladen', ok: !!S.letzteSicherung && S.letzteSicherung > bis,
-    s: S.letzteSicherung ? `Letzte Sicherung am ${dat(S.letzteSicherung)}.` : 'Noch nie gesichert.', act: 'backup', b: 'Sichern' });
+  L.push({ id: 'sich', t: 'Sicherung herunterladen', ok: !!sicherAm() && sicherAm() > bis,
+    s: sicherAm() ? `Letzte Sicherung am ${dat(sicherAm())}.` : 'Noch nie gesichert.', act: 'backup', b: 'Sichern' });
   L.push({ id: 'ablage', t: 'Jahrespaket und Sicherung an zwei Orten ablegen', ok: !!(S.archivJahre && S.archivJahre[y]),
     s: S.archivJahre && S.archivJahre[y] ? `Abgelegt am ${dat(S.archivJahre[y])}.` : 'Rechnungen und Belege musst du 8 Jahre aufheben. Weil alles nur in diesem Browser liegt, beide Dateien z. B. auf einen USB-Stick und in eine Cloud.', act: 'jahrarchiv', k: String(y), b: 'Ablegen' });
   return L;
@@ -3030,11 +3035,12 @@ function vJahrArchiv(y) {
 function datenKarte() {
   return `  <div class="card">
     <h2>Sind meine Daten sicher? ${hb('sicherung')}</h2>
-    <p>Alles liegt nur in diesem Browser auf diesem Gerät${S.letzteSicherung ? `, letzte Sicherung am ${dat(S.letzteSicherung)}` : ', noch keine Sicherung'}.</p>
+    <p>Alles liegt nur in diesem Browser auf diesem Gerät${sicherAm() ? `, letzte Sicherung am ${dat(sicherAm())}` : ', noch keine Sicherung'}.</p>
     <p class="small">${dauerhaft ? '<span class="pill good">Dauerhaft gespeichert</span> Der Browser löscht die Daten nicht von selbst, auch wenn der Speicher knapp wird.' : `<span class="pill warn">Nicht fest gespeichert</span> Der Browser darf die Daten bei Platzmangel löschen, Safari auch nach 7 Tagen ohne Nutzung. Lege die App auf den Home-Bildschirm und lade regelmäßig eine Sicherung herunter. <button class="chip" data-act="speicher-fest">Dauerhaft speichern</button>`}</p>
     <div class="btns"><button data-act="backup">Sicherung herunterladen</button><button data-act="restore">Sicherung einspielen</button></div>
     ${vorherAm ? `<p class="small" style="margin-top:10px"><span class="pill grey">Aufgehoben</span> Der Stand vor dem Einspielen vom ${dat(vorherAm)} ist noch da. <button class="chip" data-act="vorher-zurueck">Rückgängig machen</button> <button class="chip" data-act="vorher-weg">Verwerfen</button></p>` : ''}
     <p class="small muted" style="margin-top:6px">Die Sicherung ist eine Datei mit allen Daten und Belegen. Speichere sie auf deinem Computer, in iCloud oder Google Drive. ${hb('handy', 'Aufs Handy legen')}</p>
+    <div id="drvBox">${drvBoxHtml()}</div>
     <details><summary>Auf ein anderes Gerät umziehen, z. B. vom Laptop aufs Handy</summary><ol class="small" style="margin:8px 0 0;padding-left:20px">
       <li>Auf dem alten Gerät „Sicherung herunterladen“.</li>
       <li>Die Datei aufs neue Gerät bringen: per AirDrop, iCloud Drive, Google Drive oder als Mail an dich selbst.</li>
@@ -3707,11 +3713,11 @@ const HILFE = {
     tipps: ['Ohne Steuerberater reicht das Jahrespaket: Listen für Excel plus alle Belege.'], siehe: ['euer'] },
   sicherung: { b: 'App', t: 'Sicherung und Gerätewechsel', kurz: 'Damit keine Daten verloren gehen.',
     text: 'Alle Daten liegen nur in diesem Browser auf diesem Gerät, nicht im Internet. Geht das Gerät kaputt oder löschst du den Browserverlauf, sind sie weg, außer du hast eine Sicherung.',
-    schritte: ['Im Reiter Firma „Sicherung herunterladen“. Es entsteht eine Datei mit allen Daten und Belegen.',
-      'Die Datei woanders ablegen: iCloud, Google Drive, USB-Stick oder als Mail an dich selbst.',
-      'Am besten alle zwei Wochen. Die App erinnert dich auf der Übersicht.',
-      'Neues Gerät: dort das Cockpit öffnen, im Reiter Firma „Sicherung einspielen“ und die Datei wählen.'],
-    tipps: ['Arbeite immer nur auf einem Gerät, sonst laufen die Stände auseinander.'], siehe: ['handy'] },
+    schritte: ['Am einfachsten: im Reiter Firma (privat: Einstellungen) „Mit Google Drive verbinden“. Mit deinem eigenen Google-Konto anmelden und ein Kennwort für die Sicherung festlegen. Ab dann sichert die App von selbst in deinen Ordner „Steuer-Cockpit Sicherungen“.',
+      'Von Hand: „Sicherung herunterladen“. Es entsteht eine Datei mit allen Daten und Belegen. Die Datei woanders ablegen: iCloud, Google Drive, USB-Stick oder als Mail an dich selbst.',
+      'Ohne Google Drive am besten alle zwei Wochen von Hand. Die App erinnert dich auf der Übersicht.',
+      'Neues Gerät: dort das Cockpit öffnen und „Aus Google Drive wiederherstellen“ oder „Sicherung einspielen“ mit der Datei.'],
+    tipps: ['Jeder nimmt sein eigenes Google-Konto. Die App sichert nicht in ein fremdes Konto und warnt, wenn eine Sicherung zu einem anderen Cockpit gehört.', 'Das Kennwort der Sicherung aufschreiben. Ohne es lässt sich die Sicherung nicht öffnen, auch nicht von uns.', 'Arbeite immer nur auf einem Gerät, sonst laufen die Stände auseinander.'], siehe: ['handy'] },
   ordnung: { b: 'Jahresende', t: 'Ordnung und Aufbewahrung', kurz: 'Was das Finanzamt bei der Buchhaltung erwartet.',
     text: 'Für die Buchhaltung gelten Regeln, die GoBD heißen. Kurz gesagt: Belege vollständig und zeitnah erfassen, nichts spurlos ändern oder löschen, alles lange genug aufheben und aufschreiben, wie du dabei vorgehst. Die Regeln gelten für dich als Unternehmer, nicht für die App. Die App nimmt dir aber das meiste ab.',
     schritte: ['Gestellte Rechnungen sperrt die App und legt eine feste Kopie ab. Fehler korrigierst du mit Storno oder Rechnungskorrektur.',
@@ -6055,48 +6061,68 @@ function dataToBlob(data, type) {
 // Dateien, auf die der Stand verweist (Belege, hinterlegte Rechnungen, Unterlagen der Steuererklärung)
 const dateiKeys = (st, alle) => { const j = JSON.stringify(st || {}); return alle.filter((k) => String(k).startsWith('datei:') && j.includes('"' + String(k).slice(6) + '"')); };
 const zaehle = (st) => ({ re: (st.rechnungen || []).length, be: (st.belege || []).length, bank: (st.bank || []).length, an: (st.angebote || []).length });
-async function backup() {
+async function sicherungsDaten() {
   const dateien = {};
   let fehlt = 0;
   for (const k of dateiKeys(S, await idbKeys())) {
     const d = await idbGet(k);
     try { if (d && d.blob) dateien[k] = { name: d.name, type: d.type, data: await blobToData(d.blob) }; } catch (e) { fehlt++; }
   }
+  return { fehlt, daten: { app: 'steuer-cockpit', format: 2, erstellt: new Date().toISOString(), anzahl: Object.assign(zaehle(S), { dateien: Object.keys(dateien).length }), state: S, dateien } };
+}
+async function backup() {
   S.letzteSicherung = heute(); await save(); speicherFest();
+  const { daten, fehlt } = await sicherungsDaten();
   const name = `steuer-cockpit-sicherung-${heute()}${S.firma.name ? '-' + dateiName(S.firma.name).replace(/\s+/g, '-') : ''}.json`;
-  download(name, new Blob([JSON.stringify({ app: 'steuer-cockpit', format: 2, erstellt: new Date().toISOString(), anzahl: Object.assign(zaehle(S), { dateien: Object.keys(dateien).length }), state: S, dateien })], { type: 'application/json' }));
+  download(name, new Blob([JSON.stringify(daten)], { type: 'application/json' }));
   render(); toast(fehlt ? `Sicherung heruntergeladen, ${fehlt} Datei${fehlt > 1 ? 'en' : ''} nicht lesbar` : 'Sicherung heruntergeladen');
 }
 /* Sicherung einspielen: erst zeigen, was drin ist, dann alles in einem Schritt schreiben. Der alte Stand bleibt zum Rückgängigmachen. */
 let sicherung = null;
 function restore() {
-  const inp = document.createElement('input'); inp.type = 'file'; inp.accept = '.json,application/json,text/plain';
+  const inp = document.createElement('input'); inp.type = 'file'; inp.accept = '.json,.cockpit-sicherung,application/json,application/octet-stream,text/plain';
   inp.onchange = () => { if (inp.files[0]) sicherungLesen(inp.files[0]); };
   inp.click();
 }
 async function sicherungLesen(file) {
   let j;
+  // Verschlüsselte Sicherung aus Google Drive (auch heruntergeladen und hier gewählt)
+  if ((await file.slice(0, 4).text()) === 'SCD1') {
+    const k = kopfLesen(new Uint8Array(await file.arrayBuffer()));
+    if (!k) return toast('Die Datei ist unvollständig oder beschädigt.');
+    drvOffen = { k, konto: '', name: file.name };
+    return drv && drv.kennwort ? drvOeffnen(drv.kennwort) : vKennwort();
+  }
   try { j = JSON.parse(await file.text()); }
   catch (e) { return toast('Die Datei ist unvollständig oder beschädigt. Lade die Sicherung noch einmal vollständig herunter.'); }
   if (j && j.app === 'steuer-cockpit' && j.art === 'rechnungen') return rePaketLesen(j);
   if (!j || j.app !== 'steuer-cockpit' || !j.state) return toast('Diese Datei ist keine Sicherung des Steuer-Cockpits.');
+  sicherungZeigen(j);
+}
+function sicherungZeigen(j) {
   sicherung = j;
   const a = zaehle(j.state), b = zaehle(S), nd = Object.keys(j.dateien || {}).length;
   const hier = b.re + b.be + b.bank + b.an > 0 && !S.beispiel;
   const neuer = hier && S.geaendert && j.erstellt && S.geaendert > j.erstellt;
+  // Gehört die Sicherung zu diesem Cockpit und zu diesem Google-Konto?
+  const fremdProfil = hier && S.profil && j.state.profil && S.profil !== j.state.profil;
+  const ihrKonto = j.state.driveKonto || (j._kopf && j._kopf.konto) || '';
+  const fremdKonto = ihrKonto && ((j._drive && j._drive.konto !== ihrKonto) || (!j._drive && S.driveKonto && S.driveKonto !== ihrKonto));
   const zeile = (x) => `${x.re} Rechnungen, ${x.an} Angebote, ${x.be} Belege, ${x.bank} Bankbuchungen`;
   openDlg(`${head('Sicherung einspielen')}<div class="dlg-body">
     <p><b>${esc((j.state.firma && j.state.firma.name) || 'Ohne Firmenname')}</b><br><span class="small muted">Gesichert am ${j.erstellt ? new Date(j.erstellt).toLocaleString('de-DE', { dateStyle: 'medium', timeStyle: 'short' }) : 'unbekannt'}</span></p>
     <table class="tab"><tr><td>In der Sicherung</td><td>${zeile(a)}, ${nd} Datei${nd === 1 ? '' : 'en'}</td></tr><tr><td>Jetzt auf diesem Gerät</td><td>${hier ? zeile(b) : 'noch nichts'}</td></tr></table>
+    ${fremdProfil || fremdKonto ? `<p class="small" style="margin-top:10px"><span class="pill bad">Anderes Cockpit</span> ${fremdKonto ? `Diese Sicherung gehört zum Google-Konto ${esc(ihrKonto)}, nicht zu ${esc((j._drive && j._drive.konto) || S.driveKonto)}.` : 'Diese Sicherung stammt aus einem anderen Cockpit als dem auf diesem Gerät, vielleicht von einer anderen Person.'} Spiel sie nur ein, wenn du die Daten hier wirklich durch diese ersetzen willst.</p>` : ''}
     ${neuer ? `<p class="small" style="margin-top:10px"><span class="pill warn">Achtung</span> Auf diesem Gerät wurde nach der Sicherung noch etwas geändert (${new Date(S.geaendert).toLocaleString('de-DE', { dateStyle: 'medium', timeStyle: 'short' })}). Diese Änderungen sind danach weg. Sichere sie vorher, falls du sie brauchst.</p>` : ''}
     <p class="small muted" style="margin-top:10px">Die Sicherung ersetzt den Stand auf diesem Gerät. ${hier ? 'Der bisherige Stand bleibt aufgehoben, bis du ihn im Reiter Firma verwirfst. So kannst du es rückgängig machen.' : ''}</p>
   </div>
-  <div class="dlg-foot">${hier ? '<button data-act="backup">Erst dieses Gerät sichern</button>' : ''}<button class="primary" data-act="restore-ok">Jetzt einspielen</button></div>`);
+  <div class="dlg-foot">${hier ? '<button data-act="backup">Erst dieses Gerät sichern</button>' : ''}<button class="primary" data-act="restore-ok">${fremdProfil || fremdKonto ? 'Trotzdem einspielen' : 'Jetzt einspielen'}</button></div>`);
 }
 async function sicherungEinspielen() {
   const j = sicherung; if (!j) return;
   toast('Sicherung wird eingespielt …');
   const neu = Object.assign(leer(), j.state, { firma: Object.assign(leer().firma, j.state.firma || {}), steuer: Object.assign(leer().steuer, j.state.steuer || {}) });
+  if (j._drive) neu.driveKonto = j._drive.konto;
   // Protokoll geht nicht verloren: Einträge beider Stände zusammen, dazu der Vorgang selbst
   if (!S.beispiel || neu.beispiel) { const ids = new Set((neu.protokoll || []).map((p) => p.id)); neu.protokoll = (neu.protokoll || []).concat((S.protokoll || []).filter((p) => !ids.has(p.id))).sort((a, b) => a.t.localeCompare(b.t)); }
   if (!neu.beispiel) neu.protokoll = (neu.protokoll || []).concat([{ id: uid(), t: new Date().toISOString(), art: 'Vorgang', b: 'app', n: `Sicherung vom ${j.erstellt ? new Date(j.erstellt).toLocaleString('de-DE', { dateStyle: 'medium', timeStyle: 'short' }) : 'unbekannt'} eingespielt` }]);
@@ -6107,9 +6133,315 @@ async function sicherungEinspielen() {
   await kv('readwrite', (st) => { for (const [k, v] of files) st.put(v, k); if (hatteDaten) st.put({ am: heute(), state: alt }, 'state-vorher'); else st.delete('state-vorher'); st.put(neu, 'state'); });
   S = neu; migriere(); protoStand = protoSchnitt(); sicherung = null; vorherAm = hatteDaten ? heute() : null;
   await aufraeumen(); speicherFest();
+  // Aus Google Drive geholt: dieses Gerät sichert ab jetzt wieder in dasselbe Konto, mit demselben Kennwort
+  if (j._drive) { drv = Object.assign(drv || {}, { konto: j._drive.konto, kname: j._drive.kname, kennwort: j._drive.kennwort, abgelaufen: false, profil: S.profil, stand: S.geaendert, letzte: j.erstellt || null }); if (drv.auto == null) drv.auto = true; await drvSpeichern(); }
   closeDlg(); tab = 'start'; render(); window.scrollTo(0, 0);
   toast(kaputt ? `Eingespielt. ${kaputt} Datei${kaputt > 1 ? 'en waren' : ' war'} beschädigt.` : 'Sicherung eingespielt');
 }
+/* ---------- Google Drive: automatische, verschlüsselte Sicherung ----------
+   Jeder meldet sich mit seinem eigenen Google-Konto an. Die App darf dort nur Dateien sehen, die sie selbst angelegt hat (drive.file).
+   Sie legt den Ordner „Steuer-Cockpit Sicherungen“ an und lädt eine Sicherung hoch, vorher mit einem eigenen Kennwort verschlüsselt.
+   Gegen Vermischen: Jedes Cockpit hat eine eigene Kennung (S.profil) und merkt sich sein Google-Konto (S.driveKonto).
+   In ein anderes Konto sichert die App nur nach ausdrücklicher Bestätigung. Beim Wiederherstellen warnt sie, wenn die Sicherung zu einem anderen Cockpit gehört.
+   Automatisch: beim Öffnen, wenn sich seit der letzten Sicherung etwas geändert hat (stille Anmeldung über eine kurze Weiterleitung zu Google),
+   und solange die Anmeldung gilt (etwa eine Stunde) gut eine Minute nach jeder Änderung. Pro Tag eine Datei, die letzten 30 bleiben. */
+const G_CLIENT = '';
+const G_SCOPE = 'https://www.googleapis.com/auth/drive.file';
+const G_ORDNER = 'Steuer-Cockpit Sicherungen';
+const G_BEHALTEN = 30;
+const G_API = 'https://www.googleapis.com/drive/v3', G_UP = 'https://www.googleapis.com/upload/drive/v3';
+let drv = null; // nur auf diesem Gerät: { konto, kname, kennwort, auto, letzte, stand, profil, abgelaufen, versuchtUm, nonce, zweck }
+let gTok = null; // { token, bis, konto }
+let drvTimer = null, drvLaeuft = false, drvFehler = '', drvWahl = null, drvOffen = null, drvKwSehen = false;
+async function drvLaden() {
+  try { drv = (await idbGet('drive')) || null; } catch (e) { drv = null; }
+  try { const t = JSON.parse(sessionStorage.getItem('sc-gtok') || 'null'); if (t && t.bis > Date.now() + 60000) gTok = t; } catch (e) {}
+}
+const drvSpeichern = () => (drv ? idbSet('drive', drv) : idbDel('drive'));
+const drvAn = () => !!(drv && drv.konto && drv.kennwort);
+const tokOk = (konto) => !!(gTok && gTok.bis > Date.now() + 60000 && (!konto || gTok.konto === konto));
+const drvKontoPasst = () => !S.driveKonto || !drv || S.driveKonto === drv.konto;
+const drvHatDaten = () => !!S.geaendert && !S.beispiel;
+function sicherAm() {
+  const d = drv && drv.letzte && drv.profil === S.profil ? drv.letzte.slice(0, 10) : '';
+  return [S.letzteSicherung || '', d].sort().pop() || null;
+}
+const drvZeit = (t) => t ? new Date(t).toLocaleString('de-DE', { dateStyle: 'medium', timeStyle: 'short' }) : 'unbekannt';
+const drvWer = () => (S.firma.inhaber || S.firma.name || (drv && drv.kname) || (gTok && gTok.kname) || '').trim();
+function gUri() { return location.origin + location.pathname.replace(/index\.html$/, ''); }
+
+/* Anmeldung über Weiterleitung: klappt auch in der Home-Bildschirm-App, wo Popups oft nicht gehen */
+async function gAnmelden(zweck, still) {
+  if (!G_CLIENT) return toast('Die Google-Anbindung ist noch nicht eingerichtet.');
+  if (!navigator.onLine) return toast('Dafür braucht es Internet.');
+  const nonce = uid() + uid();
+  drv = Object.assign(drv || {}, { nonce, zweck, zurueck: tab }); if (still) drv.versuchtUm = Date.now(); await drvSpeichern();
+  const p = new URLSearchParams({ client_id: G_CLIENT, redirect_uri: gUri(), response_type: 'token', scope: G_SCOPE, include_granted_scopes: 'true', state: nonce });
+  if (still) p.set('prompt', 'none'); else if (zweck !== 'jetzt' || !drv.konto) p.set('prompt', 'select_account');
+  if (drv.konto && (still || zweck === 'jetzt')) p.set('login_hint', drv.konto);
+  location.assign('https://accounts.google.com/o/oauth2/v2/auth?' + p);
+}
+async function gRueckkehr() {
+  const h = location.hash || '';
+  if (!/[#&]state=/.test(h)) return null;
+  const p = new URLSearchParams(h.slice(1));
+  history.replaceState(null, '', location.pathname + location.search);
+  if (!drv || !drv.nonce || p.get('state') !== drv.nonce) return null; // fremde oder alte Antwort
+  const zweck = drv.zweck; drv.nonce = null; drv.zweck = null;
+  if (zweck !== 'auto' && drv.zurueck && (privat() ? TABS_PRIVAT : TABS).some((x) => x[0] === drv.zurueck)) { tab = drv.zurueck; render(); }
+  if (p.get('error') || !p.get('access_token')) { if (zweck === 'auto') drv.abgelaufen = true; await drvSpeichern(); return { zweck, fehler: p.get('error') || 'kein Zugang' }; }
+  await drvSpeichern();
+  if (!String(p.get('scope') || '').includes('drive.file')) return { zweck, fehler: 'ohne-drive' };
+  gTok = { token: p.get('access_token'), bis: Date.now() + (Number(p.get('expires_in')) || 3600) * 1000 };
+  const u = (await (await gFetch('GET', G_API + '/about?fields=user(emailAddress,displayName)')).json()).user || {};
+  gTok.konto = String(u.emailAddress || '').toLowerCase(); gTok.kname = u.displayName || '';
+  try { sessionStorage.setItem('sc-gtok', JSON.stringify(gTok)); } catch (e) {}
+  return { zweck, konto: gTok.konto, kname: gTok.kname };
+}
+async function gFetch(method, url, body, headers) {
+  if (!gTok) { const e = new Error('abgelaufen'); e.abgelaufen = true; throw e; }
+  const r = await fetch(url, { method, body, headers: Object.assign({ Authorization: 'Bearer ' + gTok.token }, headers || {}) });
+  if (r.status === 401) { gTok = null; try { sessionStorage.removeItem('sc-gtok'); } catch (e) {} const e = new Error('abgelaufen'); e.abgelaufen = true; throw e; }
+  if (!r.ok) { let t = ''; try { t = (await r.json()).error.message; } catch (e) {} throw new Error(`Google meldet ${r.status}${t ? ': ' + t : ''}`); }
+  return r;
+}
+async function gSuche(q) {
+  const p = new URLSearchParams({ q, spaces: 'drive', pageSize: '200', orderBy: 'modifiedTime desc', fields: 'files(id,name,size,modifiedTime,appProperties)' });
+  return (await (await gFetch('GET', G_API + '/files?' + p)).json()).files || [];
+}
+async function gOrdner(anlegen) {
+  if (drv && drv.ordner) { try { const f = await (await gFetch('GET', `${G_API}/files/${drv.ordner}?fields=id,trashed`)).json(); if (f && !f.trashed) return f.id; } catch (e) { if (e.abgelaufen) throw e; } }
+  const da = await gSuche(`mimeType='application/vnd.google-apps.folder' and name='${G_ORDNER}' and trashed=false`);
+  let id = da.length ? da[da.length - 1].id : null;
+  if (!id && anlegen) id = (await (await gFetch('POST', G_API + '/files?fields=id', JSON.stringify({ name: G_ORDNER, mimeType: 'application/vnd.google-apps.folder', description: 'Sicherungen aus dem Steuer-Cockpit, verschlüsselt. Nur das Cockpit kann sie öffnen.' }), { 'Content-Type': 'application/json; charset=UTF-8' })).json()).id;
+  if (id && drv) drv.ordner = id;
+  return id;
+}
+async function gHoch(id, meta, bytes) {
+  const url = (id ? `${G_UP}/files/${id}` : `${G_UP}/files`) + '?fields=id,name,size&uploadType=';
+  if (bytes.length <= 4500000) {
+    const b = 'sc' + uid();
+    const body = new Blob([`--${b}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${JSON.stringify(meta)}\r\n--${b}\r\nContent-Type: application/octet-stream\r\n\r\n`, bytes, `\r\n--${b}--`]);
+    return (await gFetch(id ? 'PATCH' : 'POST', url + 'multipart', body, { 'Content-Type': 'multipart/related; boundary=' + b })).json();
+  }
+  // Große Sicherungen (viele Belege) in zwei Schritten
+  const r = await gFetch(id ? 'PATCH' : 'POST', url + 'resumable', JSON.stringify(meta), { 'Content-Type': 'application/json; charset=UTF-8', 'X-Upload-Content-Type': 'application/octet-stream' });
+  const loc = r.headers.get('Location'); if (!loc) throw new Error('Google hat keine Upload-Adresse geliefert.');
+  return (await gFetch('PUT', loc, bytes, { 'Content-Type': 'application/octet-stream' })).json();
+}
+
+/* Verschlüsseln: Kennwort → Schlüssel (PBKDF2, 600.000 Runden), AES-GCM. Datei: "SCD1", Länge, offener Kopf (nur Datum, Name, Zähler), verschlüsselter Inhalt */
+const DRV_MAGIC = [83, 67, 68, 49];
+async function drvSchluessel(kw, salt, it) {
+  const base = await crypto.subtle.importKey('raw', new TextEncoder().encode(kw), 'PBKDF2', false, ['deriveKey']);
+  return crypto.subtle.deriveKey({ name: 'PBKDF2', hash: 'SHA-256', salt, iterations: it }, base, { name: 'AES-GCM', length: 256 }, false, ['encrypt', 'decrypt']);
+}
+const b64e = (u) => { let s = ''; for (let i = 0; i < u.length; i += 0x8000) s += String.fromCharCode.apply(null, u.subarray(i, i + 0x8000)); return btoa(s); };
+const b64d = (s) => Uint8Array.from(atob(s), (c) => c.charCodeAt(0));
+const strom = async (u, T) => new Uint8Array(await new Response(new Blob([u]).stream().pipeThrough(new T('gzip'))).arrayBuffer());
+async function verpacken(obj, kw, meta) {
+  let roh = new TextEncoder().encode(JSON.stringify(obj)), gz = false;
+  if (typeof CompressionStream !== 'undefined') { try { roh = await strom(roh, CompressionStream); gz = true; } catch (e) { roh = new TextEncoder().encode(JSON.stringify(obj)); } }
+  const salt = crypto.getRandomValues(new Uint8Array(16)), iv = crypto.getRandomValues(new Uint8Array(12)), it = 600000;
+  const ct = new Uint8Array(await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, await drvSchluessel(kw, salt, it), roh));
+  const kopf = new TextEncoder().encode(JSON.stringify(Object.assign({ app: 'steuer-cockpit', art: 'verschluesselt', format: 1, gz, salt: b64e(salt), iv: b64e(iv), it }, meta)));
+  const out = new Uint8Array(8 + kopf.length + ct.length);
+  out.set(DRV_MAGIC, 0); new DataView(out.buffer).setUint32(4, kopf.length); out.set(kopf, 8); out.set(ct, 8 + kopf.length);
+  return out;
+}
+function kopfLesen(u) {
+  if (!u || u.length < 8 || DRV_MAGIC.some((b, i) => u[i] !== b)) return null;
+  const n = new DataView(u.buffer, u.byteOffset, u.byteLength).getUint32(4);
+  try { return { kopf: JSON.parse(new TextDecoder().decode(u.subarray(8, 8 + n))), ct: u.subarray(8 + n) }; } catch (e) { return null; }
+}
+async function entpacken(k, kw) {
+  let roh;
+  try { roh = new Uint8Array(await crypto.subtle.decrypt({ name: 'AES-GCM', iv: b64d(k.kopf.iv) }, await drvSchluessel(kw, b64d(k.kopf.salt), k.kopf.it || 600000), k.ct)); }
+  catch (e) { const x = new Error('kennwort'); x.kennwort = true; throw x; }
+  if (k.kopf.gz) {
+    if (typeof DecompressionStream === 'undefined') throw new Error('Dieser Browser kann die Sicherung nicht öffnen. Bitte einen aktuellen Browser nehmen.');
+    roh = await strom(roh, DecompressionStream);
+  }
+  return JSON.parse(new TextDecoder().decode(roh));
+}
+
+/* Sichern */
+function drvPlane() {
+  if (!drvAn() || S.beispiel || !tokOk(drv.konto) || !drvKontoPasst()) return;
+  clearTimeout(drvTimer); drvTimer = setTimeout(() => drvSichern('auto'), 75000);
+}
+async function drvSichern(art) { // 'auto' still im Hintergrund, 'hand' per Knopf, 'erst' direkt nach dem Verbinden
+  if (drvLaeuft || !drvAn() || S.beispiel) return;
+  clearTimeout(drvTimer);
+  if (!drvKontoPasst()) { drvFehler = 'konto'; drvBoxAkt(); if (art !== 'auto') vFalschesKonto(drv.konto); return; }
+  if (art === 'auto' && drv.stand && S.geaendert && drv.stand >= S.geaendert) return;
+  if (!tokOk(drv.konto)) { if (art !== 'auto') return gAnmelden('jetzt'); return; }
+  drvLaeuft = true; drvFehler = ''; drvBoxAkt();
+  try {
+    if (!S.profil) { S.profil = uid(); await save(); }
+    const stand = S.geaendert, tag = heute();
+    const { daten, fehlt } = await sicherungsDaten();
+    const wer = drvWer();
+    const bytes = await verpacken(daten, drv.kennwort, { erstellt: daten.erstellt, profil: S.profil, konto: drv.konto, name: wer, anzahl: daten.anzahl });
+    const ordner = await gOrdner(true);
+    const props = { app: 'steuer-cockpit', profil: S.profil, tag };
+    const name = `Steuer-Cockpit Sicherung ${tag}${wer ? ' ' + dateiName(wer) : ''} (${drv.konto}).cockpit-sicherung`;
+    const da = (await gSuche(`'${ordner}' in parents and trashed=false and appProperties has { key='profil' and value='${S.profil}' } and appProperties has { key='tag' and value='${tag}' }`))[0];
+    await gHoch(da ? da.id : null, da ? { name, appProperties: props } : { name, parents: [ordner], mimeType: 'application/octet-stream', appProperties: props, description: 'Verschlüsselte Sicherung aus dem Steuer-Cockpit.' }, bytes);
+    Object.assign(drv, { letzte: new Date().toISOString(), stand, profil: S.profil, abgelaufen: false }); await drvSpeichern();
+    // Ältere Tage ab Nummer 31 in den Papierkorb (Google hebt sie dort noch 30 Tage auf)
+    try { for (const f of (await gSuche(`'${ordner}' in parents and trashed=false and appProperties has { key='profil' and value='${S.profil}' }`)).slice(G_BEHALTEN)) await gFetch('PATCH', `${G_API}/files/${f.id}`, JSON.stringify({ trashed: true }), { 'Content-Type': 'application/json' }); } catch (e) { console.warn(e); }
+    if (art !== 'auto') toast(fehlt ? `In Google Drive gesichert, ${fehlt} Datei${fehlt > 1 ? 'en' : ''} nicht lesbar` : 'In Google Drive gesichert');
+  } catch (e) {
+    console.error(e);
+    if (e.abgelaufen) { drvFehler = ''; if (art !== 'auto') { drvLaeuft = false; return gAnmelden('jetzt'); } }
+    else { drvFehler = navigator.onLine ? (e.message || 'Fehler') : 'offline'; if (art !== 'auto') toast(navigator.onLine ? 'Sicherung in Google Drive hat nicht geklappt.' : 'Keine Internetverbindung. Die App versucht es später noch einmal.'); }
+  } finally {
+    drvLaeuft = false; drvBoxAkt();
+    if (updateWartet && !dlg.open) location.reload();
+  }
+}
+
+/* Nach der Rückkehr von Google */
+async function drvNach(r) {
+  if (r.fehler) {
+    if (r.zweck !== 'auto') toast(r.fehler === 'ohne-drive' ? 'Bitte beim Anmelden das Häkchen für Google Drive setzen.' : r.fehler === 'access_denied' ? 'Anmeldung bei Google abgebrochen.' : 'Die Anmeldung bei Google hat nicht geklappt.');
+    return render();
+  }
+  if (r.zweck === 'auto' || r.zweck === 'jetzt') {
+    if (drvAn() && r.konto === drv.konto) { drv.abgelaufen = false; await drvSpeichern(); render(); return drvSichern(r.zweck === 'auto' ? 'auto' : 'hand'); }
+    if (r.zweck === 'jetzt') return vFalschesKonto(r.konto);
+    return;
+  }
+  if (r.zweck === 'restore') return drvListe();
+  if (r.zweck === 'verbinden') {
+    if (S.driveKonto && S.driveKonto !== r.konto && drvHatDaten()) return vFalschesKonto(r.konto);
+    let liste = [];
+    try { const o = await gOrdner(false); if (o) liste = await drvDateien(o); } catch (e) { console.warn(e); }
+    if (liste.length && !drvHatDaten()) return drvListe(liste, true);
+    return vKennwortNeu(r.konto, liste);
+  }
+}
+async function drvDateien(ordner) { return (await gSuche(`'${ordner}' in parents and trashed=false and appProperties has { key='app' and value='steuer-cockpit' }`)); }
+function vFalschesKonto(konto) {
+  const soll = S.driveKonto || (drv && drv.konto);
+  openDlg(`${head('Anderes Google-Konto')}<div class="dlg-body">
+    <p>Dieses Cockpit sichert in das Google Drive von <b>${esc(soll)}</b>. Angemeldet hast du dich gerade mit <b>${esc(konto)}</b>.</p>
+    <p class="small muted">Damit die Daten von zwei Personen nicht durcheinander geraten, sichert die App nicht einfach in ein anderes Konto. Wenn das ein Versehen war: bei Google mit dem richtigen Konto anmelden.</p>
+    <p class="small muted">Nur wenn dieses Cockpit ab jetzt wirklich zu <b>${esc(konto)}</b> gehört, zum Beispiel weil du das Konto gewechselt hast, kannst du es umstellen. Die alten Sicherungen bleiben im anderen Drive.</p>
+  </div><div class="dlg-foot"><button data-act="close">Abbrechen</button><button data-act="drive-verbinden">Richtiges Konto wählen</button><button class="danger" data-act="drive-umziehen" data-k="${esc(konto)}">Ab jetzt in ${esc(konto)} sichern</button></div>`);
+}
+function vKennwortNeu(konto, liste) {
+  const eigene = (liste || []).filter((f) => f.appProperties && f.appProperties.profil === S.profil).length, fremde = (liste || []).length - eigene;
+  openDlg(`${head('Kennwort für die Sicherung')}<form id="kwNeuForm" class="dlg-body" autocomplete="off">
+    <p>Angemeldet als <b>${esc(konto)}</b>. Die Sicherungen landen in deinem Google Drive im Ordner „${G_ORDNER}“.</p>
+    <p class="small muted">Bevor etwas zu Google geht, verschlüsselt das Cockpit die Daten mit einem Kennwort. Ohne das Kennwort kann niemand die Sicherung öffnen, auch Google nicht. Das Kennwort bleibt auf diesem Gerät gespeichert, auf einem neuen Gerät fragt die App danach.</p>
+    ${eigene ? '<p class="small"><span class="pill grey">Hinweis</span> Von diesem Cockpit gibt es schon Sicherungen. Nimm am besten dasselbe Kennwort wie damals.</p>' : ''}
+    ${fremde ? `<p class="small"><span class="pill grey">Hinweis</span> In deinem Drive liegen schon ${fremde} Sicherung${fremde > 1 ? 'en' : ''} eines anderen Cockpits. Die bleiben getrennt, nichts wird überschrieben.</p>` : ''}
+    <label>Kennwort (mindestens 8 Zeichen)<input type="password" name="kw1" minlength="8" required autocomplete="new-password"></label>
+    <label>Kennwort wiederholen<input type="password" name="kw2" minlength="8" required autocomplete="new-password"></label>
+    <label class="check"><input type="checkbox" name="notiert"> Ich habe mir das Kennwort aufgeschrieben. Ohne es lässt sich die Sicherung nicht öffnen.</label>
+    <p class="small" id="kwNeuMsg" style="color:var(--bad)"></p>
+  </form><div class="dlg-foot"><button data-act="close">Abbrechen</button><button class="primary" data-act="drive-kw-neu" data-k="${esc(konto)}">Verbinden und sichern</button></div>`);
+}
+async function drvKwNeu(el) {
+  const f = $('#kwNeuForm').elements, m = $('#kwNeuMsg'), konto = el.dataset.k;
+  if (f.kw1.value.length < 8) return (m.textContent = 'Bitte mindestens 8 Zeichen.');
+  if (f.kw1.value !== f.kw2.value) return (m.textContent = 'Die beiden Kennwörter sind nicht gleich.');
+  if (!f.notiert.checked) return (m.textContent = 'Bitte bestätige, dass du das Kennwort aufgeschrieben hast.');
+  if (!tokOk(konto)) { closeDlg(); return gAnmelden('verbinden'); }
+  drv = Object.assign(drv || {}, { konto, kname: gTok.kname, kennwort: f.kw1.value, auto: true, abgelaufen: false, letzte: null, stand: null });
+  await drvSpeichern();
+  if (!S.profil) S.profil = uid();
+  S.driveKonto = konto; await save();
+  closeDlg(); render();
+  await drvSichern('erst');
+  render();
+}
+
+/* Wiederherstellen */
+async function drvListe(liste, neuesGeraet) {
+  if (!tokOk()) return gAnmelden('restore');
+  try { if (!liste) { const o = await gOrdner(false); liste = o ? await drvDateien(o) : []; } }
+  catch (e) { console.error(e); if (e.abgelaufen) return gAnmelden('restore'); return toast('Die Sicherungen in Google Drive ließen sich nicht abrufen.'); }
+  drvWahl = liste;
+  const groesse = (n) => n > 1e6 ? (n / 1e6).toLocaleString('de-DE', { maximumFractionDigits: 1 }) + ' MB' : Math.max(1, Math.round(n / 1e3)) + ' KB';
+  const eigen = (f) => S.profil && f.appProperties && f.appProperties.profil === S.profil;
+  openDlg(`${head('Aus Google Drive wiederherstellen')}<div class="dlg-body">
+    <p class="small muted">Angemeldet als <b>${esc(gTok.konto)}</b>. ${liste.length ? 'Wähle eine Sicherung. Vor dem Einspielen siehst du, was drinsteckt.' : `Im Ordner „${G_ORDNER}“ liegt noch keine Sicherung des Cockpits.`}</p>
+    ${neuesGeraet ? '<p class="small">Auf diesem Gerät ist noch nichts gespeichert. Willst du deine Daten zurückholen?</p>' : ''}
+    ${liste.length ? `<table class="tab">${liste.map((f) => `<tr><td><b>${esc(f.name.replace(/^Steuer-Cockpit Sicherung /, '').replace(/\.cockpit-sicherung$/, ''))}</b><div class="small muted">${drvZeit(f.modifiedTime)} · ${groesse(Number(f.size) || 0)}${drvHatDaten() && S.profil ? (eigen(f) ? ' · <span class="pill good">dieses Cockpit</span>' : ' · <span class="pill warn">anderes Cockpit</span>') : ''}</div></td><td style="text-align:right"><button class="chip" data-act="drive-nehmen" data-k="${esc(f.id)}">Öffnen</button></td></tr>`).join('')}</table>` : ''}
+  </div><div class="dlg-foot"><button data-act="close">Abbrechen</button>${neuesGeraet ? `<button data-act="drive-neu-start">Neu anfangen</button>` : ''}</div>`);
+}
+async function drvHolen(id) {
+  const f = (drvWahl || []).find((x) => x.id === id);
+  toast('Sicherung wird geladen …');
+  let k;
+  try { k = kopfLesen(new Uint8Array(await (await gFetch('GET', `${G_API}/files/${id}?alt=media`)).arrayBuffer())); }
+  catch (e) { console.error(e); if (e.abgelaufen) return gAnmelden('restore'); return toast('Die Sicherung ließ sich nicht laden.'); }
+  if (!k) return toast('Diese Datei ist keine Sicherung des Steuer-Cockpits.');
+  drvOffen = { k, konto: gTok.konto, kname: gTok.kname, name: f ? f.name : '' };
+  if (drv && drv.kennwort) return drvOeffnen(drv.kennwort);
+  vKennwort();
+}
+function vKennwort(falsch) {
+  const kp = drvOffen.k.kopf;
+  openDlg(`${head('Sicherung öffnen')}<form id="kwForm" class="dlg-body" autocomplete="off">
+    <p>Sicherung${kp.name ? ` von <b>${esc(kp.name)}</b>` : ''} vom ${drvZeit(kp.erstellt)}</p>
+    <label>Kennwort der Sicherung<input type="password" name="kw" required autocomplete="off"></label>
+    <p class="small" style="color:var(--bad)">${falsch ? 'Das Kennwort passt nicht zu dieser Sicherung.' : ''}</p>
+    <p class="small muted">Das ist das Kennwort, das du beim Verbinden mit Google Drive festgelegt hast, nicht das Passwort der App.</p>
+  </form><div class="dlg-foot"><button data-act="close">Abbrechen</button><button class="primary" data-act="drive-kw-ok">Öffnen</button></div>`);
+  const i = $('#kwForm [name=kw]'); if (i) i.focus();
+}
+async function drvOeffnen(kw) {
+  let j;
+  try { j = await entpacken(drvOffen.k, kw); }
+  catch (e) { if (e.kennwort) return vKennwort(!!$('#kwForm')); return toast(e.message || 'Die Sicherung ließ sich nicht öffnen.'); }
+  if (!j || j.app !== 'steuer-cockpit' || !j.state) return toast('Diese Datei ist keine Sicherung des Steuer-Cockpits.');
+  j._kopf = drvOffen.k.kopf;
+  if (drvOffen.konto) j._drive = { konto: drvOffen.konto, kname: drvOffen.kname, kennwort: kw };
+  drvOffen = null;
+  sicherungZeigen(j);
+}
+
+/* Anzeige in „Sind meine Daten sicher?“ */
+function drvBoxHtml() {
+  if (!G_CLIENT) return `<p class="small muted" style="margin-top:10px"><b>Automatisch in Google Drive sichern:</b> wird gerade eingerichtet.</p>`;
+  if (S.beispiel) return `<p class="small muted" style="margin-top:10px">Mit Beispieldaten sichert die App nicht in Google Drive.</p>`;
+  if (!drvAn()) return `<h3 style="margin:14px 0 4px">Automatisch in Google Drive sichern</h3>
+    <p class="small muted">Das Cockpit sichert dann von selbst in dein eigenes Google Drive, verschlüsselt mit einem Kennwort, das nur du kennst. Jeder nimmt sein eigenes Google-Konto, so bleibt alles getrennt.</p>
+    <div class="btns"><button class="primary" data-act="drive-verbinden">Mit Google Drive verbinden</button><button data-act="drive-liste">Aus Google Drive wiederherstellen</button></div>`;
+  const falsch = !drvKontoPasst();
+  const st = drvLaeuft ? '<span class="pill grey">Sichert gerade …</span>'
+    : falsch ? '<span class="pill bad">Anderes Konto</span>'
+    : drv.abgelaufen ? '<span class="pill warn">Bitte neu anmelden</span>'
+    : drvFehler ? `<span class="pill warn">${drvFehler === 'offline' ? 'Offline, versucht es später' : 'Letzter Versuch ging schief'}</span>`
+    : drv.letzte ? '<span class="pill good">Läuft</span>' : '<span class="pill warn">Noch nicht gesichert</span>';
+  return `<h3 style="margin:14px 0 4px">Google Drive ${st}</h3>
+    <p class="small">Sichert in das Drive von <b>${esc(drv.konto)}</b>, Ordner „${G_ORDNER}“.${drv.letzte && drv.profil === S.profil ? ` Zuletzt am ${drvZeit(drv.letzte)}.` : ''}</p>
+    ${falsch ? `<p class="small" style="color:var(--bad)">Dieses Cockpit gehört zu ${esc(S.driveKonto)}. Darum sichert die App gerade nicht.</p>` : ''}
+    ${drv.abgelaufen && !falsch ? '<p class="small muted">Google hat die Anmeldung beendet. Einmal neu anmelden, dann läuft es wieder automatisch.</p>' : ''}
+    <p class="small muted">${drv.auto !== false ? 'Automatisch beim Öffnen, wenn sich etwas geändert hat, und kurz nach jeder Änderung. Pro Tag eine Datei, die letzten 30 bleiben.' : 'Automatik ist aus. Sichern nur per Knopf.'}</p>
+    <div class="btns"><button data-act="drive-jetzt"${drvLaeuft ? ' disabled' : ''}>${drv.abgelaufen ? 'Neu anmelden und sichern' : 'Jetzt sichern'}</button><button data-act="drive-liste">Wiederherstellen</button></div>
+    <details><summary class="small">Einstellungen</summary><div class="btns" style="margin-top:8px">
+      <button class="chip" data-act="drive-auto">${drv.auto !== false ? 'Automatik ausschalten' : 'Automatik einschalten'}</button>
+      <button class="chip" data-act="drive-kw-zeigen">${drvKwSehen ? 'Kennwort: ' + esc(drv.kennwort) : 'Kennwort anzeigen'}</button>
+      <button class="chip" data-act="drive-trennen">Trennen</button></div></details>`;
+}
+function drvBoxAkt() { const b = document.getElementById('drvBox'); if (b) b.innerHTML = drvBoxHtml(); }
+async function drvStart() {
+  let r = null;
+  try { r = await gRueckkehr(); } catch (e) { console.error(e); toast('Die Anmeldung bei Google hat nicht geklappt.'); }
+  if (r) return drvNach(r);
+  if (!drvAn() || drv.auto === false || !drvHatDaten() || !drvKontoPasst()) return;
+  if (drv.stand && S.geaendert && drv.stand >= S.geaendert) return;
+  if (tokOk(drv.konto)) return drvSichern('auto');
+  const pause = (drv.abgelaufen ? 24 : 6) * 3600 * 1000;
+  if (navigator.onLine && (!drv.versuchtUm || Date.now() - drv.versuchtUm > pause)) return gAnmelden('auto', true);
+}
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden' && drvTimer && tokOk()) drvSichern('auto'); });
+
 /* ---------- Rechnungsdatei einspielen ----------
    Eine Datei mit fertig gestellten Rechnungen (z. B. von Claude erstellt) kommt dazu, ohne den Rest zu ersetzen:
    Rechnungen, Kunden, Zähler, auf Wunsch Firmendaten, Logo und Aussehen. Schon vorhandene Nummern werden übersprungen. */
@@ -6686,6 +7018,17 @@ const ACT = {
   'datev-nur': () => datevLos(false),
   'datev-paket': () => datevLos(true),
   'restore-ok': sicherungEinspielen,
+  'drive-verbinden': () => { closeDlg(); return gAnmelden('verbinden'); },
+  'drive-jetzt': () => drvSichern('hand'),
+  'drive-liste': () => drvListe(),
+  'drive-nehmen': (el) => drvHolen(el.dataset.k),
+  'drive-kw-ok': () => { const i = $('#kwForm [name=kw]'); if (i && i.value) return drvOeffnen(i.value); },
+  'drive-kw-neu': drvKwNeu,
+  'drive-neu-start': () => { closeDlg(); return vKennwortNeu(gTok.konto, drvWahl); },
+  'drive-umziehen': async (el) => { if (!tokOk(el.dataset.k)) { closeDlg(); return gAnmelden('verbinden'); } S.driveKonto = el.dataset.k; await save(); if (drvAn() && drv.konto === el.dataset.k) { closeDlg(); render(); return drvSichern('hand'); } return vKennwortNeu(el.dataset.k, []); },
+  'drive-auto': async () => { drv.auto = drv.auto === false; await drvSpeichern(); drvBoxAkt(); toast(drv.auto ? 'Automatik ist an' : 'Automatik ist aus'); },
+  'drive-kw-zeigen': () => { drvKwSehen = !drvKwSehen; drvBoxAkt(); },
+  'drive-trennen': async () => { if (!confirm('Google Drive trennen? Die Sicherungen bleiben in deinem Drive. Auf diesem Gerät wird nicht mehr automatisch gesichert.')) return; drv = null; gTok = null; try { sessionStorage.removeItem('sc-gtok'); } catch (e) {} await drvSpeichern(); render(); toast('Google Drive getrennt'); },
   'rp-ok': rePaketEinspielen,
   'rp-datei': restore,
   'vorher-zurueck': vorherZurueck,
@@ -6752,7 +7095,7 @@ const ACT = {
   'st-ics': stIcs,
   'kal-ok': kalSpeichern,
   'kal-eins': (el) => { const f = fristen().find((x) => x.key === el.dataset.k); if (!f) return; icsDatei([{ uid: f.key, datum: f.datum, t: f.t, s: f.s }], [num(S.steuer.kalVorher)], `frist-${f.key}.ics`); toast('Termin gespeichert. Datei öffnen, um ihn zu übernehmen.'); },
-  wipe: async () => { if (!confirm('Wirklich alle Daten auf diesem Gerät löschen? Das kann nicht rückgängig gemacht werden.')) return; for (const k of await idbKeys()) await idbDel(k); S = leer(); protoStand = protoSchnitt(); vorherAm = null; render(); toast('Alle Daten gelöscht'); }
+  wipe: async () => { if (!confirm('Wirklich alle Daten auf diesem Gerät löschen? Das kann nicht rückgängig gemacht werden.')) return; for (const k of await idbKeys()) await idbDel(k); S = leer(); protoStand = protoSchnitt(); vorherAm = null; drv = null; gTok = null; try { sessionStorage.removeItem('sc-gtok'); } catch (e) {} render(); toast('Alle Daten gelöscht'); }
 };
 document.addEventListener('click', (e) => {
   const el = e.target.closest('[data-act]'); if (!el) return;
@@ -6870,7 +7213,7 @@ async function pruefeUpdate() {
     if (!j.v || j.v === BUILD) return;
     // Schutz gegen Endlosschleife, falls noch eine alte Fassung zwischengespeichert ist
     try { if (sessionStorage.getItem('sc-update') === j.v) return; sessionStorage.setItem('sc-update', j.v); } catch (e) {}
-    if (dlg.open) updateWartet = true; else location.reload();
+    if (dlg.open || drvLaeuft) updateWartet = true; else location.reload();
   } catch (e) {}
 }
 document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') { pruefeUpdate(); wiederkehrend().then((n) => { if (n && !dlg.open) render(); }).catch(() => {}); } });
@@ -6878,7 +7221,7 @@ dlg.addEventListener('close', () => { if (updateWartet) location.reload(); });
 setInterval(pruefeUpdate, 15 * 60 * 1000);
 pruefeUpdate();
 
-load().then(async () => { await wiederkehrend(); try { const v = await idbGet('state-vorher'); vorherAm = v ? v.am : null; } catch (e) {} render(); if (S.rechnungen.length + S.belege.length + S.bank.length) speicherFest().then(() => { if (tab === 'firma' && !dlg.open) render(); }); }).catch((e) => { console.error(e); $('#app').innerHTML = '<div class="card"><b>Der Speicher dieses Browsers ist nicht verfügbar.</b><p class="muted">Im privaten Modus oder bei blockierten Website-Daten kann die App nichts speichern. Bitte normal öffnen.</p></div>'; });
+load().then(async () => { await drvLaden(); await wiederkehrend(); try { const v = await idbGet('state-vorher'); vorherAm = v ? v.am : null; } catch (e) {} render(); drvStart().catch((e) => console.error(e)); if (S.rechnungen.length + S.belege.length + S.bank.length) speicherFest().then(() => { if (tab === 'firma' && !dlg.open) render(); }); }).catch((e) => { console.error(e); $('#app').innerHTML = '<div class="card"><b>Der Speicher dieses Browsers ist nicht verfügbar.</b><p class="muted">Im privaten Modus oder bei blockierten Website-Daten kann die App nichts speichern. Bitte normal öffnen.</p></div>'; });
 })();
 </script>
 </body>
